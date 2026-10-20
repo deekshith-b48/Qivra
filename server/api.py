@@ -54,9 +54,7 @@ def load_or_create_api_token():
     if TOKEN_FILE.exists():
         content = TOKEN_FILE.read_text(encoding="utf-8", errors="ignore").strip()
         if content and is_valid_api_token_format(content):
-            logger.info("=" * 80)
-            logger.info(f"🔐 API Token: {content}")
-            logger.info("=" * 80)
+            logger.info("🔐 Legacy API token loaded from token.txt (value not logged)")
             return content
 
         if content:
@@ -65,9 +63,7 @@ def load_or_create_api_token():
     token = generate_api_token()
     TOKEN_FILE.write_text(token)
 
-    logger.info("=" * 80)
-    logger.info(f"🔐 API Token (NEW): {token}")
-    logger.info("=" * 80)
+    logger.info("🔐 New legacy API token written to token.txt (value not logged)")
     return token
 
 API_TOKEN = load_or_create_api_token()
@@ -77,12 +73,26 @@ async def verify_token(request: Request, x_api_key: str = Header(None, descripti
     Verify authentication using Access Token.
     Can be passed in X-API-Key header or token query parameter.
     """
+    # Qivra: a paired-device credential (Authorization: Bearer qv1_...) is accepted everywhere.
+    services = getattr(request.app.state, "qivra", None)
+    if services is not None:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer ") and services.pairing.authenticate(auth[7:].strip()):
+            return "device"
     actual_token = x_api_key or request.query_params.get("token")
-    if actual_token != API_TOKEN:
+    if actual_token is None or not secrets.compare_digest(str(actual_token), API_TOKEN):
         logger.warning("Invalid Access Token attempt from IP: %s", request.client.host if hasattr(request, 'client') and request.client else 'unknown')
         raise HTTPException(
             status_code=401,
             detail="Invalid Access Token. Use the token from backend/token.txt."
+        )
+    # Qivra: the static legacy token is accepted only from this machine unless explicitly allowed,
+    # because it never expires and cannot be revoked per device.
+    client_host = request.client.host if request.client else ""
+    if services is not None and not services.config.allow_legacy_token_on_lan and client_host not in ("127.0.0.1", "::1", "testclient"):
+        raise HTTPException(
+            status_code=403,
+            detail="The legacy Access Token is only accepted from localhost. Pair the device with Qivra instead."
         )
     return actual_token
 
@@ -101,8 +111,8 @@ allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
 if allowed_origins_env:
     allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',')]
 else:
-    # Development: allow all origins so phones on same WiFi can connect
-    allowed_origins = ["*"]
+    # Qivra: no wildcard CORS. Native apps do not need CORS; browser extensions must be listed explicitly.
+    allowed_origins = []
 
 app.add_middleware(
     CORSMiddleware,
@@ -1008,7 +1018,8 @@ async def connect_info(request: Request):
 
     return {
         "url": base_url,
-        "token": API_TOKEN,
+        # Qivra: the Access Token is no longer disclosed here (this route is unauthenticated).
+        "pairing": "Use the one-time QR code printed by `python -m qivra serve` (POST /api/v1/pairing/complete).",
         "version": "2.0.0",
         "name": "SuperBrain"
     }
@@ -1984,4 +1995,5 @@ if __name__ == "__main__":
     print("🚀 Starting SuperBrain API...")
     print("📖 API Docs: http://localhost:5000/docs")
     print("🔍 Interactive: http://localhost:5000/redoc")
-    uvicorn.run("api:app", host="0.0.0.0", port=5000, reload=False)
+    # Qivra: bind to loopback by default. Use `python -m qivra serve --lan` for LAN pairing.
+    uvicorn.run("api:app", host="127.0.0.1", port=5000, reload=False)
