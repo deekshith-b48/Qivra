@@ -1,0 +1,49 @@
+# ── Python / server ──────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+server/token.txt
+server/config/.api_keys
+server/config/backend_id.txt
+server/config/ngrok_token.txt
+server/.instagram_session.json
+server/.instaloader_session
+server/*.db
+server/*.db-shm
+server/*.db-wal
+server/data/
+server/temp/
+server/static/thumbnails/
+server/static/uploads/
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+*.env
+!.env.example
+*.keystore
+!android/app/debug.keystore
+
+# ── React Native / Expo ──────────────────────────────────────────────────────
+node_modules/
+.expo/
+android/build/
+android/app/build/
+android/.gradle/
+android/.kotlin/
+android/local.properties
+.env*.local
+expo-env.d.ts
+*.tsbuildinfo
+.metro-health-check*
+coverage/
+dist/
+*.apk
+*.aab
+
+# ── IDE / OS ─────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+*.log

@@ -1,0 +1,72 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# Multi-stage build for optimized image size
+# ────────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install system build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install to /install so it's accessible by all users in the final stage
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Final production image
+# ────────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+LABEL maintainer="SuperBrain <sidinsearch@gmail.com>"
+LABEL description="SuperBrain API - AI-powered content analysis and archival"
+LABEL version="1.0.0"
+
+WORKDIR /app
+
+# ──── Install runtime dependencies only ────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libmagic1 \
+    libgl1 \
+    libglib2.0-0 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ──── Copy Python dependencies from builder ────
+COPY --from=builder /install /usr/local
+
+# ──── Set environment variables ────
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    ENVIRONMENT=production \
+    WORKERS=2
+
+# ──── Copy application code ────
+COPY . .
+
+# ──── Create necessary directories with proper permissions ────
+RUN mkdir -p temp config static logs data && \
+    chown -R 1000:1000 temp config static logs data
+
+# ──── Health check ────
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD ["sh", "-c", "TOKEN=$(tr -d '[:space:]' < /app/token.txt); curl -fs -H \"X-API-Key: $TOKEN\" http://localhost:5000/health || exit 1"]
+
+# ──── Run as non-root user for security ────
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+# ──── Expose port ────
+EXPOSE 5000
+
+# ──── Run the application ────
+CMD ["sh", "-c", "python -m uvicorn api:app --host 0.0.0.0 --port 5000 --workers ${WORKERS:-2} --loop uvloop --no-access-log"]

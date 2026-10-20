@@ -1,0 +1,42 @@
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+python-multipart>=0.0.9
+
+# ── HTTP ──────────────────────────────────────────────────────────────────────
+requests>=2.31.0
+httpx>=0.27.0
+
+# ── AI Providers ──────────────────────────────────────────────────────────────
+groq>=0.9.0
+google-genai>=0.8.0
+
+# ── Web Page Fetching & Parsing ───────────────────────────────────────────────
+beautifulsoup4>=4.12.0
+trafilatura>=1.12.0
+newspaper4k[nlp]>=0.9.0
+lxml>=5.0.0
+lxml_html_clean>=0.1.0
+htmldate>=1.9.0
+
+# ── Audio Transcription ───────────────────────────────────────────────────────
+# Note: openai-whisper is installed gracefully via start.py to handle ARM devices. DO NOT put it here.
+
+# ── Music Identification ──────────────────────────────────────────────────────
+shazamio>=0.4.0
+
+# ── Instagram Download ────────────────────────────────────────────────────────
+instaloader>=4.11.0
+instagrapi>=2.0.0
+
+# ── Computer Vision ───────────────────────────────────────────────────────────
+opencv-python-headless>=4.9.0.80
+Pillow>=10.0.0
+
+# ── Remote Access (Networking) ──────────────────────────────────────────────
+pyngrok>=7.1.5
+
+# ── Terminal UI ───────────────────────────────────────────────────────────────
+rich>=13.0.0
+segno>=1.6.0

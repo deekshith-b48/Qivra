@@ -1,0 +1,705 @@
+<div align="center">
+
+# 🧠 SuperBrain
+
+### Save anything. Understand everything. Forget nothing.
+
+A self-hosted AI-powered second brain for Android — save Instagram posts, YouTube videos, and web pages directly from the share sheet, have them automatically analysed by AI, and rediscover them with intelligent search, collections, and smart notifications.
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![React Native](https://img.shields.io/badge/React_Native-0.81-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
+[![Expo SDK 54](https://img.shields.io/badge/Expo-SDK_54-000020?logo=expo&logoColor=white)](https://expo.dev)
+[![npm package](https://img.shields.io/npm/v/superbrain-server?label=npm%20package)](https://www.npmjs.com/package/superbrain-server)
+
+<p align="center">
+  <a href="https://www.producthunt.com/products/superbrain-ai-powered-second-brain?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-superbrain" target="_blank" rel="noopener noreferrer">
+    <img 
+      alt="SuperBrain on Product Hunt"
+      src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1127472&theme=light"
+      height="40"
+    />
+  </a>
+</p>
+
+[![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases/latest/download/superbrain.apk)
+[![Report Bug](https://img.shields.io/badge/Report%20Bug-d73a4a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=bug)
+[![Request Feature](https://img.shields.io/badge/Request%20Feature-7057ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=enhancement)
+
+</div>
+
+---
+
+## 📱 App Screenshots
+
+<div align="center">
+<table>
+  <tr>
+    <td><img src="superbrain-app/assets/mockups/1.png" width="220"/></td>
+    <td><img src="superbrain-app/assets/mockups/2.png" width="220"/></td>
+    <td><img src="superbrain-app/assets/mockups/3.png" width="220"/></td>
+  </tr>
+  <tr>
+    <td><img src="superbrain-app/assets/mockups/4.png" width="220"/></td>
+    <td><img src="superbrain-app/assets/mockups/5.png" width="220"/></td>
+    <td><img src="superbrain-app/assets/mockups/6.png" width="220"/></td>
+  </tr>
+  <tr>
+    <td><img src="superbrain-app/assets/mockups/7.png" width="220"/></td>
+    <td><img src="superbrain-app/assets/mockups/8.png" width="220"/></td>
+    <td><img src="superbrain-app/assets/mockups/9.png" width="220"/></td>
+  </tr>
+</table>
+</div>
+
+---
+
+## Table of Contents
+
+- [The Problem](#the-problem)
+- [The Solution](#the-solution)
+- [Features](#features)
+- [Architecture](#architecture)
+- [AI Model Router](#ai-model-router)
+- [Getting Started](#getting-started)
+- [Packages](#packages)
+- [Instagram Credentials](#instagram-credentials)
+- [Installing the Android App](#installing-the-android-app)
+- [Release Process](#release-process)
+- [Hosting Options](#hosting-options)
+- [Notifications](#notifications)
+- [API Reference](#api-reference)
+- [Tech Stack](#tech-stack)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## The Problem
+
+We all save content constantly — Instagram posts, YouTube videos, Reddit threads, articles, recipes — but every platform buries it in its own silo:
+
+- **Instagram Saved** is a graveyard. No search, no categories, no reminders. You save hundreds of posts and never look at them again.
+- **YouTube Watch Later** piles up endlessly with no way to know what each video was about without rewatching it.
+- **Browser bookmarks** are a mess — unsorted folders full of dead links and forgotten context.
+- **Screenshots** fill your gallery with no searchable text.
+
+You spend time saving things you'll never find again. You forget **what** you saved, **why** you saved it, and **where** you saved it.
+
+## The Solution
+
+**SuperBrain** is a self-hosted Android app + Python backend that acts as your **personal AI-powered content archive**. Share any URL from any app — the backend analyses it with AI in seconds and gives you:
+
+- A clean **title** and **summary** so you instantly know what it's about
+- Auto-assigned **category** and **tags** for filtering at a glance
+- **Background music identification** from Instagram reels (via Shazam)
+- **Audio transcription** from videos (Groq Whisper API + local Whisper)
+- Smart **Watch Later reminders** that actually bring you back to your content
+
+Everything is stored in a local SQLite database **you own** — no cloud subscriptions, no data harvesting, no vendor lock-in.
+
+---
+
+## Features
+
+### ✨ Content Analysis
+
+| Feature | Description |
+|---|---|
+| **Universal share target** | Works with any app that shares URLs — Instagram, YouTube, Chrome, Reddit, etc. |
+| **Multi-provider AI** | Automatic fallback across Groq, Gemini, OpenRouter, and Ollama |
+| **Smart model router** | EMA-ranked, auto-healing, self-optimising — always picks the fastest available model |
+| **Music identification** | Shazam-powered background music detection from Instagram reels |
+| **Audio transcription** | Groq Whisper API (cloud) with local OpenAI Whisper as offline fallback |
+| **Native YouTube analysis** | Gemini watches the video directly — no download needed |
+| **Web scraping** | Multi-strategy extraction (newspaper4k, trafilatura, Wayback Machine) |
+
+### 📂 Organisation & Discovery
+
+| Feature | Description |
+|---|---|
+| **Custom collections** | Watch Later, Recipes, Work, or any category you create |
+| **Full-text search** | Search across titles, summaries, tags, and transcriptions |
+| **Smart filtering** | Filter by category, tags, or collection |
+| **Watch Later reminders** | Daily notifications with unique time slots per post (8 AM – 9:30 PM) |
+| **Urgent alerts** | Morning notifications for deadline-sensitive content (exams, hackathons) |
+| **Offline-first** | Queues saves locally and syncs automatically when reconnected |
+| **Retry recovery** | Failed analyses can be retried directly from the Library |
+
+---
+
+## Architecture
+
+```
+superbrain/
+├── backend/
+│   ├── start.py                  # Interactive setup wizard & server launcher
+│   ├── reset.py                  # Reset / clean utility (selective wipe)
+│   ├── api.py                    # FastAPI REST API (18 endpoints) + queue worker
+│   ├── main.py                   # Analysis orchestrator (parallel processing)
+│   ├── core/
+│   │   ├── model_router.py       # Multi-provider AI router with EMA ranking
+│   │   ├── database.py           # SQLite (WAL mode) — posts, queue, collections
+│   │   ├── link_checker.py       # URL validator (Instagram / YouTube / web)
+│   │   └── category_manager.py   # Category normalisation & deduplication
+│   ├── analyzers/
+│   │   ├── visual_analyze.py     # Vision analysis (frame extraction + AI)
+│   │   ├── audio_transcribe.py   # Groq Whisper → local Whisper fallback
+│   │   ├── music_identifier.py   # Shazamio multi-segment recognition
+│   │   ├── text_analyzer.py      # Caption / metadata AI analysis
+│   │   ├── caption.py            # Instagram caption extractor
+│   │   ├── youtube_analyzer.py   # Gemini native YouTube understanding
+│   │   └── webpage_analyzer.py   # Multi-strategy web scraper + AI summary
+│   ├── instagram/
+│   │   ├── instagram_downloader.py  # Instaloader engine (auth/anonymous)
+│   │   └── instagram_login.py      # One-time session setup with 2FA
+│   ├── utils/
+│   │   ├── db_stats.py           # Database statistics
+│   │   └── manage_token.py       # API token management
+│   ├── config/
+│   │   ├── .api_keys.example     # Template for API keys
+│   │   ├── openrouter_free_models.json
+│   │   └── model_rankings.json   # Persisted provider performance data
+│   ├── tests/
+│   └── requirements.txt
+│
+└── superbrain-app/               # React Native (Expo SDK 54)
+    ├── App.tsx                   # Navigation + notification handlers
+    ├── src/
+    │   ├── screens/
+    │   │   ├── HomeScreen.tsx          # Feed with search, filters, categories
+    │   │   ├── LibraryScreen.tsx       # Collections + failed analyses
+    │   │   ├── PostDetailScreen.tsx    # Full post view (edit, re-analyse, delete)
+    │   │   ├── CollectionDetailScreen.tsx
+    │   │   ├── SettingsScreen.tsx      # Server URL + token configuration
+    │   │   ├── ShareHandlerScreen.tsx  # Receives shared URLs from other apps
+    │   │   ├── FailedAnalysisScreen.tsx
+    │   │   └── SplashScreen.tsx
+    │   ├── services/
+    │   │   ├── api.ts                  # Axios client + offline queue & retry
+    │   │   ├── postsCache.ts           # AsyncStorage cache + pending mutations
+    │   │   ├── collections.ts          # Collection CRUD + offline sync
+    │   │   └── notificationService.ts  # Watch Later scheduling + channels
+    │   ├── components/
+    │   │   └── CustomToast.tsx
+    │   ├── types/index.ts
+    │   └── theme/colors.ts
+    └── android/                  # Native Android project (Gradle)
+
+  └── superbrain-cli/               # npm wrapper for one-line backend install
+    ├── bin/superbrain.js         # Cross-platform launcher (downloads/runs backend)
+    ├── scripts/build.js          # Payload packager for npm release
+    └── payload/                  # Bundled backend template shipped to users
+```
+
+---
+
+## AI Model Router
+
+Free AI APIs have rate limits, downtime, and variable speed. SuperBrain solves this with a **multi-provider model router** that automatically selects the fastest available model and falls back transparently on failure — you never have to think about which provider is working.
+
+### Priority Chain
+
+| Task | Fallback Order |
+|---|---|
+| **Text analysis** | Groq → Gemini → OpenRouter (hardcoded best) → Dynamic free OpenRouter → Ollama |
+| **Vision** | Gemini → Groq Vision → OpenRouter Vision → Ollama Vision |
+| **Transcription** | Groq Whisper API → Local OpenAI Whisper |
+| **YouTube** | Gemini (native URL understanding) |
+
+### How It Works
+
+- **Performance ranking** — tracks response times with an exponential moving average; faster models get promoted automatically
+- **Cooldown on failure** — generic errors trigger a 5‑minute cooldown; rate limits (HTTP 429) trigger a 30‑minute cooldown
+- **Dynamic discovery** — refreshes the OpenRouter free model list every 6 hours, scores models by context length, capabilities, recency, and provider trust
+- **Persistent rankings** — saved to `config/model_rankings.json` so performance data survives server restarts
+
+### Supported Providers
+
+| Provider | Key in `config/.api_keys` | Notes |
+|---|---|---|
+| **Groq** | `GROQ_API_KEY` | Fastest inference — free tier at [console.groq.com](https://console.groq.com) |
+| **Google Gemini** | `GEMINI_API_KEY` | Most generous free tier at [aistudio.google.com](https://aistudio.google.com) |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Free model router at [openrouter.ai](https://openrouter.ai) |
+| **Ollama** | *(no key needed)* | Local inference — `start.py` guides setup · recommended model: `qwen3-vl:4b` |
+
+> **Tip:** You don't need all providers — the router falls back automatically. Start with at least **Gemini** (most generous free tier). Ollama serves as the fully offline last resort.
+
+---
+
+## Getting Started
+
+### Backend Setup Prerequisites
+
+| Requirement | Install | Needed For |
+|---|---|---|
+| Python 3.10+ | [python.org](https://python.org) | npm + local Python setup |
+| ffmpeg | `sudo apt install ffmpeg` / `brew install ffmpeg` / `winget install Gyan.FFmpeg` | all backend methods |
+| Node.js 20+ | [nodejs.org](https://nodejs.org) | npm one-line setup |
+| Docker + Compose | [docs.docker.com/get-started](https://docs.docker.com/get-started/) | Docker setup |
+| ngrok (optional) | [ngrok.com](https://ngrok.com) | phone access from outside local network |
+
+### Method 1: npm One-Line Setup (Recommended)
+
+This is the easiest way to run backend on any PC without cloning this repository.
+
+```bash
+# Run directly (no global install)
+npx -y superbrain-server@latest
+```
+
+Optional global install:
+
+```bash
+npm install -g superbrain-server
+superbrain-server
+```
+
+What this does on first run:
+
+1. Downloads backend package to `~/.superbrain-server`
+2. Creates virtual environment
+3. Installs dependencies
+4. Runs interactive setup wizard
+5. Starts API server and prints Access Token
+
+Useful commands:
+
+```bash
+superbrain-server               # Starts the backend engine
+superbrain-server status        # Show connection QR code & running server info
+superbrain-server update        # Update the backend components
+superbrain-server ngrok         # Configure Ngrok tunnel
+superbrain-server reset         # Open interactive reset menu
+superbrain-server reset --all   # Force complete data wipe
+```
+
+### Method 2: Docker Setup
+
+Use this when you want containerized, reproducible deployment.
+
+#### Option A: Pre-built image from GHCR (fastest)
+
+A multi-arch image (`linux/amd64`, `linux/arm64`) is published automatically on every push to `main` / `beta` and on each GitHub release.
+
+```bash
+docker pull ghcr.io/sidinsearch/superbrain-server:latest
+
+docker run -d \
+  --name superbrain-server \
+  --restart unless-stopped \
+  -p 5000:5000 \
+  -v superbrain-data:/app/data \
+  -v superbrain-logs:/app/logs \
+  -e GEMINI_API_KEY=your_key_here \
+  -e ENVIRONMENT=production \
+  ghcr.io/sidinsearch/superbrain-server:latest
+```
+
+Pin to a specific version:
+
+```bash
+# Latest release tag (e.g. v2.0.3)
+docker pull ghcr.io/sidinsearch/superbrain-server:2.0.3
+
+# Beta builds
+docker pull ghcr.io/sidinsearch/superbrain-server:beta
+```
+
+Available tags: `latest` (main only), `main`, `beta`, `sha-<commit>`, plus semver tags like `2.0.3`, `2.0` on releases.
+
+Health check:
+
+```bash
+curl http://localhost:5000/health
+```
+
+View logs:
+
+```bash
+docker logs -f superbrain-server
+```
+
+Stop / remove:
+
+```bash
+docker stop superbrain-server && docker rm superbrain-server
+```
+
+#### Option B: Build from source
+
+```bash
+cd superbrain/backend
+cp .env.example .env
+```
+
+Edit `.env` and set at least:
+
+- `GEMINI_API_KEY` (recommended)
+- `GROQ_API_KEY` (optional)
+- `OPENROUTER_API_KEY` (optional)
+
+Then run:
+
+```bash
+docker compose up -d --build
+docker compose logs -f superbrain-api
+```
+
+Health check:
+
+```bash
+curl http://localhost:5000/health
+```
+
+### Method 3: Local Python Setup (Normal)
+
+Use this when developing backend locally without Docker.
+
+Windows (PowerShell):
+
+```powershell
+cd superbrain\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python start.py
+```
+
+Linux / macOS:
+
+```bash
+cd superbrain/backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python start.py
+```
+
+Direct API run (without setup wizard):
+
+```bash
+python api.py
+```
+
+### Connect Android App to Backend
+
+1. Start backend using any method above.
+2. Copy the Access Token shown by backend.
+3. In Android app Settings, set backend URL and Access Token.
+4. Verify `/health` endpoint returns OK.
+
+### Optional: Expose Backend for Phone Access
+
+If phone cannot reach your PC directly, expose port 5000:
+
+```bash
+ngrok http 5000
+```
+
+Use the generated HTTPS URL in app Settings.
+
+> **Tip:** `GOOGLE_API_KEY` is accepted as a compatibility alias, but `GEMINI_API_KEY` is the preferred key name.
+
+---
+
+## Packages
+
+SuperBrain backend is published in three artifacts:
+
+- **Docker image (GHCR)**: [`ghcr.io/sidinsearch/superbrain-server`](https://github.com/sidinsearch/superbrain/pkgs/container/superbrain-server)
+  - Multi-arch (`linux/amd64`, `linux/arm64`), rebuilt on every push to `main`/`beta` and on each release
+  - Pull: `docker pull ghcr.io/sidinsearch/superbrain-server:latest`
+  - See [Method 2: Docker Setup](#method-2-docker-setup) above for run instructions
+
+- **npmjs**: [superbrain-server](https://www.npmjs.com/package/superbrain-server)
+  - Stable install: `npx -y superbrain-server@latest`
+
+- **GitHub Packages (npm)**: `@sidinsearch/superbrain-server`
+  - One-time auth + install block (`read:packages` token required):
+  - Note: only needed for GitHub Packages. Not needed for npmjs (`superbrain-server`) installs.
+
+```bash
+npm config set @sidinsearch:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
+npx -y @sidinsearch/superbrain-server@latest
+
+```
+
+GitHub Packages docs: [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
+
+GitHub Packages is separate from the npmjs package page and may not appear in the repository Packages tab until it has been published and linked there.
+
+---
+
+## Instagram Credentials
+
+SuperBrain uses [Instaloader](https://instaloader.github.io/) to download Instagram posts. It can operate in two modes:
+
+### Without credentials (anonymous mode)
+
+SuperBrain works **without any Instagram account** — but with limitations:
+
+| Limitation | Details |
+|---|---|
+| **Public posts only** | Only posts from public profiles that Instagram serves to unauthenticated users |
+| **Rate limiting** | Instagram aggressively rate-limits anonymous requests — you may need to wait several minutes between saves |
+| **Login-required blocks** | Some posts trigger a `LoginRequiredException` even if the profile is public — these get auto-queued for retry later |
+
+YouTube videos and web pages are **not affected** — they work fully without Instagram credentials.
+
+### With credentials (recommended)
+
+Adding Instagram credentials removes all the above restrictions:
+
+- ✅ **Reliable downloads** — authenticated sessions are not rate-limited for normal usage
+- ✅ **Access to all public posts** — no more login-required blocks
+- ✅ **Posts from followed private accounts** — if the authenticated account follows a private profile, those posts can be saved too
+- ✅ **Session caching** — you log in once and the session is reused automatically until Instagram invalidates it
+
+### How to set up
+
+**Option 1 — During setup wizard** (recommended)
+
+`start.py` prompts for Instagram credentials during first-run setup. Enter your username and password when asked — they're saved to `config/.api_keys` and a session file is created automatically.
+
+**Option 2 — Manual login**
+
+```bash
+cd superbrain/backend
+python instagram/instagram_login.py
+```
+
+This interactive script handles the full login flow including **two-factor authentication (2FA)**. It saves:
+- Credentials → `config/.api_keys` (gitignored)
+- Session → `.instaloader_session` (gitignored)
+
+### ⚠️ Security advice
+
+> **Use a secondary / burner Instagram account — not your main personal account.**
+>
+> While credentials are stored locally and never transmitted anywhere other than Instagram's servers, using a disposable account protects your primary account from any risk of rate-limit flags or session issues.
+
+Credentials are stored in `config/.api_keys` which is **gitignored** — they will never be committed to version control. The cached session file (`.instaloader_session`) is also gitignored.
+
+---
+
+## Installing the Android App
+
+### Option 1 — Download from Releases *(easiest)*
+
+The latest APK is always available on the **[Releases](https://github.com/sidinsearch/superbrain/releases)** page.
+
+1. Download `superbrain.apk` from the latest release
+2. On your Android device, enable **Install from unknown sources**
+3. Open the APK to install
+
+### Option 2 — EAS Cloud Build
+
+```bash
+npm install -g eas-cli
+eas login
+cd superbrain-app
+eas build --platform android --profile preview --non-interactive
+```
+
+EAS returns a download URL + QR code when done. No Android Studio required.
+
+### Option 3 — GitHub Actions
+
+The repo includes:
+
+- [build workflow](.github/workflows/build.yml): On push to `main`, it builds APK, uploads artifact, publishes the GitHub npm package, and updates the release with `superbrain.apk`
+- [release APK workflow](.github/workflows/release-apk.yml): Optional tag/release-driven APK pipeline for versioned tags
+
+Automatic release targets:
+
+1. Push to `main` updates release tag `latest` (stable).
+
+
+How to get the newest APK from Actions artifacts:
+
+1. Push your changes to `main`.
+2. Open **GitHub → Actions → Build APK (Gradle)**.
+3. Open the latest successful run.
+4. Download the artifact named like `superbrain-release-<run_number>`.
+5. Extract it and rename `superbrain.apk` if needed.
+6. Use it directly for testing/internal sharing.
+
+### Option 4 — Local Gradle Build
+
+```bash
+cd superbrain-app
+npm install
+cd android
+./gradlew assembleRelease
+# Output: android/app/build/outputs/apk/release/app-release.apk
+```
+
+---
+
+## Release Process
+
+Use this push-based flow to keep GitHub release + APK + GitHub Packages aligned.
+
+1. Push changes to `main`.
+2. `.github/workflows/build.yml` runs automatically and does all of the following:
+  - Builds release APK.
+  - Uploads APK as an Actions artifact.
+  - Updates the branch release and attaches `superbrain.apk`.
+  - Publishes `@sidinsearch/superbrain-server` to GitHub Packages.
+3. Verify:
+  - APK download works from the release.
+  - Package appears under GitHub Packages for the repository.
+
+Recommended release notes install line:
+
+```bash
+npx -y superbrain-server@latest
+```
+
+Verification checklist:
+
+1. `latest` (main) release contains `superbrain.apk`.
+2. Repository **Packages** tab shows `@sidinsearch/superbrain-server`.
+3. Install checks:
+  - npmjs: `npx -y superbrain-server@latest`
+  - GitHub Packages: `npx -y @sidinsearch/superbrain-server@latest`
+
+---
+
+## Hosting Options
+
+The backend is lightweight and runs anywhere with Python 3.10+:
+
+| Platform | Cost | Notes |
+|---|---|---|
+| **Your PC / laptop** | Free | Use ngrok to expose · disable sleep / hibernate |
+| **Raspberry Pi** | ~$50 one-time | Low power, always-on home server |
+| **AWS EC2** | Free tier | `t2.micro` handles it fine |
+| **DigitalOcean** | $4/mo | Basic droplet |
+| **Hetzner** | €3.29/mo | Fast EU-based VPS |
+| **Google Cloud Run** | Pay-per-use | Serverless, scales to zero |
+
+For cloud hosting, open port `5000` in your firewall and point the app directly at your server's public IP — no ngrok needed.
+
+---
+
+## Notifications
+
+SuperBrain uses Android notification channels to keep you engaged with your saved content without being noisy.
+
+### Watch Later
+
+Adding a post to the **Watch Later** collection triggers:
+
+| Notification | When | Details |
+|---|---|---|
+| **Instant confirmation** | Immediately | High-priority heads-up banner |
+| **Daily reminder** | Once per day, unique time slot per post | Spread between 8:00 AM – 9:30 PM |
+| **Urgent morning alert** | 9:00 AM | Only for deadline-sensitive content (exams, hackathons, applications) |
+
+Each reminder includes a **Mark as Watched** action button — tap it to remove from Watch Later and cancel all future reminders for that post.
+
+### Other Collections
+
+Saving to any non-Watch Later collection fires an instant **"Saved to SuperBrain"** notification confirming the save.
+
+---
+
+## API Reference
+
+All endpoints require the `X-API-Key` header with the Access Token.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/analyze` | Submit a URL for analysis (queued if busy) |
+| `GET` | `/cache/{shortcode}` | Retrieve cached analysis by shortcode |
+| `GET` | `/recent` | List recent analyses |
+| `GET` | `/search` | Full-text search across posts |
+| `GET` | `/category/{category}` | Filter posts by category |
+| `GET` | `/stats` | Database statistics |
+| `GET` | `/caption` | Extract Instagram caption from URL |
+| `GET` | `/collections` | List all collections |
+| `POST` | `/collections` | Create a new collection |
+| `PUT` | `/collections/{id}/posts` | Update posts in a collection |
+| `DELETE` | `/collections/{id}` | Delete a collection |
+| `PUT` | `/post/{shortcode}` | Update post fields (category, title, summary) |
+| `DELETE` | `/post/{shortcode}` | Delete a post (cancels active analysis if running) |
+| `GET` | `/queue-status` | Current processing and queue state |
+| `GET` | `/queue/retry` | Items scheduled for automatic retry |
+| `POST` | `/queue/retry/flush` | Force-promote retry items to active queue |
+| `GET` | `/ping` | Connectivity check |
+| `GET` | `/health` | Health check with system info |
+
+> Interactive API docs are available at `http://localhost:5000/docs` (Swagger UI) and `/redoc`.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Mobile** | React Native 0.81 · Expo SDK 54 · TypeScript |
+| **Backend** | Python 3 · FastAPI · Uvicorn |
+| **Database** | SQLite with WAL mode |
+| **AI Routing** | Custom multi-provider router (Groq · Gemini · OpenRouter · Ollama) |
+| **Vision** | OpenCV frame extraction → AI vision models |
+| **Transcription** | Groq Whisper API → OpenAI Whisper (local fallback) |
+| **Music ID** | Shazamio (multi-segment recognition) |
+| **Instagram** | Instaloader + Instagrapi |
+| **Web Scraping** | newspaper4k · trafilatura · Wayback Machine · BeautifulSoup |
+| **Notifications** | Expo Notifications · Android notification channels |
+| **CI/CD** | GitHub Actions (Gradle APK build) · EAS Build |
+
+---
+
+## Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. **Fork** the repository
+2. **Create** a feature branch — `git checkout -b feature/my-feature`
+3. **Commit** your changes — `git commit -m "feat: add my feature"`
+4. **Push** to the branch — `git push origin feature/my-feature`
+5. **Open** a Pull Request
+
+For major changes, please [open an issue](https://github.com/sidinsearch/superbrain/issues) first to discuss what you'd like to implement.
+
+---
+
+## License
+
+This project is licensed under the **[GNU Affero General Public License v3.0](LICENSE)** (AGPL-3.0).
+
+| Use Case | Allowed? |
+|---|---|
+| Personal & non-commercial use | ✅ Free, no restrictions |
+| Forking & modifications | ✅ Must release under AGPL-3.0 with source code |
+| Running as a network service (SaaS) | ✅ Must publish your modified source code |
+| Commercial / proprietary use | ❌ Requires a separate commercial license |
+
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/sidinsearch">sidinsearch</a>
+  &nbsp;·&nbsp;
+  Copyright &copy; 2026 <a href="https://github.com/sidinsearch">sidinsearch</a>
+  &nbsp;·&nbsp;
+  <a href="LICENSE">AGPL-3.0 License</a>
+</p>
+
+
+
+## Contributors
+
+Thanks to all community members and AI agents for improving SuperBrain:
+
+<!-- contributors:start -->
+<a href="https://github.com/sidinsearch"><img src="https://avatars.githubusercontent.com/u/29821792?v=4&s=400" width="48" height="48" alt="sidinsearch" style="border-radius: 8px;"></a> <a href="https://github.com/apps/github-actions"><img src="https://avatars.githubusercontent.com/in/15368?v=4&s=400" width="48" height="48" alt="github-actions[bot]" style="border-radius: 8px;"></a> <a href="https://github.com/djbclark"><img src="https://avatars.githubusercontent.com/u/131936?v=4&s=400" width="48" height="48" alt="djbclark" style="border-radius: 8px;"></a> <a href="https://github.com/TheBoomerDev"><img src="https://avatars.githubusercontent.com/u/87417633?v=4&s=400" width="48" height="48" alt="TheBoomerDev" style="border-radius: 8px;"></a> <a href="https://github.com/cursoragent"><img src="https://github.com/cursoragent.png?size=400" width="48" height="48" alt="cursoragent" style="border-radius: 8px;"></a> <a href="https://github.com/apps/copilot-swe-agent"><img src="https://avatars.githubusercontent.com/in/1143301?v=4&s=400" width="48" height="48" alt="copilot-swe-agent" style="border-radius: 8px;"></a>
+<!-- contributors:end -->
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=sidinsearch/superbrain&type=date&legend=top-left&sealed_token=FTgdSp1tS9R55Xrq7L6P4_EsJZWODIWNm9_dsPLRlgI4ssCMAXqWE-Sr8k9Uoax7fQ4hjAa_TCF0yJ9Ffh_5YPCGF-FYB3nasj88Rf3JunGpxsV6qDPhAA)](https://www.star-history.com/?repos=sidinsearch%2Fsuperbrain&type=date&legend=top-left)

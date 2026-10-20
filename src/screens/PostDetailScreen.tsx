@@ -1,0 +1,1032 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, StatusBar, Modal, TextInput, ActivityIndicator, Linking, InteractionManager } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import { RootStackParamList } from '../../App';
+import { Post } from '../types';
+import { colors } from '../theme/colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import apiService from '../services/api';
+import postsCache from '../services/postsCache';
+import CustomToast from '../components/CustomToast';
+import { collectionsService } from '../services/collections';
+import { Collection } from '../types';
+import { schedulePostWatchLaterNotification, sendImmediateWatchLaterNotification, sendImmediateSavedNotification } from '../services/notificationService';
+import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
+import { BUILTIN_DEFAULT_CATEGORIES, CATEGORY_ICONS } from '../constants/categories';
+import { isTaxonomyApiActive } from '../services/taxonomySupport';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'PostDetail'>;
+
+type CategoryOption = { id: string; name: string; icon: string };
+
+/** Upstream / no-taxonomy edit list (built-in mainline categories). */
+const FALLBACK_CATEGORIES: CategoryOption[] = BUILTIN_DEFAULT_CATEGORIES.map(c => ({
+  id: c.id,
+  name: c.name,
+  icon: c.icon,
+}));
+
+const PostDetailScreen = ({ route, navigation }: Props) => {
+  const { post } = route.params;
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [editedCategory, setEditedCategory] = useState(post.category);
+  const [editedTitle, setEditedTitle] = useState(post.title);
+  const [editedSummary, setEditedSummary] = useState(post.summary);
+  const [saving, setSaving] = useState(false);
+  const [categoryOptions, setCategoryOptions] = useState<CategoryOption[]>(FALLBACK_CATEGORIES);
+  const [deleting, setDeleting] = useState(false);
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [showCollectionsModal, setShowCollectionsModal] = useState(false);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const titleInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (showEditModal) {
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => {
+          titleInputRef.current?.focus();
+        }, 500);
+      });
+    }
+  }, [showEditModal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Gate behind connectivity to avoid a wasted 404 round-trip on
+        // upstream servers that lack GET /taxonomy.
+        const isOnline = await apiService.testConnection().catch(() => false);
+        if (!isOnline || cancelled) return;
+        const taxonomy = await apiService.getTaxonomy();
+        if (cancelled) return;
+        // Only replace the built-in picker when the server exposes taxonomy.
+        if (isTaxonomyApiActive(taxonomy)) {
+          setCategoryOptions(
+            taxonomy!.categories.map(c => ({
+              id: c.id,
+              name: c.name,
+              icon: CATEGORY_ICONS[c.id] || CATEGORY_ICONS[c.name.trim().toLowerCase()] || 'pricetag',
+            }))
+          );
+        }
+      } catch {
+        // Keep FALLBACK_CATEGORIES (upstream path)
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const getPostImageUrl = (post: Post) => {
+    if (post.thumbnail_url) return post.thumbnail_url;
+    if (post.thumbnail) {
+      if (post.thumbnail.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${post.thumbnail}`;
+      }
+      return post.thumbnail;
+    }
+    return `https://www.instagram.com/p/${post.shortcode}/media/?size=l`;
+  };
+
+  const getContentTypeLabel = (type?: string) => {
+    switch (type) {
+      case 'youtube':  return { icon: 'logo-youtube', label: 'YouTube' };
+      case 'webpage':  return { icon: 'globe-outline', label: 'Website' };
+      default:         return { icon: 'logo-instagram', label: 'Instagram' };
+    }
+  };
+
+  const getCategoryColor = (category: string) => {
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
+  };
+
+  const getCategoryIcon = (category: string) => {
+    return CATEGORY_ICONS[category.trim().toLowerCase()] || CATEGORY_ICONS['other'];
+  };
+
+  const loadCollections = async () => {
+    try {
+      setLoadingCollections(true);
+      const data = await collectionsService.getCollections();
+      setCollections(data);
+    } catch (error) {
+      console.error('Error loading collections:', error);
+      setToast({ visible: true, message: 'Failed to load collections', type: 'error' });
+    } finally {
+      setLoadingCollections(false);
+    }
+  };
+
+  const handleAddToCollection = async (collectionId: string) => {
+    try {
+      const existingIds = await collectionsService.getCollectionPosts(collectionId);
+      if (existingIds.includes(post.shortcode)) {
+        setShowCollectionsModal(false);
+        setToast({ visible: true, message: 'Already in this collection', type: 'warning' });
+        return;
+      }
+
+      await collectionsService.addPostToCollection(collectionId, post.shortcode);
+      if (collectionId === 'default_watch_later') {
+        sendImmediateWatchLaterNotification(post).catch(() => {});
+      } else {
+        sendImmediateSavedNotification(post).catch(() => {});
+      }
+      
+      setShowCollectionsModal(false);
+      setToast({ visible: true, message: 'Added to collection', type: 'success' });
+    } catch (error) {
+      console.error('Error adding to collection:', error);
+      setToast({ visible: true, message: 'Failed to add to collection', type: 'error' });
+    }
+  };
+
+  const handleShowCollections = () => {
+    loadCollections();
+    setShowCollectionsModal(true);
+  };
+
+  const handleOpenInstagram = async () => {
+    const targetUrl = post.url || `https://www.instagram.com/p/${post.shortcode}/`;
+    try {
+      await Linking.openURL(targetUrl);
+    } catch (error) {
+      console.error('Error opening URL:', error);
+      setToast({ visible: true, message: 'Failed to open link', type: 'error' });
+    }
+  };
+
+  const handleReanalyze = async () => {
+    if (reanalyzing) return;
+
+    const reachable = await apiService.isReachable();
+    if (!reachable) {
+      setToast({ visible: true, message: 'Not connected to backend — connect first and retry', type: 'warning' });
+      return;
+    }
+
+    setReanalyzing(true);
+    const targetUrl = post.url || `https://www.instagram.com/p/${post.shortcode}/`;
+    const { shortcode } = post;
+
+    await postsCache.markAsAnalyzing(shortcode);
+    navigation.goBack();
+
+    apiService.reanalyzePost(targetUrl)
+      .then(async () => {
+        await postsCache.markAnalysisComplete(shortcode);
+        await postsCache.removePostFromCache(shortcode);
+      })
+      .catch(async () => {
+        await postsCache.markAnalysisComplete(shortcode);
+      })
+      .finally(() => setReanalyzing(false));
+  };
+
+  const handleDelete = () => {
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    try {
+      setDeleting(true);
+      await postsCache.removePostFromCache(post.shortcode);
+      setShowDeleteModal(false);
+      setToast({ visible: true, message: 'Post deleted successfully', type: 'success' });
+      setTimeout(() => navigation.goBack(), 1500);
+      try {
+        await apiService.deletePost(post.shortcode);
+      } catch (apiErr: any) {
+        if (!apiErr?.response) {
+          await postsCache.enqueuePendingMutation({ type: 'delete', shortcode: post.shortcode });
+        }
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      setDeleting(false);
+      setToast({ visible: true, message: 'Failed to delete post', type: 'error' });
+    }
+  };
+
+  const handleEdit = () => {
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      setSaving(true);
+      post.category = editedCategory;
+      post.title = editedTitle;
+      post.summary = editedSummary;
+      await postsCache.updatePostInCache(post);
+      setShowEditModal(false);
+      setToast({ visible: true, message: 'Post updated successfully', type: 'success' });
+      try {
+        await apiService.updatePost(post.shortcode, {
+          category: editedCategory,
+          title: editedTitle,
+          summary: editedSummary,
+        });
+      } catch (apiErr: any) {
+        if (!apiErr?.response) {
+          await postsCache.enqueuePendingMutation({
+            type: 'update',
+            shortcode: post.shortcode,
+            updates: { category: editedCategory, title: editedTitle, summary: editedSummary },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Update error:', error);
+      setToast({ visible: true, message: 'Failed to update post', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => {
+          navigation.goBack();
+        }}>
+          <Ionicons name="arrow-back" size={28} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Post Details</Text>
+        <View style={styles.actionButtons}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => handleShowCollections()}>
+            <Ionicons name="folder" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={handleReanalyze} disabled={reanalyzing}>
+            {reanalyzing
+              ? <ActivityIndicator size="small" color={colors.text} />
+              : <Ionicons name="refresh" size={22} color={colors.text} />}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={() => handleEdit()}>
+            <Ionicons name="pencil" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={() => handleDelete()}>
+            <Ionicons name="trash" size={22} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <TouchableOpacity onPress={handleOpenInstagram} activeOpacity={0.9}>
+          <Image
+            source={{ uri: getPostImageUrl(post) }}
+            style={styles.image}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
+
+        {post.category ? (
+          <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(post.category) }]}>
+            <Ionicons name={getCategoryIcon(post.category) as any} size={14} color="#fff" />
+            <Text style={styles.categoryBadgeText}>{post.category.toUpperCase()}</Text>
+          </View>
+        ) : null}
+
+        {(() => {
+          const ct = getContentTypeLabel(post.content_type);
+          return (
+            <View style={styles.contentTypeBadge}>
+              <Ionicons name={ct.icon as any} size={14} color={colors.textMuted} />
+              <Text style={styles.contentTypeBadgeText}>{ct.label}</Text>
+            </View>
+          );
+        })()}
+
+        <Text style={styles.title}>{post.title || 'Untitled'}</Text>
+
+        <View style={styles.metaContainer}>
+          <Text style={styles.username}>@{post.username || 'unknown'}</Text>
+          {post.post_date ? (
+            <Text style={styles.date}>{new Date(post.post_date).toLocaleDateString()}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Summary</Text>
+          <Text style={styles.summaryText}>{post.summary || 'No summary available'}</Text>
+        </View>
+
+        {post.tags && post.tags.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Tags</Text>
+            <View style={styles.tagsContainer}>
+              {post.tags.map((tag, index) => (
+                <View key={index} style={styles.tag}>
+                  <Text style={styles.tagText}>#{tag}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {post.content_type !== 'webpage' && post.music && post.music !== 'No music identified' && post.music !== '' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Music</Text>
+            {post.music.includes('|') ? (
+              <TouchableOpacity 
+                style={styles.musicCardLink} 
+                onPress={() => Linking.openURL(post.music.split('|')[1].trim())}
+              >
+                <View style={styles.musicCardContent}>
+                  <Ionicons name="musical-notes" size={24} color={colors.primary} />
+                  <Text style={styles.musicTextLink} numberOfLines={1}>{post.music.split('|')[0].trim()}</Text>
+                </View>
+                <Ionicons name="open-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.musicCard}>
+                <Ionicons name="musical-notes" size={24} color={colors.primary} />
+                <Text style={styles.musicText}>{post.music.trim()}</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+
+        <View style={styles.statsContainer}>
+          {post.likes && post.likes > 0 ? (
+            <View style={styles.statBox}>
+              <Ionicons name="heart" size={24} color={colors.error} />
+              <Text style={styles.statValue}>{post.likes}</Text>
+              <Text style={styles.statLabel}>Likes</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <TouchableOpacity style={styles.linkButton} onPress={handleOpenInstagram}>
+          <Text style={styles.linkButtonText}>
+            {post.content_type === 'youtube' ? 'Open in YouTube' :
+             post.content_type === 'webpage' ? 'Open Website' :
+             'Open in Instagram'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      <Modal
+        visible={showEditModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowEditModal(false)}
+      >
+        <TouchableOpacity 
+          activeOpacity={1} 
+          style={styles.modalOverlay}
+          onPress={() => setShowEditModal(false)}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+            <View style={[styles.modalContent, { marginBottom: 250 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Post</Text>
+                <TouchableOpacity onPress={() => setShowEditModal(false)}>
+                  <Ionicons name="close" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="always"
+              >
+              <Text style={styles.inputLabel}>Title</Text>
+              <TextInput
+                ref={titleInputRef}
+                style={styles.modalInput}
+                value={editedTitle}
+                onChangeText={setEditedTitle}
+                multiline
+                numberOfLines={2}
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Summary</Text>
+              <TextInput
+                style={[styles.modalInput, styles.modalInputMultiline]}
+                value={editedSummary}
+                onChangeText={setEditedSummary}
+                multiline
+                numberOfLines={4}
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Category</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.categoriesScroll}
+                contentContainerStyle={styles.categoriesContent}
+                keyboardShouldPersistTaps="always"
+              >
+                {categoryOptions.map((cat) => {
+                  const isActive =
+                    (editedCategory || '').trim().toLowerCase() === cat.id.toLowerCase() ||
+                    (editedCategory || '').trim().toLowerCase() === cat.name.trim().toLowerCase();
+                  const catColor = getCategoryColor(cat.id);
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      style={[
+                        styles.categoryOption,
+                        isActive ? {
+                          backgroundColor: catColor,
+                          borderColor: catColor,
+                        } : {
+                          borderColor: catColor + '40',
+                          backgroundColor: catColor + '10',
+                        },
+                      ]}
+                      onPress={() => setEditedCategory(cat.id)}
+                    >
+                      <Ionicons
+                        name={cat.icon as any}
+                        size={16}
+                        color={isActive ? '#fff' : catColor}
+                      />
+                      <Text
+                        style={[
+                          styles.categoryOptionText,
+                          { color: isActive ? '#fff' : catColor }
+                        ]}
+                      >
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </ScrollView>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalButtonCancel}
+                onPress={() => setShowEditModal(false)}
+                disabled={saving}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButtonSave, saving && styles.buttonDisabled]}
+                onPress={handleSaveEdit}
+                disabled={saving}
+              >
+                <Text style={styles.modalButtonSaveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
+              </TouchableOpacity>
+            </View>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={showDeleteModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <View style={styles.deleteIconContainer}>
+              <Ionicons name="trash" size={40} color={colors.error} />
+            </View>
+            <Text style={styles.deleteTitle}>Delete Post?</Text>
+            <Text style={styles.deleteMessage}>
+              Are you sure you want to delete this post? This action cannot be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalButtonCancel}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={deleting}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButtonDelete, deleting && styles.buttonDisabled]}
+                onPress={confirmDelete}
+                disabled={deleting}
+              >
+                <Text style={styles.modalButtonDeleteText}>{deleting ? 'Deleting...' : 'Delete'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showCollectionsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowCollectionsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add to Collection</Text>
+              <TouchableOpacity onPress={() => setShowCollectionsModal(false)}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingCollections ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={styles.loadingText}>Loading collections...</Text>
+              </View>
+            ) : collections.length === 0 ? (
+              <View style={styles.emptyCollections}>
+                <Ionicons name="folder-open" size={64} color={colors.textMuted} />
+                <Text style={styles.emptyTitle}>No Collections</Text>
+                <Text style={styles.emptyText}>Create collections in the Library tab first</Text>
+                <TouchableOpacity
+                  style={styles.goToLibraryButton}
+                  onPress={() => {
+                    setShowCollectionsModal(false);
+                    navigation.navigate('Library');
+                  }}
+                >
+                  <Text style={styles.goToLibraryText}>Go to Library</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView style={styles.collectionsList} showsVerticalScrollIndicator={false}>
+                {collections.map((collection) => (
+                  <TouchableOpacity
+                    key={collection.id}
+                    style={styles.collectionItem}
+                    onPress={() => handleAddToCollection(collection.id)}
+                  >
+                    <View style={styles.collectionItemLeft}>
+                      <Ionicons
+                        name={getCollectionIconName(collection.id, collection.icon) as any}
+                        size={28}
+                        color={getCollectionIconColor(collection.id, collection.icon)}
+                      />
+                      <View>
+                        <Text style={styles.collectionItemName}>{collection.name}</Text>
+                        <Text style={styles.collectionItemCount}>
+                          {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      <CustomToast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onHide={() => setToast({ ...toast, visible: false })}
+      />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: colors.backgroundCard,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  actionButton: {
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 40,
+  },
+  image: {
+    width: '100%',
+    height: 400,
+    backgroundColor: colors.backgroundCard,
+  },
+  categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginHorizontal: 20,
+    marginTop: -20,
+    marginBottom: 20,
+    gap: 6,
+  },
+  categoryBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 1,
+  },
+  contentTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginHorizontal: 20,
+    marginBottom: 12,
+    gap: 6,
+  },
+  contentTypeBadgeText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    paddingHorizontal: 20,
+    marginBottom: 14,
+    lineHeight: 30,
+    letterSpacing: -0.3,
+  },
+  metaContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  username: {
+    fontSize: 15,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  date: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  section: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  summaryText: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    lineHeight: 24,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tag: {
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(99, 102, 241, 0.2)',
+  },
+  tagText: {
+    fontSize: 13,
+    color: colors.primaryLight,
+    fontWeight: '600',
+  },
+  musicCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundCard,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 12,
+  },
+  musicCardLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.backgroundCard,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primaryGlow || 'rgba(99, 102, 241, 0.3)',
+  },
+  musicCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  musicTextLink: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.primaryLight || colors.primary,
+    fontWeight: '500',
+  },
+  musicText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    gap: 12,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: colors.backgroundCard,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 8,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  linkButton: {
+    marginHorizontal: 20,
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  linkButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+  },
+  modalContent: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  deleteModalContent: {
+    backgroundColor: colors.background,
+    borderRadius: 24,
+    padding: 24,
+    marginHorizontal: 20,
+    alignItems: 'center',
+  },
+  deleteIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.backgroundCard,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  deleteTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  deleteMessage: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  modalInput: {
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: 16,
+  },
+  modalInputMultiline: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  categoriesScroll: {
+    marginBottom: 24,
+  },
+  categoriesContent: {
+    paddingRight: 20,
+  },
+  categoryOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: colors.backgroundCard,
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 6,
+  },
+  categoryOptionActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  categoryOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  categoryOptionTextActive: {
+    color: '#fff',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButtonCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+  },
+  modalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  modalButtonSave: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+  },
+  modalButtonSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalButtonDelete: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: colors.error,
+    alignItems: 'center',
+  },
+  modalButtonDeleteText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  emptyCollections: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  goToLibraryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+  },
+  goToLibraryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  collectionsList: {
+    maxHeight: 400,
+  },
+  collectionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: colors.backgroundCard,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  collectionItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  collectionItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  collectionItemCount: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+});
+
+export default PostDetailScreen;
