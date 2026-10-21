@@ -1,5 +1,17 @@
 # Test results
 
+## 1.5.0 (2026-10-22): navigation, Home feed, Ask about this, in-app player
+
+- Release APK: `dist/Qivra-1.5.0-release.apk`, version code 8, debug-signed.
+- `tsc` and Biome pass. Jest: 200 passed, 4 live tests skipped, including new tests for item Q&A citation checks, the Home feed query, merged Library search, scoped Ask, the in-page player seeking to a key moment, the "+" capture sheet and the digest text. Server pytest: 89 passed, 5 live skipped.
+- Emulator (API 35, release APK, throwaway server with the Groq gateway):
+  - Home showed the greeting, Ready to review cards with their one-line summaries, the digest card, and the Home · Library · + · Ask tab bar.
+  - Library search for "elephants" returned matching passages from Wikipedia and from video transcripts.
+  - Tapping the 0:07 key moment played the YouTube video inside the item page; it ran to the end without leaving the app.
+  - "Ask about this" on the zoo video gave a Groq answer with five citations, each a real moment (0:01–0:16). Tapping a citation opened the item with the player loaded at that moment.
+- Found while testing: installing a package with `--legacy-peer-deps` pruned `expo-font`, which is now a direct dependency. The emulator could not reach the host at 10.0.2.2 during this run, so pairing went through `adb reverse` and 127.0.0.1.
+- Not verified: the 9 am digest firing (it is scheduled through the normal notification API; its text is unit-tested), and the iQOO 13 itself.
+
 ## 1.4.0 (2026-10-22) — background sharing, Groq Whisper, key moments
 
 - Release APK: `dist/Qivra-1.4.0-release.apk` (68 MiB), `com.qivra.app`, version code 7, debug-signed; no provider key in the APK or JS bundle.

@@ -18,12 +18,12 @@ export function T({ v = 'body', color, style, children, ...rest }: Omit<TextProp
   return <Text style={[type[v], { color: col }, style]} {...rest}>{children}</Text>;
 }
 
-export function Screen({ children, scroll = true, padded = true, edges = ['top'] as ('top' | 'bottom')[] }: { children: React.ReactNode; scroll?: boolean; padded?: boolean; edges?: ('top' | 'bottom')[] }) {
+export function Screen({ children, scroll = true, padded = true, edges = ['top'] as ('top' | 'bottom')[], scrollRef }: { children: React.ReactNode; scroll?: boolean; padded?: boolean; edges?: ('top' | 'bottom')[]; scrollRef?: React.Ref<ScrollView> }) {
   const { c } = useTheme();
   const inner = padded ? { paddingHorizontal: space.lg, paddingBottom: space.xxl } : undefined;
   return (
     <SafeAreaView edges={edges} style={{ flex: 1, backgroundColor: c.bg }}>
-      {scroll ? <ScrollView contentContainerStyle={inner} keyboardShouldPersistTaps="handled">{children}</ScrollView> : <View style={[{ flex: 1 }, inner]}>{children}</View>}
+      {scroll ? <ScrollView ref={scrollRef} contentContainerStyle={inner} keyboardShouldPersistTaps="handled">{children}</ScrollView> : <View style={[{ flex: 1 }, inner]}>{children}</View>}
     </SafeAreaView>
   );
 }

@@ -247,3 +247,38 @@ describe('concurrency', () => {
     expect(await repo.countItems({})).toBe(1);
   });
 });
+
+describe('home feed', () => {
+  test('ready-to-review, needs-you, in-progress and a daily resurfaced item', async () => {
+    let now = new Date('2026-10-01T09:00:00Z');
+    const repo = await freshRepo(':memory:', () => now);
+    const mk = async (title: string, status: string) => {
+      const { item } = await repo.createItem({ sourceType: 'note', title });
+      await repo.db.run('UPDATE items SET status = ? WHERE id = ?', [status, item.id]);
+      return item.id;
+    };
+    const old1 = await mk('Old A', 'READY');
+    const old2 = await mk('Old B', 'READY');
+    await repo.markViewed(old1);
+    await repo.markViewed(old2);
+    now = new Date('2026-10-10T09:00:00Z');
+    const fresh = await mk('Fresh', 'READY');
+    const seen = await mk('Seen', 'READY');
+    await repo.markViewed(seen);
+    const needs = await mk('Needs transcript', 'NEEDS_INPUT');
+    const busy = await mk('Busy', 'TRANSCRIBING');
+    const archived = await mk('Archived', 'READY');
+    await repo.setArchived([archived], true);
+
+    const feed = await repo.homeFeed('2026-10-10');
+    expect(feed.ready.map((i) => i.id)).toEqual([fresh]);
+    expect(feed.needsYou.map((i) => i.id)).toEqual([needs]);
+    expect(feed.processing.map((i) => i.id)).toEqual([busy]);
+    expect([old1, old2]).toContain(feed.resurface?.id);
+    // Same day → same pick; the pick is stable for the day.
+    expect((await repo.homeFeed('2026-10-10')).resurface?.id).toBe(feed.resurface?.id);
+    const days = new Set<string>();
+    for (const d of ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14']) days.add((await repo.homeFeed(d)).resurface!.id);
+    expect(days.size).toBe(2); // rotates through the old items
+  });
+});

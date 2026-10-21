@@ -1,6 +1,8 @@
 /** Connects the grounded agent to the local database and the configured model. */
 
 import { runAgent, type AgentData, type AgentResult, type EvidenceChunk, type EvidenceItem } from '../core/agent/agent';
+import { askItem, type ItemQaResult, type ItemQaSource } from '../core/agent/itemQa';
+import { ARTICLE_SOURCES } from '../core/url';
 import { cosine } from '../core/search';
 import type { Repo } from '../db/repo';
 import type { ChunkHit, Item } from '../db/types';
@@ -58,6 +60,44 @@ export async function ask(conversationId: string | null, question: string): Prom
     citations: result.sources.filter((src) => result.mode !== 'model' || result.citedIds.includes(src.sid)).map((src) => ({
       sid: src.sid, itemId: src.itemId, transcriptId: src.transcriptId, chunkId: src.chunkId, startMs: src.startMs, quote: src.quote,
     })),
+  });
+  emit('conversations');
+  return { conversationId: convId, result };
+}
+
+/** The single item an "Ask this item" conversation is about, as untrusted source text. */
+async function itemSource(repo: Repo, itemId: string): Promise<{ src: ItemQaSource; transcriptId: string | null } | null> {
+  const item = await repo.getItem(itemId);
+  if (!item || item.deleted) return null;
+  const transcripts = (await repo.listTranscripts(itemId)).filter((t) => t.kind === 'original');
+  const speech = transcripts.find((t) => !ARTICLE_SOURCES.has(t.source));
+  const main = speech ?? transcripts[0] ?? null;
+  const segs = main ? await repo.getSegments(main.id) : [];
+  const meta = item.metadata as (Item['metadata'] & { bodyText?: string }) | null;
+  const body = [main && !speech ? main.text : '', meta?.description ?? '', meta?.bodyText ?? ''].filter(Boolean).join('\n\n');
+  return {
+    transcriptId: main?.id ?? null,
+    src: {
+      title: item.title || item.url || 'Untitled', url: item.url, summary: item.summary, note: item.note, body,
+      timed: speech ? segs.map((sg) => ({ startMs: sg.startMs, text: sg.text })) : [],
+    },
+  };
+}
+
+/** "Ask this item": a conversation scoped to one saved video, post or page, citing its moments. */
+export async function askAboutItem(conversationId: string | null, itemId: string, question: string): Promise<{ conversationId: string; result: ItemQaResult }> {
+  const repo = await getRepo();
+  const found = await itemSource(repo, itemId);
+  if (!found) throw new Error('This item no longer exists.');
+  const convId = conversationId ?? (await repo.createConversation(`About: ${found.src.title}`.slice(0, 80)));
+  const history = (await repo.listMessages(convId)).slice(-6).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  await repo.addMessage({ conversationId: convId, role: 'user', content: question, mode: null, provider: null, warnings: [], proposals: [], citations: [] });
+  const { provider } = await loadProvider();
+  const result = await askItem(found.src, question, provider, history);
+  if (result.usage && result.provider) await repo.addUsage({ provider: result.provider, model: provider?.model ?? null, kind: 'agent', ...result.usage });
+  await repo.addMessage({
+    conversationId: convId, role: 'assistant', content: result.answer, mode: result.mode, provider: result.provider, warnings: [], proposals: [],
+    citations: result.moments.map((m) => ({ sid: m.sid, itemId, transcriptId: m.startMs !== null ? found.transcriptId : null, chunkId: null, startMs: m.startMs, quote: m.quote })),
   });
   emit('conversations');
   return { conversationId: convId, result };

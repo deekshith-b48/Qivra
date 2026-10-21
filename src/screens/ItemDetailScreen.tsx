@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Linking, Pressable, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Image, Linking, Pressable, type ScrollView, View } from 'react-native';
 import { formatLocal } from '../core/dates';
 import { keyMomentsOf } from '../core/enrich';
 import { extractKeywords, type Keyword } from '../core/highlights';
@@ -21,6 +21,7 @@ import { ItemCard, SyncChip } from '../ui/ItemCard';
 import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, TimestampPill, type StepState } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
 import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
+import { YouTubeHero, type YouTubeHeroHandle } from '../ui/YouTubeHero';
 
 function stepsFor(item: Item, hasSpeech: boolean, hasArticle: boolean, isVideo: boolean): { label: string; state: StepState }[] {
   const s = item.status;
@@ -52,6 +53,10 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const [langOpen, setLangOpen] = useState(false);
   const [correcting, setCorrecting] = useState<{ ordinal: number; text: string } | null>(null);
   const [details, setDetails] = useState(false);
+  const heroRef = useRef<YouTubeHeroHandle>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  const onTime = useCallback((ms: number) => setNowMs(ms), []);
 
   const q = useQuery(async (repo) => {
     const item = await repo.getItem(id);
@@ -73,6 +78,13 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   }, [id]);
 
   const d = q.data;
+  const atParam = route.params.at;
+  const videoIdForAt = d?.item.url ? analyzeUrl(d.item.url)?.youtubeId : undefined;
+  useEffect(() => {
+    if (atParam === undefined || !videoIdForAt) return;
+    const t = setTimeout(() => heroRef.current?.seek(atParam), 300);
+    return () => clearTimeout(t);
+  }, [atParam, videoIdForAt]);
   const speech = d?.transcripts.filter((t) => !ARTICLE_SOURCES.has(t.source)) ?? [];
   const articles = d?.transcripts.filter((t) => ARTICLE_SOURCES.has(t.source)) ?? [];
   const ordered: Transcript[] = [...speech, ...articles];
@@ -107,6 +119,12 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   };
   const openAt = (ms: number | null) => {
     if (!item.url) return;
+    if (ytId) {
+      // Play in place: back to the player at the top, then seek.
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      heroRef.current?.seek(ms ?? 0);
+      return;
+    }
     const url = ytId && ms !== null ? `https://www.youtube.com/watch?v=${ytId}&t=${Math.floor(ms / 1000)}s` : item.url;
     void Linking.openURL(url);
   };
@@ -142,6 +160,8 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     navigation.goBack();
   });
 
+  // While the embedded video plays, the line being spoken is highlighted.
+  const playingIndex = nowMs === null ? -1 : (segs.data ?? []).reduce((best, sg, i) => (sg.startMs !== null && sg.startMs <= nowMs + 300 ? i : best), -1);
   const shownSegs = (segs.data ?? []).map((s, i) => ({ ...s, i })).filter((s) => !focus || s.text.toLowerCase().includes(focus.toLowerCase()));
   const info = item.errorCode?.startsWith('INFO_');
   const generating = !!d.aiJob && (d.aiJob.status === 'queued' || d.aiJob.status === 'running');
@@ -157,7 +177,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           : { primary: importT, secondary: connection && isVideo ? { ...retryA, title: 'Try server again' } : undefined };
 
   return (
-    <Screen padded={false}>
+    <Screen padded={false} scrollRef={scrollRef}>
       <Header
         title=""
         onBack={() => navigation.goBack()}
@@ -168,7 +188,10 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         </>}
       />
       <View style={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}>
-        {/* Hero */}
+        {/* Hero: YouTube plays in place; other sources open the original */}
+        {ytId ? (
+          <YouTubeHero ref={heroRef} videoId={ytId} thumbnailUrl={item.thumbnailUrl || null} onTime={onTime} badge={<PlatformBadge source={item.sourceType} onMedia />} />
+        ) : (
         <Pressable onPress={() => openAt(null)} disabled={!item.url} accessibilityRole="button" accessibilityLabel={isVideo ? 'Play on the original app' : 'Open original page'}
           style={{ borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.surfaceAlt, aspectRatio: item.thumbnailUrl ? 16 / 9 : undefined, minHeight: item.thumbnailUrl ? undefined : 120, justifyContent: 'center', alignItems: 'center' }}>
           {item.thumbnailUrl ? <Image source={{ uri: item.thumbnailUrl }} accessibilityIgnoresInvertColors style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" /> : (
@@ -181,6 +204,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           ) : null}
           <View style={{ position: 'absolute', top: space.sm, left: space.sm }}><PlatformBadge source={item.sourceType} onMedia={!!item.thumbnailUrl} /></View>
         </Pressable>
+        )}
 
         <T v="display" style={{ marginTop: space.md }} onLongPress={() => startEdit('title')} accessibilityHint="Long press to edit the title">{item.title || item.url || 'Untitled'}</T>
         <T v="small" color="textMuted" style={{ marginTop: 4 }}>
@@ -190,6 +214,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           <SyncChip status={item.syncStatus} />
           {item.origin === 'superbrain' ? <Chip label="From SuperBrain" tone="info" /> : null}
         </View>
+        <Button kind="tonal" title="Ask about this" icon="sparkles-outline" style={{ alignSelf: 'flex-start', marginTop: space.sm }}
+          accessibilityHint="Opens Ask with questions scoped to this item"
+          onPress={() => navigation.navigate('Main', { screen: 'Agent', params: { itemId: id } })} />
 
         {item.status !== 'READY' ? <ProgressSteps steps={stepsFor(item, speech.length > 0, articles.length > 0, isVideo)} /> : null}
 
@@ -297,7 +324,8 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
                     {focus ? <Chip label={`Showing lines with “${focus}” ✕`} selected onPress={() => setFocus(null)} /> : null}
                     <Card style={{ padding: space.md }}>
                       {shownSegs.slice(0, 500).map((s) => (
-                        <View key={s.i} style={{ flexDirection: 'row', gap: space.md, paddingVertical: 6 }}>
+                        <View key={s.i} style={{ flexDirection: 'row', gap: space.md, paddingVertical: 6, paddingHorizontal: 4, borderRadius: radius.sm, backgroundColor: s.i === playingIndex ? c.accentSoft : 'transparent' }}
+                          accessibilityState={{ selected: s.i === playingIndex }}>
                           {s.startMs !== null ? <TimestampPill label={formatTimestamp(s.startMs)} onPress={ytId ? () => openAt(s.startMs) : undefined} /> : null}
                           <Pressable style={{ flex: 1 }} onLongPress={() => setCorrecting({ ordinal: s.i, text: s.text })} accessibilityHint="Long press to correct this line">
                             <HighlightedText text={s.text} terms={focus ? [focus] : terms} style={{ fontSize: 15, lineHeight: 23 }} />
@@ -307,7 +335,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
                       {!shownSegs.length ? <T color="textMuted">No lines match.</T> : null}
                     </Card>
                     {shownSegs.length > 500 ? <T v="small" color="textMuted">Showing the first 500 lines.</T> : null}
-                    <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>{ytId ? 'Tap a timestamp to play from there · ' : ''}Long-press a line to correct it.</T>
+                    <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>{ytId ? 'Tap a timestamp to play it here · ' : ''}Long-press a line to correct it.</T>
                   </>
                 ) : null}
               </>

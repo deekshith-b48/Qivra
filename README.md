@@ -10,11 +10,17 @@ Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra s
 
 ## Get Qivra
 
-**[Download the latest APK (1.4.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
+**[Download the latest APK (1.5.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
 
 > The APK is signed with the Android debug key. It is meant for personal use and sideloading, not the Play Store.
 
 ## Features
+
+### Find your way around
+- **Three tabs and a "+" button:** **Home** shows what needs you, **Library** holds and searches everything, and **Ask** answers questions about your library. The centre **+** pastes a copied link, writes a note, records a voice note or imports a file.
+- **Home feed:** **Ready to review** (new and ready), **Needs you** (needs a transcript or failed), **In progress**, and one older item **from your library** each day. An opt-in **daily digest** notification arrives at 9 am.
+- **Watch inside Qivra:** YouTube items play on the item page. Tap a key moment, a transcript line or an Ask citation to jump straight to that second, and the line being spoken is highlighted as it plays.
+- **Ask about this:** every item has a button to chat with just that video or page. Answers cite its moments.
 
 ### Save from anywhere, without leaving the app you are in
 - **Share sheet capture.** Share from Instagram, X, YouTube, a browser or any app. A toast confirms the save, and a short "Preparing transcript and summary…" notification shows while Qivra works. When it is done, a **"Ready: <title>"** notification with the summary opens the item.
@@ -39,8 +45,8 @@ Qivra never makes up a transcript. A music-only reel finishes as "No speech to t
 - **Tools, repos and commands** are pulled out as they appear in the source. Commands are shown and can be copied, but are never run.
 
 ### Search, ask and report
-- **Full-text search** on the device with SQLite FTS5, which works offline. Semantic search is added when an embedding model is configured.
-- **AI Agent:** answers come only from your saved items and cite numbered sources [S1]. Saved content is treated as untrusted data, which guards against prompt injection. Without a model, Qivra returns the matching passages instead.
+- **Search from the Library bar:** full-text search on the device with SQLite FTS5, works offline. Results are grouped by item, and transcript matches show their timestamps. Semantic search is added when an embedding model is configured.
+- **Ask:** questions across the whole library, or about one item. Answers come only from your saved items and cite numbered sources [S1]. Saved content is treated as untrusted data, which guards against prompt injection. Without a model, Qivra returns the matching passages instead.
 - **Reports:** daily, weekly, topic or a selection of items, with sources and gaps.
 - **Collections, tags, notes and transcript corrections**, plus export and delete-everything under Privacy & storage.
 
@@ -57,7 +63,7 @@ flowchart LR
     Share["ShareActivity (Kotlin)"] -->|"envelope in files/share_inbox"| Inbox[(Share inbox)]
     Share -->|"startForegroundService"| Svc["QivraShareTaskService<br/>headless JS + foreground notification"]
     Svc --> Task["shareTask.ts"]
-    UI["Screens: Today · Library · Item · Search · Agent · Reports"] --> Services
+    UI["Tabs: Home · Library (+ search) · Ask<br/>Item page with YouTube player · Reports"] --> Services
     Task --> Services["Services: capture · processing jobs · ai · sync · voice"]
     Services --> Core["Core (pure TS): url · metadata · youtubeCaptions · enrich · highlights · agent · reports"]
     Services --> DB[("SQLite + FTS5<br/>items · transcripts · chunks · jobs")]
@@ -144,7 +150,7 @@ stateDiagram-v2
 - **Server:** admin routes answer only on loopback. Host and Origin headers are checked against DNS rebinding. Payload and upload sizes are capped. Server-side fetches are guarded against SSRF, uploads cannot traverse paths, and no secret is ever logged.
 - **Network:** cleartext HTTP is refused unless the host is on a private, LAN or VPN address, and hosted AI providers must use HTTPS.
 - **Content:** imported text is treated as untrusted. Commands are never executed, and the Agent's write tools need your confirmation.
-- **Permissions:** each one is requested when you first use the feature that needs it: camera for QR scanning, microphone for recording, notifications on the first share.
+- **Permissions:** each one is requested when you first use the feature that needs it: camera for QR scanning, microphone for recording, notifications on the first share or when you turn on the digest. The clipboard is read only when you tap "Paste copied link".
 - **Backups:** Android cloud and device-transfer backup are disabled.
 
 See [Security and privacy](docs/SECURITY_AND_PRIVACY.md) for the full threat notes.

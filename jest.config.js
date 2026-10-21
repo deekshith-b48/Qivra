@@ -14,6 +14,7 @@ module.exports = {
       moduleNameMapper: {
         '^whisper\\.rn/index$': '<rootDir>/__tests__/helpers/whisperMock.ts',
         '^@fugood/react-native-audio-pcm-stream$': '<rootDir>/__tests__/helpers/pcmMock.ts',
+        '^react-native-youtube-iframe$': '<rootDir>/__tests__/helpers/youtubeMock.tsx',
       },
     },
   ],

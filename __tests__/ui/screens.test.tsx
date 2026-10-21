@@ -12,6 +12,10 @@ import ItemDetailScreen from '../../src/screens/ItemDetailScreen';
 import AgentScreen from '../../src/screens/AgentScreen';
 import ReportDetailScreen from '../../src/screens/ReportDetailScreen';
 import CaptureScreen from '../../src/screens/CaptureScreen';
+import TodayScreen from '../../src/screens/TodayScreen';
+import { CaptureSheet, captureCopiedLink } from '../../src/ui/CaptureSheet';
+import { digestMessage } from '../../src/core/digest';
+import * as Clipboard from 'expo-clipboard';
 import { generateReport } from '../../src/services/reports';
 
 function nav() {
@@ -29,7 +33,7 @@ test('onboarding marks the app onboarded and opens the main tabs', async () => {
   expect(await (await getRepo()).getMeta('app.onboarded')).toBe('1');
 });
 
-test('library has Videos / Websites / Notes sections with real items and text filter', async () => {
+test('library has Videos / Websites / Notes sections and its search bar searches everything', async () => {
   wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
   expect(await screen.findByText('No videos yet')).toBeTruthy();
   const repo = await getRepo();
@@ -45,8 +49,12 @@ test('library has Videos / Websites / Notes sections with real items and text fi
   expect(await screen.findByText('anthropics/claude-code')).toBeTruthy();
   fireEvent.press(screen.getByRole('tab', { name: /Notes/ }));
   expect(await screen.findByText('Pasta recipe')).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Filter your library'), 'claude');
-  await waitFor(() => expect(screen.getByText('No matches')).toBeTruthy(), { timeout: 3000 });
+  // Search runs across all sections (FTS), so the GitHub item is found while Notes is selected.
+  fireEvent.changeText(screen.getByLabelText('Search your library'), 'claude');
+  expect(await screen.findByText('anthropics/claude-code', {}, { timeout: 3000 })).toBeTruthy();
+  expect(screen.queryByText('Pasta recipe')).toBeNull();
+  fireEvent.changeText(screen.getByLabelText('Search your library'), 'nonexistentword');
+  expect(await screen.findByText('No results', {}, { timeout: 3000 })).toBeTruthy();
 });
 
 test('connect screen validates manual pairing input before any network call', async () => {
@@ -83,6 +91,13 @@ test('video page: one scroll with TL;DR, key moments, keyword chips filtering a 
   expect(screen.queryByText('AI summary · generating…')).toBeNull();
   expect(screen.getByText('Key moments')).toBeTruthy();
   expect(screen.getByLabelText('Play from 1:01')).toBeTruthy(); // key moment timestamp is tappable on YouTube
+  // The video plays inside the page, and a key moment seeks it there (no jump to the YouTube app).
+  const linking = jest.spyOn(require('react-native').Linking, 'openURL');
+  fireEvent.press(screen.getByLabelText('Play from 1:01'));
+  expect(await screen.findByText('player:dQw4w9WgXcQ:playing')).toBeTruthy();
+  await waitFor(() => expect(require('../helpers/youtubeMock').seekTo).toHaveBeenCalledWith(61, true));
+  expect(linking).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Ask about this' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Enrich on server' })).toBeNull();
   // Transcript is collapsed until a keyword chip is tapped, which also filters it.
   expect(screen.queryByText('1:10')).toBeNull();
@@ -164,4 +179,64 @@ test('text scales with the system font size (allowFontScaling is not disabled)',
   wrap(<OnboardingScreen navigation={nav()} route={{ key: 'o', name: 'Onboarding' } as never} />);
   const t = await screen.findByText(/Turn what you save/);
   expect(t.props.allowFontScaling).not.toBe(false);
+});
+
+
+test('home shows what is ready, what needs you and what is in progress', async () => {
+  const repo = await getRepo();
+  const mk = async (title: string, status: string, summary = '') => {
+    const { item } = await repo.createItem({ sourceType: 'youtube', title, url: `https://www.youtube.com/watch?v=${title.replace(/\W/g, '').padEnd(11, 'x').slice(0, 11)}` });
+    await repo.db.run('UPDATE items SET status = ?, summary = ? WHERE id = ?', [status, summary, item.id]);
+  };
+  await mk('Vector databases explained', 'READY', 'Vectors make search semantic. More text.');
+  await mk('Reel without captions', 'NEEDS_INPUT');
+  await mk('Still transcribing', 'TRANSCRIBING');
+  wrap(<TodayScreen navigation={nav()} route={{ key: 't', name: 'Today' } as never} />);
+  expect(await screen.findByText('Ready to review')).toBeTruthy();
+  expect(screen.getByText('Vector databases explained')).toBeTruthy();
+  expect(screen.getByText('Vectors make search semantic.')).toBeTruthy();
+  expect(screen.getByText('Needs you')).toBeTruthy();
+  expect(screen.getByText('Reel without captions')).toBeTruthy();
+  expect(screen.getByText('In progress')).toBeTruthy();
+  expect(screen.getByText(/1 need you/)).toBeTruthy();
+});
+
+test('ask can be scoped to one item and answers from it with timestamps', async () => {
+  const repo = await getRepo();
+  const { item } = await repo.createItem({ sourceType: 'youtube', title: 'Postgres indexing', url: 'https://www.youtube.com/watch?v=abcdefghijk' });
+  await repo.upsertTranscript({ itemId: item.id, language: 'en', languageMethod: 'provider', source: 'youtube_captions', provider: 'youtube-captions', segments: [
+    { startMs: 0, endMs: 5000, text: 'Today: Postgres indexes.' },
+    { startMs: 62000, endMs: 66000, text: 'Use a GIN index for JSONB documents.' },
+  ] });
+  const n = nav() as { navigate: jest.Mock };
+  wrap(<AgentScreen navigation={n as never} route={{ key: 'a', name: 'Agent', params: { itemId: item.id } } as never} />);
+  expect(await screen.findByText('Postgres indexing')).toBeTruthy();
+  expect(screen.getByText(/Asking about:/)).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Message'), 'Which index for JSONB?');
+  fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+  expect((await screen.findAllByText(/1:02/, {}, { timeout: 3000 })).length).toBeGreaterThanOrEqual(2); // in the answer and its citation
+  fireEvent.press(screen.getAllByRole('link')[0]);
+  expect(n.navigate).toHaveBeenCalledWith('ItemDetail', { id: item.id, at: 62000 });
+  const convs = await repo.listConversations();
+  expect(convs[0].title).toBe('About: Postgres indexing');
+});
+
+test('the + sheet saves the copied link, and explains when there is none', async () => {
+  const spy = jest.spyOn(Clipboard, 'getStringAsync');
+  spy.mockResolvedValueOnce('look at this https://www.youtube.com/watch?v=dQw4w9WgXcQ !');
+  const r = await captureCopiedLink();
+  expect('itemId' in r && r.itemId).toBeTruthy();
+  spy.mockResolvedValueOnce('just some words');
+  expect(await captureCopiedLink()).toEqual({ message: 'The copied text has no link. Use “Note” to save text.' });
+  const onCapture = jest.fn();
+  wrap(<CaptureSheet visible onClose={jest.fn()} onOpenItem={jest.fn()} onCapture={onCapture} />);
+  fireEvent.press(screen.getByRole('button', { name: 'Voice note' }));
+  expect(onCapture).toHaveBeenCalledWith('voice');
+});
+
+test('daily digest text lists what is ready, else resurfaces something', () => {
+  const [a, b, c] = ['A', 'B', 'C'].map((title) => ({ title, url: null }));
+  expect(digestMessage([a, b, c], 5, null)).toEqual({ title: '5 ready to review', body: 'A · B · C and 2 more' });
+  expect(digestMessage([], 0, { title: 'Old gem', url: null })).toEqual({ title: 'From your library', body: 'Revisit: Old gem' });
+  expect(digestMessage([], 0, null).body).toMatch(/Nothing new/);
 });

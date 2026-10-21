@@ -16,10 +16,12 @@ import { getRepo } from '../services/db';
 import { emit, subscribe } from '../services/events';
 import { generateReport } from '../services/reports';
 import { updateSettings } from '../services/settings';
-import { Banner, Button, Chip, EmptyState, Fab, IconButton, Loading, Sheet, T } from '../ui/components';
+import { Banner, Button, Chip, EmptyState, IconButton, Loading, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard, VideoCard } from '../ui/ItemCard';
 import { Segmented } from '../ui/media';
+import { SearchResults } from '../ui/SearchResults';
+import { VoiceSheet } from '../ui/VoiceSheet';
 import { radius, space, type, useTheme } from '../ui/theme';
 import { useSettings, useAiInfo } from '../ui/useSettings';
 
@@ -62,6 +64,9 @@ export default function LibraryScreen({ navigation, route }: Props) {
     return () => clearTimeout(t);
   }, [text]);
   useEffect(() => setCollectionId(route.params?.collectionId), [route.params?.collectionId]);
+  useEffect(() => { if (route.params?.q) setText(route.params.q); }, [route.params?.q]);
+  const [voice, setVoice] = useState(false);
+  const searching = debounced.trim().length > 0;
 
   const filter: LibraryFilter = useMemo(() => {
     const allowed = SECTION_SOURCES[section];
@@ -172,16 +177,16 @@ export default function LibraryScreen({ navigation, route }: Props) {
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder="Filter your library"
+            placeholder="Search titles, transcripts, notes…"
             placeholderTextColor={c.textFaint}
-            accessibilityLabel="Filter your library"
+            accessibilityLabel="Search your library"
             style={[type.body, { flex: 1, color: c.text, minHeight: 48 }]}
             returnKeyType="search"
           />
-          {text ? <IconButton icon="close-circle" label="Clear text" onPress={() => setText('')} color={c.textMuted} /> : null}
+          {text ? <IconButton icon="close-circle" label="Clear search" onPress={() => setText('')} color={c.textMuted} /> : <IconButton icon="mic-outline" label="Search by voice" onPress={() => setVoice(true)} />}
           <IconButton icon="options-outline" label={`Filters${activeFilters ? `, ${activeFilters} active` : ''}`} onPress={() => setFiltersOpen(true)} />
         </View>
-        <View style={{ marginTop: space.md }}>
+        {searching ? null : <View style={{ marginTop: space.md }}>
           <Segmented<Section>
             value={section}
             onChange={(k) => { setSection(k); setSelected(new Set()); }}
@@ -191,15 +196,15 @@ export default function LibraryScreen({ navigation, route }: Props) {
               { key: 'notes', label: 'Notes', count: facets.data?.counts.notes },
             ]}
           />
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm, flexWrap: 'wrap' }}>
+        </View>}
+        {searching ? null : <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm, flexWrap: 'wrap' }}>
           <T v="caption" color="textMuted" style={{ marginRight: space.sm }}>{total} item{total === 1 ? '' : 's'}</T>
           {collectionName ? <Chip label={collectionName} selected onPress={() => setCollectionId(undefined)} /> : null}
           {activeFilters ? <Chip label={`${activeFilters} filter(s)`} tone="accent" onPress={() => setFiltersOpen(true)} /> : null}
-        </View>
+        </View>}
       </View>
       {error ? <View style={{ paddingHorizontal: space.lg }}><Banner tone="danger" title="Couldn't load library" body={error} action={<Button kind="outline" title="Retry" onPress={() => void load(true)} />} /></View> : null}
-      <FlatList
+      {searching ? <SearchResults query={debounced} onOpen={(id) => navigation.navigate('ItemDetail', { id })} /> : <FlatList
         key={section === 'videos' ? 'video' : grid ? 'grid' : 'list'}
         data={items}
         numColumns={grid && section !== 'videos' ? 2 : 1}
@@ -245,8 +250,8 @@ export default function LibraryScreen({ navigation, route }: Props) {
             />
           )
         ) : null}
-      />
-      {!selecting ? <Fab label="Save" icon="add" onPress={() => navigation.navigate('Capture')} /> : null}
+      />}
+      <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={(t) => setText(t.replace(/[.?!]+$/, ''))} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
 
       <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filter & sort">
         <T v="caption" color="textMuted">Sort</T>

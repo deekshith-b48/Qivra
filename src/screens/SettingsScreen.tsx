@@ -50,7 +50,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
           help={`Device time zone: ${deviceTimeZone()}`} style={{ marginTop: space.sm }} />
       </Section>
       <Section title="Reminders & schedules">
-        <ToggleRow title="Daily review reminder (8 pm)" subtitle="Asks for notification permission when turned on." value={s.dailyReminder} onChange={async (v) => {
+        <ToggleRow title="Daily digest (9 am)" subtitle="What is ready to review, each morning. Shows item titles; hidden on a locked screen. Asks for notification permission when turned on." value={s.dailyReminder} onChange={async (v) => {
           if (v) {
             const r = await enableDailyReminder();
             if (r === 'denied') return Alert.alert('Notifications are off', 'Allow notifications for Qivra in Android settings to use reminders.');

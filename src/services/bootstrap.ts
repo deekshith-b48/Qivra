@@ -7,6 +7,7 @@ import { drainShareInbox, type CaptureResult } from './capture';
 import { getRepo } from './db';
 import { runLegacyImport } from './legacyImport';
 import { requestSync, runDueJobs, wakeServerJobs } from './processing';
+import { refreshDailyDigest } from './reminders';
 import { checkConnection, getConnection } from './server';
 
 setRandomSource((bytes) => Crypto.getRandomValues(bytes));
@@ -31,6 +32,7 @@ export async function boot(): Promise<BootResult> {
       if (await repo.syncEnabled()) await requestSync();
     }
     await runDueJobs();
+    await refreshDailyDigest();
   })();
   return { onboarded, legacyImported: legacy?.posts ?? 0, shared };
 }
@@ -45,6 +47,7 @@ export async function onResume(): Promise<BootResult['shared']> {
       if (c && !c.lastError) await wakeServerJobs(await getRepo());
     }
     await runDueJobs();
+    await refreshDailyDigest();
   })();
   return shared;
 }

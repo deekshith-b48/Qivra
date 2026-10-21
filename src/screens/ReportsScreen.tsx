@@ -1,18 +1,15 @@
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { CompositeScreenProps } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { formatLocal } from '../core/dates';
 import type { ReportKind } from '../core/reports';
-import type { RootStackParamList, TabParamList } from '../navigation/types';
+import type { RootProps } from '../navigation/types';
 import { generateReport } from '../services/reports';
 import { Banner, Button, Card, Chip, EmptyState, Field, Header, Screen, Section, T, ToggleRow } from '../ui/components';
 import { useAction, useQuery } from '../ui/hooks';
 import { space } from '../ui/theme';
 import { useSettings, useAiInfo } from '../ui/useSettings';
 
-type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Reports'>, NativeStackScreenProps<RootStackParamList>>;
+type Props = RootProps<'Reports'>;
 
 const KINDS: [ReportKind, string, string][] = [
   ['daily', "Today's report", 'Everything you saved today'],
@@ -34,7 +31,7 @@ export default function ReportsScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <Header title="Reports" subtitle={`Dates use your timezone: ${settings?.timezone ?? '…'}`} />
+      <Header title="Reports" subtitle={`Dates use your timezone: ${settings?.timezone ?? '…'}`} onBack={() => navigation.goBack()} />
       <Card>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
           {KINDS.map(([k, l]) => <Chip key={k} label={l} selected={kind === k} onPress={() => setKind(k)} />)}

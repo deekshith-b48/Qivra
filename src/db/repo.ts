@@ -805,6 +805,27 @@ export class Repo {
     return Number(r?.n ?? 0);
   }
 
+  /** Home feed: what is ready to look at, what needs the user, what is in progress, and one item to resurface. */
+  async homeFeed(dayKey: string, limit = 10): Promise<{ ready: Item[]; needsYou: Item[]; processing: Item[]; resurface: Item | null }> {
+    const q = (where: string, order: string, params: SqlValue[] = []) =>
+      this.db.all<Row>(`SELECT * FROM items WHERE deleted = 0 AND archived = 0 AND ${where} ORDER BY ${order} LIMIT ?`, [...params, limit]).then((rows) => Promise.all(rows.map((r) => this.rowToItem(r))));
+    const ready = await q(`status = 'READY' AND last_viewed_at IS NULL`, 'updated_at DESC');
+    const needsYou = await q(`status IN ('NEEDS_INPUT','FAILED_RETRYABLE','FAILED_PERMANENT')`, 'updated_at DESC');
+    const processing = await q(`status IN ('CAPTURED','METADATA_CHECK','TRANSCRIBING','ENRICHING','INDEXING')`, 'captured_at DESC');
+    // Something saved (and last seen) at least 3 days ago; the pick changes once a day.
+    const cutoff = new Date(this.clock().getTime() - 3 * 86400_000).toISOString();
+    const old = `status = 'READY' AND captured_at < ? AND (last_viewed_at IS NULL OR last_viewed_at < ?)`;
+    const n = await this.countWhere(`archived = 0 AND ${old}`, [cutoff, cutoff]);
+    let resurface: Item | null = null;
+    if (n) {
+      let h = 0;
+      for (const ch of dayKey) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      const row = await this.db.get<Row>(`SELECT * FROM items WHERE deleted = 0 AND archived = 0 AND ${old} ORDER BY captured_at ASC LIMIT 1 OFFSET ?`, [cutoff, cutoff, h % n]);
+      resurface = row ? await this.rowToItem(row) : null;
+    }
+    return { ready, needsYou, processing, resurface };
+  }
+
   async recentlyViewed(limit = 5): Promise<Item[]> {
     const rows = await this.db.all<Row>('SELECT * FROM items WHERE deleted = 0 AND last_viewed_at IS NOT NULL ORDER BY last_viewed_at DESC LIMIT ?', [limit]);
     return Promise.all(rows.map((r) => this.rowToItem(r)));

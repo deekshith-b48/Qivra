@@ -8,7 +8,8 @@ import type { ActionProposal } from '../core/agent/agent';
 import { formatTimestamp } from '../core/transcripts';
 import type { Message } from '../db/types';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
-import { ask } from '../services/agentService';
+import { ITEM_SUGGESTIONS } from '../core/agent/itemQa';
+import { ask, askAboutItem } from '../services/agentService';
 import { getRepo } from '../services/db';
 import { generateReport } from '../services/reports';
 import { Banner, Button, Chip, IconButton, Loading, Sheet, T } from '../ui/components';
@@ -32,6 +33,15 @@ export default function AgentScreen({ navigation, route }: Props) {
   const { c } = useTheme();
   const ai = useAiInfo();
   const [convId, setConvId] = useState<string | null>(route.params?.conversationId ?? null);
+  const [scopeId, setScopeId] = useState<string | null>(route.params?.itemId ?? null);
+  // Opening "Ask this item" again (or for another item) starts a fresh scoped conversation.
+  useEffect(() => {
+    if (route.params?.itemId) {
+      setScopeId(route.params.itemId);
+      setConvId(null);
+    }
+  }, [route.params?.itemId]);
+  const scopeItem = useQuery(async (repo) => (scopeId ? repo.getItem(scopeId) : null), ['items'], [scopeId]);
   const [input, setInput] = useState(route.params?.prompt ?? '');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voice, setVoice] = useState(false);
@@ -53,7 +63,7 @@ export default function AgentScreen({ navigation, route }: Props) {
     const q = text.trim();
     if (!q) return;
     setInput('');
-    const r = await ask(convId, q);
+    const r = scopeId ? await askAboutItem(convId, scopeId, q) : await ask(convId, q);
     setConvId(r.conversationId);
   }, 'The assistant failed');
 
@@ -65,6 +75,11 @@ export default function AgentScreen({ navigation, route }: Props) {
     navigation.navigate('ReportDetail', { id: r.id });
   });
 
+  const makeReport = (kind: 'daily' | 'weekly') => run(async () => {
+    const r = await generateReport({ kind, useAi: ai?.enabled });
+    navigation.navigate('ReportDetail', { id: r.id });
+  }, 'Report failed');
+
   const aiLabel = ai?.enabled ? `Model: ${ai.model}` : 'No AI model — answers quote your saved items';
 
   return (
@@ -74,9 +89,16 @@ export default function AgentScreen({ navigation, route }: Props) {
           <T v="title" accessibilityRole="header">Ask your library</T>
           <T v="caption" color="textMuted">{aiLabel}</T>
         </View>
+        <IconButton icon="document-text-outline" label="Reports" onPress={() => navigation.navigate('Reports')} />
         <IconButton icon="time-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} />
-        <IconButton icon="create-outline" label="New conversation" onPress={() => setConvId(null)} />
+        <IconButton icon="create-outline" label="New conversation" onPress={() => { setConvId(null); setScopeId(null); }} />
       </View>
+      {scopeId ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: space.lg, marginTop: space.sm, padding: space.sm, paddingLeft: space.md, borderRadius: radius.lg, backgroundColor: c.accentSoft }}>
+          <T v="small" style={{ flex: 1 }} numberOfLines={2} accessibilityLiveRegion="polite">Asking about: <T v="small" style={{ fontWeight: '700' }}>{scopeItem.data?.title || scopeItem.data?.url || 'this item'}</T></T>
+          <IconButton icon="close" label="Ask the whole library instead" onPress={() => { setScopeId(null); setConvId(null); }} />
+        </View>
+      ) : null}
       <KeyboardAvoidingView behavior="height" style={{ flex: 1 }}>
         <FlatList
           ref={listRef}
@@ -87,7 +109,17 @@ export default function AgentScreen({ navigation, route }: Props) {
             <View>
               <T color="textMuted" style={{ marginBottom: space.md }}>Answers are grounded in what you saved, with citations. Qivra tells you when your library has no evidence.</T>
               {!ai?.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra assembles answers from matching items and transcript passages. Add a local Ollama or your own key in Settings → AI models for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
-              {SUGGESTIONS.map((s) => <Chip key={s} label={s} onPress={() => void send(s)} />)}
+              {(scopeId ? ITEM_SUGGESTIONS : SUGGESTIONS).map((s) => <Chip key={s} label={s} onPress={() => void send(s)} />)}
+              {!scopeId ? (
+                <View style={{ marginTop: space.md }}>
+                  <T v="caption" color="textMuted">Reports</T>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.xs }}>
+                    <Chip icon="today-outline" label="Today's report" onPress={() => void makeReport('daily')} />
+                    <Chip icon="calendar-outline" label="This week's report" onPress={() => void makeReport('weekly')} />
+                    <Chip icon="folder-open-outline" label="All reports" onPress={() => navigation.navigate('Reports')} />
+                  </View>
+                </View>
+              ) : null}
             </View>
           }
           renderItem={({ item: m }) => (
@@ -100,7 +132,7 @@ export default function AgentScreen({ navigation, route }: Props) {
                   <T v="caption" color="textFaint">{m.mode === 'model' ? `AI answer · ${m.provider}` : m.mode === 'retrieval_only' ? 'Assembled from your items (no AI model)' : 'No evidence found'}</T>
                   {m.warnings.map((w, i) => <T key={i} v="caption" color="warning">⚠ {w}</T>)}
                   {m.citations.map((ci) => (
-                    <Pressable key={ci.sid} onPress={() => navigation.navigate('ItemDetail', { id: ci.itemId })} accessibilityRole="link" accessibilityLabel={`Source ${ci.sid}: ${titles.data?.[ci.itemId] ?? ''}`} style={{ paddingVertical: 6, borderTopWidth: 1, borderColor: c.border }}>
+                    <Pressable key={ci.sid} onPress={() => navigation.navigate('ItemDetail', { id: ci.itemId, at: ci.startMs ?? undefined })} accessibilityRole="link" accessibilityLabel={`Source ${ci.sid}: ${titles.data?.[ci.itemId] ?? ''}`} style={{ paddingVertical: 6, borderTopWidth: 1, borderColor: c.border }}>
                       <T v="small"><T v="small" color="accent">[{ci.sid}]</T> {titles.data?.[ci.itemId] ?? 'Saved item'}{ci.startMs !== null ? ` @ ${formatTimestamp(ci.startMs)}` : ''}</T>
                       {ci.quote ? <T v="caption" color="textMuted" numberOfLines={2}>{ci.quote}</T> : null}
                     </Pressable>
@@ -118,7 +150,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="Ask about what you saved…"
+            placeholder={scopeId ? 'Ask about this item…' : 'Ask about what you saved…'}
             placeholderTextColor={c.textFaint}
             accessibilityLabel="Message"
             multiline

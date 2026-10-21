@@ -7,6 +7,7 @@
  */
 
 import * as BackgroundTask from 'expo-background-task';
+import { refreshDailyDigest } from './reminders';
 import * as TaskManager from 'expo-task-manager';
 import { drainShareInbox } from './capture';
 import { getRepo } from './db';
@@ -23,6 +24,7 @@ export function defineBackgroundTask(): void {
       await drainShareInbox();
       if (await repo.syncEnabled()) await requestSync();
       await runDueJobs(20_000);
+      await refreshDailyDigest();
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch {
       return BackgroundTask.BackgroundTaskResult.Failed;
