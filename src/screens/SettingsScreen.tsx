@@ -26,6 +26,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
         <Row icon="git-compare-outline" title="Sync conflicts" subtitle={counts.data?.conflicts ? `${counts.data.conflicts} to review` : 'None'} onPress={() => navigation.navigate('Conflicts')} />
       </Section>
       <Section title="AI & processing">
+        <Row icon="mic-outline" title="Voice & dictation" subtitle={`On-device ${s.voice.modelId.startsWith('parakeet') ? 'Parakeet' : 'Whisper'} · ${s.voice.language === 'auto' ? 'auto language' : s.voice.language}${s.voice.preferServer ? ' · notes via server' : ''}`} onPress={() => navigation.navigate('VoiceSettings')} />
         <Row icon="sparkles-outline" title="AI models" subtitle={s.ai.enabled ? `${s.ai.model} · ${s.ai.baseUrl}` : 'None — Qivra works without AI'} onPress={() => navigation.navigate('AiProviders')} />
         <ToggleRow title="Auto-transcribe shared videos" subtitle="YouTube captions are fetched on this phone. Instagram and X videos (and YouTube videos without captions) are transcribed by your paired server with local Whisper." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
         <Row icon="list-outline" title="Processing queue" subtitle={j ? `${j.queued + j.running} pending · ${j.failed_retryable + j.failed_permanent} failed` : undefined} onPress={() => navigation.navigate('Jobs')} />

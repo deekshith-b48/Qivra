@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from . import API_VERSION, PRODUCT, SERVER_VERSION, ai
+from . import API_VERSION, PRODUCT, SERVER_VERSION, ai, transcribers
 from .jobs import JOB_KINDS
 from .knowledge import agent_answer, build_report, terms_of
 from .pairing import PairingError
@@ -124,6 +124,7 @@ def pairing_status(request: Request, device: Device = Depends(require_device)) -
         "server": {"id": svc.store.server_id, "version": SERVER_VERSION, "lan_enabled": svc.config.lan_enabled},
         "server_time": now_iso(),
         "ai": ai.provider_status(),
+        "transcription": transcribers.describe(),
     }
 
 

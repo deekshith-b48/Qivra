@@ -8,9 +8,10 @@ import { captureRequest, importTranscriptText, pickMediaFile, pickTranscriptFile
 import { getRepo } from '../services/db';
 import { Banner, Button, Chip, Field, Header, Screen, T } from '../ui/components';
 import { useAction } from '../ui/hooks';
+import { VoiceSheet } from '../ui/VoiceSheet';
 import { space } from '../ui/theme';
 
-type Mode = 'link' | 'note' | 'transcript' | 'media';
+type Mode = 'link' | 'note' | 'voice' | 'transcript' | 'media';
 
 export default function CaptureScreen({ navigation, route }: RootProps<'Capture'>) {
   const [mode, setMode] = useState<Mode>(route.params?.mode ?? 'link');
@@ -20,6 +21,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CaptureResult[] | null>(null);
   const { busy, run } = useAction();
+  const [voice, setVoice] = useState(false);
 
   const done = (res: CaptureResult[]) => {
     if (res.length === 1 && res[0].itemId && !res[0].error) navigation.replace('ItemDetail', { id: res[0].itemId });
@@ -70,7 +72,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
     <Screen>
       <Header title="Save to Qivra" onBack={() => navigation.goBack()} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: space.md }}>
-        {([['link', 'Link'], ['note', 'Note'], ['transcript', 'Transcript'], ['media', 'Audio/video']] as [Mode, string][]).map(([m, l]) => (
+        {([['link', 'Link'], ['note', 'Note'], ['voice', 'Voice'], ['transcript', 'Transcript'], ['media', 'Audio/video']] as [Mode, string][]).map(([m, l]) => (
           <Chip key={m} label={l} selected={mode === m} onPress={() => { setMode(m); setError(null); }} />
         ))}
       </View>
@@ -81,6 +83,13 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
               action={r.itemId ? <Button kind="outline" title="Open" onPress={() => navigation.navigate('ItemDetail', { id: r.itemId! })} /> : undefined} />
           ))}
           <Button title="Done" onPress={() => navigation.goBack()} />
+        </>
+      ) : mode === 'voice' ? (
+        <>
+          <T color="textMuted">Speak a note. It is transcribed privately on this phone (or by your own server if you chose that), then summarised and highlighted like any other item.</T>
+          <Button title="Start voice note" icon="mic" onPress={() => setVoice(true)} style={{ marginTop: space.md }} />
+          <Button kind="text" title="Voice & dictation settings" onPress={() => navigation.navigate('VoiceSettings')} />
+          <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="note" onSaved={(id) => navigation.replace('ItemDetail', { id })} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
         </>
       ) : mode === 'media' ? (
         <>

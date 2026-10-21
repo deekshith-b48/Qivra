@@ -26,7 +26,19 @@ export interface Settings {
   serverProcessing: boolean;
   /** Automatically transcribe shared Instagram/X/YouTube videos on the paired server. */
   autoTranscribe: boolean;
+  voice: VoiceSettings;
 }
+
+export interface VoiceSettings {
+  /** On-device speech model (see src/core/voiceModels.ts). */
+  modelId: string;
+  /** 'auto' or a language code. */
+  language: string;
+  /** Send recordings to the paired server instead of transcribing on the phone. */
+  preferServer: boolean;
+}
+
+export const DEFAULT_VOICE: VoiceSettings = { modelId: 'whisper-base', language: 'auto', preferServer: false };
 
 export const DEFAULT_AI: AiSettings = { enabled: false, baseUrl: '', model: '', embeddingModel: '', externalConsent: false, autoEnrich: false };
 
@@ -58,13 +70,14 @@ export async function getSettings(): Promise<Settings> {
     scheduledDailyReport: s.scheduledDailyReport ?? false,
     serverProcessing: s.serverProcessing ?? false,
     autoTranscribe: s.autoTranscribe ?? true,
+    voice: { ...DEFAULT_VOICE, ...(s.voice ?? {}) },
   };
 }
 
 export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
   const repo = await getRepo();
   const current = await getSettings();
-  const next = { ...current, ...patch, ai: { ...current.ai, ...(patch.ai ?? {}) } };
+  const next = { ...current, ...patch, ai: { ...current.ai, ...(patch.ai ?? {}) }, voice: { ...current.voice, ...(patch.voice ?? {}) } };
   await repo.setJson('settings', next);
   emit('settings');
   return next;

@@ -16,7 +16,6 @@ import os
 import re
 import shutil
 import tempfile
-import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -29,10 +28,7 @@ ALLOWED_HOSTS = {
 }
 MAX_SECONDS = int(os.getenv("QIVRA_MAX_MEDIA_SECONDS", "3600"))
 MAX_BYTES = int(os.getenv("QIVRA_MAX_MEDIA_BYTES", str(300 * 1024 * 1024)))
-WHISPER_MODEL = os.getenv("QIVRA_WHISPER_MODEL", "base")
 
-_model = None
-_model_lock = threading.Lock()
 
 
 class MediaError(Exception):
@@ -135,35 +131,14 @@ def download_audio(url: str, workdir: Path) -> tuple[Path, dict]:
     return files[0], meta
 
 
-def _whisper():
-    global _model
-    with _model_lock:
-        if _model is None:
-            from faster_whisper import WhisperModel
-            _model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        return _model
-
-
 def transcribe_file(path: Path) -> tuple[list[dict], str, str]:
-    """Return (segments, language, provider). Segments carry real start/end ms."""
+    """Delegate to the configured engine (transcribe-anything / faster-whisper / SuperBrain)."""
+    from .transcribers import TranscriberError
+    from .transcribers import transcribe_file as run
     try:
-        import faster_whisper  # noqa: F401
-    except ImportError:
-        from .jobs import JobFailure, transcribe_media
-        try:
-            text, lang, provider = transcribe_media(str(path))
-        except JobFailure as exc:
-            raise MediaError(exc.code, exc.message) from exc
-        return [{"start_ms": None, "end_ms": None, "text": text}], lang, provider
-    try:
-        segments, info = _whisper().transcribe(str(path), vad_filter=True, beam_size=1)
-        segs = [{"start_ms": int(s.start * 1000), "end_ms": int(s.end * 1000), "text": s.text.strip()}
-                for s in segments if s.text and s.text.strip()]
-    except IndexError as exc:  # container without an audio stream
-        raise MediaError("NO_AUDIO", "This video has no audio track.") from exc
-    except Exception as exc:
-        raise MediaError("TRANSCRIPTION_FAILED", f"Transcription failed ({type(exc).__name__}).", True) from exc
-    return segs, info.language or "und", f"faster-whisper-{WHISPER_MODEL}"
+        return run(path)
+    except TranscriberError as exc:
+        raise MediaError(exc.code, exc.message, exc.retryable) from exc
 
 
 def transcribe_url(url: str, data_dir: Path) -> dict:

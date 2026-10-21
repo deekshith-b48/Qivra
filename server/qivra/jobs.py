@@ -131,10 +131,19 @@ class JobRunner:
         media = self.store.latest_media(item["id"])
         if media is None:
             raise JobFailure("NO_MEDIA", "Upload an audio or video file for this item first.", False)
-        text, language, provider = transcribe_media(media["path"])
-        tr = self.store.upsert_transcript(item["id"], text=text, segments=[], language=language or "und",
-                                          kind="original", source="server_whisper", provider=provider)
-        return {"transcript_id": tr["id"], "chars": len(text), "language": language, "provider": provider}
+        from pathlib import Path
+
+        from .transcribers import TranscriberError, transcribe_file
+        try:
+            segs, language, provider = transcribe_file(Path(media["path"]))
+        except TranscriberError as exc:
+            raise JobFailure(exc.code, exc.message, exc.retryable) from exc
+        if not segs:
+            raise JobFailure("NO_SPEECH", "No speech was detected in this recording.", False)
+        tr = self.store.upsert_transcript(item["id"], text=segments_to_text(segs), segments=segs,
+                                          language=language or "und", kind="original", source="server_whisper",
+                                          provider=provider)
+        return {"transcript_id": tr["id"], "segments": len(segs), "language": language, "provider": provider}
 
     def _job_transcribe_url(self, item: dict) -> dict:
         from .config import get_config

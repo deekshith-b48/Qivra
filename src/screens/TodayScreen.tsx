@@ -13,6 +13,7 @@ import { generateReport } from '../services/reports';
 import { Banner, Button, Card, Chip, EmptyState, Fab, IconButton, Loading, Section, T, Wordmark } from '../ui/components';
 import { useAction, useQuery } from '../ui/hooks';
 import { ItemCard } from '../ui/ItemCard';
+import { VoiceSheet } from '../ui/VoiceSheet';
 import { PlatformBadge } from '../ui/media';
 import { space, useTheme } from '../ui/theme';
 import { useConnection, useSettings } from '../ui/useSettings';
@@ -34,6 +35,7 @@ export default function TodayScreen({ navigation }: Props) {
   const tz = settings?.timezone ?? 'UTC';
   const { connection } = useConnection();
   const { busy, run } = useAction();
+  const [voice, setVoice] = React.useState(false);
   const q = useQuery(
     async (repo) => {
       const r = rangeFor('today', Date.now(), tz);
@@ -161,7 +163,11 @@ export default function TodayScreen({ navigation }: Props) {
           </>
         ) : null}
       </ScrollView>
+      <View style={{ position: 'absolute', right: space.lg + 4, bottom: 84, backgroundColor: c.surface, borderRadius: 28, borderWidth: 1, borderColor: c.border, elevation: 3 }}>
+        <IconButton icon="mic" label="Record a voice note" onPress={() => setVoice(true)} size={26} />
+      </View>
       <Fab label="Save" icon="add" onPress={() => navigation.navigate('Capture')} />
+      <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="note" onSaved={(id) => navigation.navigate('ItemDetail', { id })} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
     </SafeAreaView>
   );
 }

@@ -11,6 +11,7 @@ import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { getRepo } from '../services/db';
 import { Chip, EmptyState, IconButton, Loading, T } from '../ui/components';
 import { useQuery } from '../ui/hooks';
+import { VoiceSheet } from '../ui/VoiceSheet';
 import { radius, space, type, useTheme } from '../ui/theme';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Search'>, NativeStackScreenProps<RootStackParamList>>;
@@ -23,6 +24,7 @@ export default function SearchScreen({ navigation }: Props) {
   const [scope, setScope] = useState<'all' | 'transcripts' | 'notes'>('all');
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [voice, setVoice] = useState(false);
   const tags = useQuery(async (repo) => (await repo.allTags()).slice(0, 12), ['items']);
 
   useEffect(() => {
@@ -67,7 +69,7 @@ export default function SearchScreen({ navigation }: Props) {
         <T v="title" accessibilityRole="header">Search</T>
         <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: radius.pill, borderWidth: 1, borderColor: c.border, paddingLeft: space.md, marginTop: space.sm }}>
           <TextInput value={q} onChangeText={setQ} placeholder="Titles, notes, transcripts, commands…" placeholderTextColor={c.textFaint} accessibilityLabel="Search your knowledge" style={[type.body, { flex: 1, color: c.text, minHeight: 48 }]} autoFocus returnKeyType="search" />
-          {q ? <IconButton icon="close-circle" label="Clear" onPress={() => setQ('')} color={c.textMuted} /> : null}
+          {q ? <IconButton icon="close-circle" label="Clear" onPress={() => setQ('')} color={c.textMuted} /> : <IconButton icon="mic-outline" label="Search by voice" onPress={() => setVoice(true)} />}
         </View>
         <View style={{ flexDirection: 'row', marginTop: space.sm }}>
           {(['all', 'transcripts', 'notes'] as const).map((s) => <Chip key={s} label={s === 'all' ? 'Everything' : s === 'transcripts' ? 'Transcripts' : 'Notes & summaries'} selected={scope === s} onPress={() => setScope(s)} />)}
@@ -105,6 +107,7 @@ export default function SearchScreen({ navigation }: Props) {
           ) : loading ? null : <EmptyState icon="search-outline" title="No results" body="Nothing in your library matches. Try fewer or different words." />
         }
       />
+      <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={(t) => setQ(t.replace(/[.?!]+$/, ''))} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
     </SafeAreaView>
   );
 }

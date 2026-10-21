@@ -14,7 +14,7 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Main: NavigatorScreenParams<TabParamList> | undefined;
   ItemDetail: { id: string };
-  Capture: { mode?: 'link' | 'note' | 'transcript' | 'media' } | undefined;
+  Capture: { mode?: 'link' | 'note' | 'voice' | 'transcript' | 'media' } | undefined;
   TranscriptImport: { itemId: string; kind?: 'original' | 'translation' };
   ShareReceipt: { results: CaptureResult[]; rejected: { name: string; reason: string }[] };
   Collections: undefined;
@@ -23,6 +23,7 @@ export type RootStackParamList = {
   ConnectServer: { scanned?: string } | undefined;
   QrScan: undefined;
   AiProviders: undefined;
+  VoiceSettings: undefined;
   PrivacyStorage: undefined;
   Jobs: undefined;
   Conflicts: undefined;

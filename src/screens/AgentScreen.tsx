@@ -16,6 +16,7 @@ import { confirm, useAction, useQuery } from '../ui/hooks';
 import { radius, space, type, useTheme } from '../ui/theme';
 import { useSettings } from '../ui/useSettings';
 import { Markdown } from '../ui/Markdown';
+import { VoiceSheet } from '../ui/VoiceSheet';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Agent'>, NativeStackScreenProps<RootStackParamList>>;
 
@@ -33,6 +34,7 @@ export default function AgentScreen({ navigation, route }: Props) {
   const [convId, setConvId] = useState<string | null>(route.params?.conversationId ?? null);
   const [input, setInput] = useState(route.params?.prompt ?? '');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [voice, setVoice] = useState(false);
   const { busy, run } = useAction();
   const listRef = useRef<FlatList<Message>>(null);
 
@@ -122,9 +124,11 @@ export default function AgentScreen({ navigation, route }: Props) {
             multiline
             style={[type.body, { flex: 1, color: c.text, backgroundColor: c.surface, borderRadius: radius.lg, paddingHorizontal: space.md, paddingVertical: 10, maxHeight: 140, minHeight: 48 }]}
           />
+          {input.trim() ? null : <IconButton icon="mic-outline" size={28} label="Ask by voice" onPress={() => setVoice(true)} />}
           <IconButton icon="arrow-up-circle" size={34} label="Send" onPress={() => void send(input)} color={input.trim() ? c.text : c.textFaint} />
         </View>
       </KeyboardAvoidingView>
+      <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={(t) => void send(t)} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
       <Sheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Conversations">
         {(convs.data ?? []).map((cv) => (
           <View key={cv.id} style={{ flexDirection: 'row', alignItems: 'center' }}>

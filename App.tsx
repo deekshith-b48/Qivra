@@ -12,6 +12,7 @@ import type { RootStackParamList, TabParamList } from './src/navigation/types';
 import AboutScreen from './src/screens/AboutScreen';
 import AgentScreen from './src/screens/AgentScreen';
 import AiProvidersScreen from './src/screens/AiProvidersScreen';
+import VoiceSettingsScreen from './src/screens/VoiceSettingsScreen';
 import CaptureScreen from './src/screens/CaptureScreen';
 import CollectionsScreen from './src/screens/CollectionsScreen';
 import ConflictsScreen from './src/screens/ConflictsScreen';
@@ -129,6 +130,7 @@ function Root() {
         <Stack.Screen name="ConnectServer" component={ConnectServerScreen} />
         <Stack.Screen name="QrScan" component={QrScanScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="AiProviders" component={AiProvidersScreen} />
+        <Stack.Screen name="VoiceSettings" component={VoiceSettingsScreen} />
         <Stack.Screen name="PrivacyStorage" component={PrivacyStorageScreen} />
         <Stack.Screen name="Jobs" component={JobsScreen} />
         <Stack.Screen name="Conflicts" component={ConflictsScreen} />

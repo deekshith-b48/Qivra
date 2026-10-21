@@ -35,10 +35,10 @@
         "android.permission.CAMERA",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECORD_AUDIO"
       ],
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW",
@@ -78,7 +78,7 @@
         "expo-camera",
         {
           "cameraPermission": "Qivra uses the camera only to scan the pairing QR code shown by your own server.",
-          "recordAudioAndroid": false
+          "recordAudioAndroid": true
         }
       ],
       [
