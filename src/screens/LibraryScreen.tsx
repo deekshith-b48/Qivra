@@ -1,1101 +1,268 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  StatusBar,
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
-  InteractionManager,
-  Keyboard,
-  Dimensions,
-} from 'react-native';
-import * as Haptics from 'expo-haptics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
-import { RootStackParamList } from '../../App';
-import { colors } from '../theme/colors';
-import { Collection, FailedPost } from '../types';
-import { ICON_OPTIONS } from '../constants/icons';
-import { collectionsService } from '../services/collections';
-import postsCache from '../services/postsCache';
-import { rescheduleWatchLaterNotification } from '../services/notificationService';
-import CustomToast from '../components/CustomToast';
-import BottomNav from '../components/BottomNav';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { CompositeScreenProps } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { rangeFor } from '../core/dates';
+import { languageName } from '../core/language';
+import type { LibraryFilter, SortKey } from '../core/search';
+import { ALL_STATUSES, STATUS_LABELS, type ItemStatus } from '../core/status';
+import { SOURCE_LABELS, type SourceType } from '../core/url';
+import type { Item } from '../db/types';
+import type { RootStackParamList, TabParamList } from '../navigation/types';
+import { deleteItemFiles } from '../services/capture';
+import { getRepo } from '../services/db';
+import { emit, subscribe } from '../services/events';
+import { generateReport } from '../services/reports';
+import { updateSettings } from '../services/settings';
+import { Banner, Button, Chip, EmptyState, Fab, IconButton, Loading, Sheet, T } from '../ui/components';
+import { confirm, useAction, useQuery } from '../ui/hooks';
+import { ItemCard } from '../ui/ItemCard';
+import { radius, space, type, useTheme } from '../ui/theme';
+import { useSettings } from '../ui/useSettings';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Library'>, NativeStackScreenProps<RootStackParamList>>;
+const PAGE = 30;
+const SORTS: [SortKey, string][] = [['newest', 'Newest'], ['oldest', 'Oldest'], ['updated', 'Recently updated'], ['title', 'Title A–Z']];
+const DATES: [string, string][] = [['any', 'Any time'], ['today', 'Today'], ['week', 'Last 7 days'], ['last30', 'Last 30 days']];
 
-const { width: screenWidth } = Dimensions.get('window');
-
-const LOCAL_ICON_COLORS: Record<string, string> = {
-  'folder': colors.primary || '#6366f1',
-  'airplane': '#0ea5e9',
-  'restaurant': '#ef4444',
-  'shirt': '#ec4899',
-  'fitness': '#10b981',
-  'book': '#b45309',
-  'film': '#8b5cf6',
-  'camera': '#06b6d4',
-  'star': '#eab308',
-  'heart': '#f43f5e',
-  'flame': '#f97316',
-  'pin': '#3b82f6',
-  'time': '#64748b',
-  'clock': '#64748b',
-};
-
-const LibraryScreen = () => {
-  const navigation = useNavigation<NavigationProp>();
-  const createInputRef = useRef<TextInput>(null);
-  const editInputRef = useRef<TextInput>(null);
-  const [collections, setCollections] = useState<Collection[]>([]);
+export default function LibraryScreen({ navigation, route }: Props) {
+  const { c } = useTheme();
+  const settings = useSettings();
+  const tz = settings?.timezone ?? 'UTC';
+  const grid = settings?.libraryView === 'grid';
+  const [text, setText] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [sort, setSort] = useState<SortKey>('newest');
+  const [sources, setSources] = useState<SourceType[]>([]);
+  const [statuses, setStatuses] = useState<ItemStatus[]>([]);
+  const [languages, setLanguages] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [date, setDate] = useState('any');
+  const [collectionId, setCollectionId] = useState<string | undefined>(route.params?.collectionId);
+  const [archived, setArchived] = useState(false);
+  const [items, setItems] = useState<Item[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newCollectionName, setNewCollectionName] = useState('');
-  const [selectedIcon, setSelectedIcon] = useState('folder');
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [collectionToDelete, setCollectionToDelete] = useState<Collection | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [collectionToEdit, setCollectionToEdit] = useState<Collection | null>(null);
-  const [editCollectionName, setEditCollectionName] = useState('');
-  const [editSelectedIcon, setEditSelectedIcon] = useState('folder');
-  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedCollections, setSelectedCollections] = useState<Set<string>>(new Set());
-  const [showLibraryTips, setShowLibraryTips] = useState(false);
-  const [failedPosts, setFailedPosts] = useState<FailedPost[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [end, setEnd] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const { busy, run } = useAction();
 
   useEffect(() => {
-    loadCollections();
-    checkLibraryTips();
-    
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadCollections();
-    });
-    
-    return unsubscribe;
-  }, [navigation]);
+    const t = setTimeout(() => setDebounced(text), 250);
+    return () => clearTimeout(t);
+  }, [text]);
+  useEffect(() => setCollectionId(route.params?.collectionId), [route.params?.collectionId]);
 
-  const checkLibraryTips = async () => {
-    const seen = await AsyncStorage.getItem('@superbrain_library_tips_seen');
-    if (seen) return;
-    const existingPosts = await AsyncStorage.getItem('@superbrain_posts_cache');
-    const existingCollections = await AsyncStorage.getItem('@superbrain_collections');
-    if (existingPosts || existingCollections) {
-      await AsyncStorage.setItem('@superbrain_library_tips_seen', '1');
-      return;
+  const filter: LibraryFilter = useMemo(() => {
+    const f: LibraryFilter = { text: debounced, sourceTypes: sources, statuses, languages, tags, collectionId, archived };
+    if (date !== 'any') {
+      const r = rangeFor(date as 'today' | 'week' | 'last30', Date.now(), tz);
+      f.fromIso = r.startIso;
+      f.toIso = r.endIso;
     }
-    setShowLibraryTips(true);
-  };
+    return f;
+  }, [debounced, sources, statuses, languages, tags, collectionId, archived, date, tz]);
 
-  const dismissLibraryTips = async () => {
-    await AsyncStorage.setItem('@superbrain_library_tips_seen', '1');
-    setShowLibraryTips(false);
-  };
-
-  useEffect(() => {
-    if (showCreateModal) {
-      const focusInput = () => {
-        setTimeout(() => {
-          createInputRef.current?.focus();
-          setTimeout(() => {
-            createInputRef.current?.focus();
-          }, 200);
-        }, 500);
-      };
-      focusInput();
-    }
-  }, [showCreateModal]);
-
-  useEffect(() => {
-    if (showEditModal) {
-      const focusInput = () => {
-        setTimeout(() => {
-          editInputRef.current?.focus();
-          setTimeout(() => {
-            editInputRef.current?.focus();
-          }, 200);
-        }, 500);
-      };
-      focusInput();
-    }
-  }, [showEditModal]);
-
-  const loadCollections = async () => {
+  const load = useCallback(async (reset: boolean) => {
     try {
       setLoading(true);
-      const data = await collectionsService.getCollections();
-      setCollections(data);
-      const watchLater = data.find(c => c.id === 'default_watch_later');
-      if (watchLater && watchLater.postIds.length > 0) {
-        rescheduleWatchLaterNotification().catch(() => {});
-      }
-      const failed = await postsCache.getFailedPosts();
-      setFailedPosts(failed);
-    } catch (error) {
-      console.error('Error loading collections:', error);
+      const repo = await getRepo();
+      const offset = reset ? 0 : items.length;
+      const page = await repo.listItems(filter, sort, PAGE, offset);
+      setItems((prev) => (reset ? page : [...prev, ...page.filter((p) => !prev.some((x) => x.id === p.id))]));
+      setEnd(page.length < PAGE);
+      if (reset) setTotal(await repo.countItems(filter));
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
+  }, [filter, sort, items.length]);
+
+  useEffect(() => {
+    void load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, sort]);
+  useEffect(() => subscribe((t) => {
+    if (t === 'items' || t === 'collections') void load(true);
+  }), [load]);
+
+  const facets = useQuery(async (repo) => ({
+    tags: (await repo.allTags()).slice(0, 30),
+    languages: (await repo.db.all<{ language: string }>(`SELECT DISTINCT language FROM items WHERE deleted = 0 AND language != 'und'`)).map((r) => r.language),
+    collections: await repo.listCollections(),
+  }), ['items', 'collections']);
+
+  const toggle = <T,>(list: T[], v: T, set: (x: T[]) => void) => set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  const activeFilters = sources.length + statuses.length + languages.length + tags.length + (date !== 'any' ? 1 : 0) + (collectionId ? 1 : 0);
+  const selecting = selected.size > 0;
+  const ids = [...selected];
+
+  const bulk = {
+    archive: () => run(async () => {
+      const repo = await getRepo();
+      await repo.setArchived(ids, !archived);
+      setSelected(new Set());
+      emit('items');
+    }),
+    delete: () => run(async () => {
+      if (!(await confirm(`Delete ${ids.length} item(s)?`, 'Transcripts, notes and attached media on this phone are deleted. Synced items are deleted on your server at the next sync.', 'Delete', true))) return;
+      const repo = await getRepo();
+      await deleteItemFiles(ids);
+      await repo.deleteItems(ids);
+      setSelected(new Set());
+      emit('items');
+    }),
+    collect: (colId: string) => run(async () => {
+      const repo = await getRepo();
+      await repo.addToCollection(colId, ids);
+      setSelected(new Set());
+      setCollectOpen(false);
+      emit('items', 'collections');
+    }),
   };
 
-  const handleCreateCollection = async () => {
-    if (!newCollectionName.trim()) {
-      setToast({ visible: true, message: 'Please enter a collection name', type: 'warning' });
-      return;
-    }
-
-    const trimmedName = newCollectionName.trim().toLowerCase();
-    const duplicate = collections.find(
-      c => c.name.trim().toLowerCase() === trimmedName && c.icon === selectedIcon,
-    );
-    if (duplicate) {
-      setToast({ visible: true, message: 'A collection with this name and icon already exists', type: 'warning' });
-      return;
-    }
-
-    try {
-      await collectionsService.createCollection(newCollectionName.trim(), selectedIcon);
-      setNewCollectionName('');
-      setSelectedIcon('folder');
-      setShowCreateModal(false);
-      loadCollections();
-      setToast({ visible: true, message: 'Collection created successfully', type: 'success' });
-    } catch (error) {
-      setToast({ visible: true, message: 'Failed to create collection', type: 'error' });
-    }
-  };
-
-  const handleEditCollection = (collection: Collection) => {
-    if (collection.id === 'default_watch_later') {
-      setToast({ visible: true, message: 'Watch Later is a default collection and cannot be edited', type: 'warning' });
-      return;
-    }
-    setCollectionToEdit(collection);
-    setEditCollectionName(collection.name);
-    setEditSelectedIcon(collection.icon);
-    setShowEditModal(true);
-  };
-
-  const handleUpdateCollection = async () => {
-    if (!editCollectionName.trim()) {
-      setToast({ visible: true, message: 'Please enter a collection name', type: 'warning' });
-      return;
-    }
-
-    if (collectionToEdit) {
-      try {
-        await collectionsService.updateCollection(collectionToEdit.id, {
-          name: editCollectionName.trim(),
-          icon: editSelectedIcon,
-        });
-        setShowEditModal(false);
-        setCollectionToEdit(null);
-        loadCollections();
-        setToast({ visible: true, message: 'Collection updated successfully', type: 'success' });
-      } catch (error) {
-        setToast({ visible: true, message: 'Failed to update collection', type: 'error' });
-      }
-    }
-  };
-
-  const handleDeleteCollection = (collection: Collection) => {
-    if (collection.id === 'default_watch_later') {
-      setToast({ visible: true, message: 'Watch Later is a default collection and cannot be deleted', type: 'warning' });
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setCollectionToDelete(collection);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDelete = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    
-    if (selectionMode && selectedCollections.size > 0) {
-      const deletableCollectionIds = Array.from(selectedCollections).filter(
-        (collectionId) => collectionId !== 'default_watch_later'
-      );
-
-      for (const collectionId of deletableCollectionIds) {
-        await collectionsService.deleteCollection(collectionId);
-      }
-      setShowDeleteModal(false);
-      setSelectionMode(false);
-      setSelectedCollections(new Set());
-      loadCollections();
-      setToast({ 
-        visible: true, 
-        message: `${deletableCollectionIds.length} collection(s) deleted`, 
-        type: 'success' 
-      });
-    } else if (collectionToDelete) {
-      await collectionsService.deleteCollection(collectionToDelete.id);
-      setShowDeleteModal(false);
-      setCollectionToDelete(null);
-      loadCollections();
-      setToast({ visible: true, message: 'Collection deleted', type: 'success' });
-    }
-  };
-
-  const filteredCollections = collections.filter(col =>
-    searchQuery === '' || col.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const deletableSelectedCount = Array.from(selectedCollections).filter(
-    (collectionId) => collectionId !== 'default_watch_later'
-  ).length;
-
-  const getCollectionIconName = (collection: Collection) => {
-    if (collection.id === 'default_watch_later') return 'time';
-    if (collection.icon === 'clock') return 'time';
-    return collection.icon in LOCAL_ICON_COLORS ? collection.icon : 'folder';
-  };
+  const collectionName = facets.data?.collections.find((x) => x.id === collectionId)?.name;
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Library</Text>
-        <Text style={styles.headerSubtitle}>
-          {collections.length} collections
-        </Text>
-        {selectionMode && (
-          <View style={styles.selectionButtonsContainer}>
-            <TouchableOpacity 
-              style={styles.cancelButton}
-              onPress={() => {
-                setSelectionMode(false);
-                setSelectedCollections(new Set());
-              }}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.deleteButton, deletableSelectedCount === 0 && styles.deleteButtonDisabled]}
-              onPress={() => deletableSelectedCount > 0 && setShowDeleteModal(true)}
-              disabled={deletableSelectedCount === 0}
-            >
-              <Text style={styles.deleteButtonText}>Delete</Text>
-            </TouchableOpacity>
-          </View>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.lg, paddingTop: space.sm, minHeight: 56 }}>
+        {selecting ? (
+          <>
+            <IconButton icon="close" label="Clear selection" onPress={() => setSelected(new Set())} />
+            <T v="title" style={{ flex: 1 }}>{selected.size} selected</T>
+            <IconButton icon="document-text-outline" label="Report on selected items" onPress={() => void run(async () => {
+              const r = await generateReport({ kind: 'selection', itemIds: ids, useAi: settings?.ai.enabled });
+              setSelected(new Set());
+              navigation.navigate('ReportDetail', { id: r.id });
+            }, 'Report failed')} />
+            <IconButton icon="folder-outline" label="Add to collection" onPress={() => setCollectOpen(true)} />
+            <IconButton icon={archived ? 'arrow-undo-outline' : 'archive-outline'} label={archived ? 'Restore' : 'Archive'} onPress={() => void bulk.archive()} />
+            <IconButton icon="trash-outline" label="Delete" color={c.danger} onPress={() => void bulk.delete()} />
+          </>
+        ) : (
+          <>
+            <T v="title" style={{ flex: 1 }} accessibilityRole="header">{archived ? 'Archive' : collectionName ?? 'Library'}</T>
+            <IconButton icon={grid ? 'list-outline' : 'grid-outline'} label={grid ? 'List view' : 'Grid view'} onPress={() => void updateSettings({ libraryView: grid ? 'list' : 'grid' })} />
+            <IconButton icon={archived ? 'albums-outline' : 'archive-outline'} label={archived ? 'Show library' : 'Show archive'} onPress={() => setArchived(!archived)} />
+            <IconButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
+          </>
         )}
       </View>
-
-      <View style={styles.searchContainer}>
-        <View style={styles.searchIconContainer}>
-          <Ionicons name="search" size={20} color={colors.textMuted} />
+      <View style={{ paddingHorizontal: space.lg }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: radius.pill, borderWidth: 1, borderColor: c.border, paddingLeft: space.md }}>
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            placeholder="Filter your library"
+            placeholderTextColor={c.textFaint}
+            accessibilityLabel="Filter your library"
+            style={[type.body, { flex: 1, color: c.text, minHeight: 48 }]}
+            returnKeyType="search"
+          />
+          {text ? <IconButton icon="close-circle" label="Clear text" onPress={() => setText('')} color={c.textMuted} /> : null}
+          <IconButton icon="options-outline" label={`Filters${activeFilters ? `, ${activeFilters} active` : ''}`} onPress={() => setFiltersOpen(true)} />
         </View>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search collections..."
-          placeholderTextColor={colors.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery !== '' && (
-          <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm, flexWrap: 'wrap' }}>
+          <T v="caption" color="textMuted" style={{ marginRight: space.sm }}>{total} item{total === 1 ? '' : 's'}</T>
+          {collectionName ? <Chip label={collectionName} selected onPress={() => setCollectionId(undefined)} /> : null}
+          {activeFilters ? <Chip label={`${activeFilters} filter(s)`} tone="accent" onPress={() => setFiltersOpen(true)} /> : null}
+        </View>
       </View>
-
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading collections...</Text>
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.collectionsContainer}
-          contentContainerStyle={styles.collectionsContent}
-        >
-          {filteredCollections.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <View style={[styles.collectionIconContainer, { backgroundColor: 'rgba(107, 114, 128, 0.1)' }]}>
-                <Ionicons name="folder-open-outline" size={48} color={colors.textMuted} />
-              </View>
-              <Text style={styles.emptyTitle}>No Collections Yet</Text>
-              <Text style={styles.emptyText}>
-                Create collections to organize your saved posts
-              </Text>
-            </View>
+      {error ? <View style={{ paddingHorizontal: space.lg }}><Banner tone="danger" title="Couldn't load library" body={error} action={<Button kind="outline" title="Retry" onPress={() => void load(true)} />} /></View> : null}
+      <FlatList
+        key={grid ? 'grid' : 'list'}
+        data={items}
+        numColumns={grid ? 2 : 1}
+        keyExtractor={(i) => i.id}
+        contentContainerStyle={{ padding: space.lg, paddingBottom: 96 }}
+        renderItem={({ item }) => (
+          <ItemCard
+            item={item}
+            grid={grid}
+            timezone={tz}
+            selected={selected.has(item.id)}
+            onPress={() => (selecting ? setSelected((s) => { const n = new Set(s); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n; }) : navigation.navigate('ItemDetail', { id: item.id }))}
+            onLongPress={() => setSelected((s) => new Set(s).add(item.id))}
+          />
+        )}
+        onEndReached={() => { if (!end && !loading) void load(false); }}
+        onEndReachedThreshold={0.4}
+        initialNumToRender={10}
+        windowSize={7}
+        removeClippedSubviews
+        refreshing={false}
+        onRefresh={() => void load(true)}
+        ListFooterComponent={loading ? <Loading /> : null}
+        ListEmptyComponent={!loading ? (
+          debounced || activeFilters ? (
+            <EmptyState icon="search-outline" title="No matches" body="Try fewer filters or different words." action={<Button kind="outline" title="Clear filters" onPress={() => { setText(''); setSources([]); setStatuses([]); setLanguages([]); setTags([]); setDate('any'); setCollectionId(undefined); }} />} />
+          ) : archived ? (
+            <EmptyState icon="archive-outline" title="Archive is empty" body="Archived items are hidden from the library but kept and searchable here." />
           ) : (
-            <View style={styles.collectionsGrid}>
-              {failedPosts.length > 0 && (
-                <View style={styles.collectionWrapper}>
-                  <TouchableOpacity
-                    style={[styles.collectionCard, styles.failedCollectionCard]}
-                    onPress={() => navigation.navigate('FailedAnalysis')}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.collectionIconContainer}>
-                      <Ionicons name="warning" size={32} color={colors.error} />
-                    </View>
-                    <Text style={[styles.collectionName, { color: colors.error }]} numberOfLines={1}>
-                      Failed Analysis
-                    </Text>
-                    <Text style={styles.collectionCount}>
-                      {failedPosts.length} {failedPosts.length === 1 ? 'post' : 'posts'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-              {filteredCollections.map((collection) => {
-                const isSelected = selectedCollections.has(collection.id);
-                const isWatchLaterCollection = collection.id === 'default_watch_later';
-                return (
-                <View key={collection.id} style={styles.collectionWrapper}>
-                  <TouchableOpacity
-                    style={[
-                      styles.collectionCard,
-                      isSelected && styles.collectionCardSelected
-                    ]}
-                    onPress={() => {
-                      if (selectionMode) {
-                        if (isWatchLaterCollection) {
-                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                          return;
-                        }
-                        const newSelected = new Set(selectedCollections);
-                        newSelected.delete('default_watch_later');
-                        if (isSelected) {
-                          newSelected.delete(collection.id);
-                        } else {
-                          newSelected.add(collection.id);
-                        }
-                        setSelectedCollections(newSelected);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      } else {
-                        navigation.navigate('CollectionDetail', { collection });
-                      }
-                    }}
-                    onLongPress={() => {
-                      if (!selectionMode && !isWatchLaterCollection) {
-                        setSelectionMode(true);
-                        setSelectedCollections(new Set([collection.id]));
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      }
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    {selectionMode && !isWatchLaterCollection && (
-                      <View style={styles.checkboxContainer}>
-                        <View style={[
-                          styles.checkbox,
-                          isSelected && styles.checkboxSelected
-                        ]}>
-                          {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
-                        </View>
-                      </View>
-                    )}
-                    <View style={styles.collectionIconContainer}>
-                      <Ionicons 
-                        name={getCollectionIconName(collection) as any} 
-                        size={32} 
-                        color={LOCAL_ICON_COLORS[getCollectionIconName(collection)] || colors.primary} 
-                      />
-                    </View>
-                    <Text style={styles.collectionName} numberOfLines={1}>
-                      {collection.name}
-                    </Text>
-                    <Text style={styles.collectionCount}>
-                      {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
-                    </Text>
-                  </TouchableOpacity>
-                  {!selectionMode && collection.id !== 'default_watch_later' && (
-                  <TouchableOpacity
-                    style={styles.editButton}
-                    onPress={() => handleEditCollection(collection)}
-                  >
-                    <Ionicons name="pencil" size={16} color={colors.textMuted} />
-                  </TouchableOpacity>
-                  )}
-                </View>
-              );})}
-            </View>
-          )}
-        </ScrollView>
-      )}
-
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setShowCreateModal(true)}
-      >
-        <Ionicons name="add" size={32} color="#fff" />
-      </TouchableOpacity>
-
-      <BottomNav activeTab="Library" />
-
-      <Modal
-        visible={showCreateModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {}}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-        >
-          <TouchableOpacity 
-            activeOpacity={1}
-            style={{ justifyContent: 'center', paddingHorizontal: 20, flex: 1 }}
-          >
-            <View style={[styles.modalContent, { marginBottom: 140 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>New Collection</Text>
-              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.inputLabel}>Collection Name</Text>
-            <TextInput
-              ref={createInputRef}
-              style={styles.modalInput}
-              placeholder="e.g., Travel, Food, Inspiration"
-              placeholderTextColor={colors.textMuted}
-              value={newCollectionName}
-              onChangeText={setNewCollectionName}
-            />
-
-            <Text style={styles.inputLabel}>Choose Icon</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.iconsScroll}
-              contentContainerStyle={styles.iconsContent}
-              keyboardShouldPersistTaps="always"
-            >
-              {ICON_OPTIONS.map((icon) => (
-                <TouchableOpacity
-                  key={icon}
-                  style={[
-                    styles.iconOption,
-                    selectedIcon === icon && styles.iconOptionActive,
-                  ]}
-                  onPress={() => setSelectedIcon(icon)}
-                >
-                  <Ionicons
-                    name={icon as any}
-                    size={24}
-                    color={selectedIcon === icon ? (LOCAL_ICON_COLORS[icon] || colors.primary) : (LOCAL_ICON_COLORS[icon] || colors.textMuted)}
-                  />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButtonCancel}
-                onPress={() => {
-                  setShowCreateModal(false);
-                  setNewCollectionName('');
-                  setSelectedIcon('folder');
-                }}
-              >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButtonCreate}
-                onPress={handleCreateCollection}
-              >
-                <Text style={styles.modalButtonCreateText}>Create</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      <Modal
-        visible={showEditModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowEditModal(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-        >
-          <TouchableOpacity 
-            activeOpacity={1}
-            style={{ justifyContent: 'center', paddingHorizontal: 20, flex: 1 }}
-          >
-            <View style={[styles.modalContent, { marginBottom: 140 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Collection</Text>
-              <TouchableOpacity onPress={() => setShowEditModal(false)}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.inputLabel}>Collection Name</Text>
-            <TextInput
-              ref={editInputRef}
-              style={styles.modalInput}
-              placeholder="Enter collection name"
-              placeholderTextColor={colors.textMuted}
-              value={editCollectionName}
-              onChangeText={setEditCollectionName}
-            />
-
-            <Text style={styles.inputLabel}>Choose Icon</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.iconsScroll}
-              contentContainerStyle={styles.iconsContent}
-              keyboardShouldPersistTaps="always"
-            >
-              {ICON_OPTIONS.map((icon) => (
-                <TouchableOpacity
-                  key={icon}
-                  style={[
-                    styles.iconOption,
-                    editSelectedIcon === icon && styles.iconOptionActive,
-                  ]}
-                  onPress={() => setEditSelectedIcon(icon)}
-                >
-                  <Ionicons
-                    name={icon as any}
-                    size={24}
-                    color={editSelectedIcon === icon ? '#fff' : colors.textMuted}
-                  />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButtonCancel}
-                onPress={() => setShowEditModal(false)}
-              >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButtonCreate}
-                onPress={handleUpdateCollection}
-              >
-                <Text style={styles.modalButtonCreateText}>Save Changes</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      <Modal
-        visible={showDeleteModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowDeleteModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.deleteModalContent}>
-            <View style={styles.deleteIconContainer}>
-              <Ionicons name="trash" size={40} color={colors.error} />
-            </View>
-            <Text style={styles.deleteTitle}>Delete Collection?</Text>
-            <Text style={styles.deleteMessage}>
-              {selectionMode && selectedCollections.size > 0
-                ? `Are you sure you want to delete ${selectedCollections.size} collection(s)? This will not delete the posts.`
-                : `Are you sure you want to delete "${collectionToDelete?.name}"? This will not delete the posts.`
-              }
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButtonCancel}
-                onPress={() => setShowDeleteModal(false)}
-              >
-                <Text style={styles.modalButtonCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButtonDelete}
-                onPress={confirmDelete}
-              >
-                <Text style={styles.modalButtonDeleteText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={showLibraryTips} transparent animationType="fade" onRequestClose={dismissLibraryTips}>
-        <View style={styles.tipsOverlay}>
-          <View style={styles.tipsCard}>
-            <View style={styles.tipsHeader}>
-              <Text style={styles.tipsHeaderLabel}>YOUR LIBRARY</Text>
-            </View>
-            <View style={styles.tipsBody}>
-              <View style={styles.tipRow}>
-                <View style={styles.tipIconWrap}>
-                  <Ionicons name="time" size={22} color={colors.primary} />
-                </View>
-                <View style={styles.tipTextWrap}>
-                  <Text style={styles.tipTitle}>Watch Later</Text>
-                  <Text style={styles.tipDesc}>Everything you save lands here first. Get a daily notification reminder for each post.</Text>
-                </View>
-              </View>
-              <View style={styles.tipRow}>
-                <View style={styles.tipIconWrap}>
-                  <Ionicons name="notifications" size={22} color={colors.primary} />
-                </View>
-                <View style={styles.tipTextWrap}>
-                  <Text style={styles.tipTitle}>Notifications</Text>
-                  <Text style={styles.tipDesc}>Each saved post gets a daily reminder at its own fixed time. Tap "Mark as Watched" on a post to silence it.</Text>
-                </View>
-              </View>
-              <View style={styles.tipRow}>
-                <View style={styles.tipIconWrap}>
-                  <Ionicons name="folder" size={22} color={colors.primary} />
-                </View>
-                <View style={styles.tipTextWrap}>
-                  <Text style={styles.tipTitle}>Collections</Text>
-                  <Text style={styles.tipDesc}>Organise your saves into custom collections — travel, meals, fitness, anything you like.</Text>
-                </View>
-              </View>
-            </View>
-            <TouchableOpacity style={styles.tipsDismiss} onPress={dismissLibraryTips}>
-              <Text style={styles.tipsDismissText}>Got it!</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <CustomToast
-        visible={toast.visible}
-        message={toast.message}
-        type={toast.type}
-        onHide={() => setToast({ ...toast, visible: false })}
+            <EmptyState icon="library-outline" title="Your library is empty" body="Share links, notes or transcript files to Qivra, or add one now." action={<Button title="Save something" icon="add" onPress={() => navigation.navigate('Capture')} />} />
+          )
+        ) : null}
       />
-    </View>
+      {!selecting ? <Fab label="Save" icon="add" onPress={() => navigation.navigate('Capture')} /> : null}
+
+      <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filter & sort">
+        <T v="caption" color="textMuted">Sort</T>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+          {SORTS.map(([k, l]) => <Chip key={k} label={l} selected={sort === k} onPress={() => setSort(k)} />)}
+        </View>
+        <T v="caption" color="textMuted">Saved</T>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+          {DATES.map(([k, l]) => <Chip key={k} label={l} selected={date === k} onPress={() => setDate(k)} />)}
+        </View>
+        <T v="caption" color="textMuted">Source</T>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+          {(Object.keys(SOURCE_LABELS) as SourceType[]).map((s) => <Chip key={s} label={SOURCE_LABELS[s]} selected={sources.includes(s)} onPress={() => toggle(sources, s, setSources)} />)}
+        </View>
+        <T v="caption" color="textMuted">Processing status</T>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+          {ALL_STATUSES.map((s) => <Chip key={s} label={STATUS_LABELS[s]} selected={statuses.includes(s)} onPress={() => toggle(statuses, s, setStatuses)} />)}
+        </View>
+        {facets.data?.languages.length ? (
+          <>
+            <T v="caption" color="textMuted">Language</T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+              {facets.data.languages.map((l) => <Chip key={l} label={languageName(l)} selected={languages.includes(l)} onPress={() => toggle(languages, l, setLanguages)} />)}
+            </View>
+          </>
+        ) : null}
+        {facets.data?.tags.length ? (
+          <>
+            <T v="caption" color="textMuted">Tags</T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+              {facets.data.tags.map((t) => <Chip key={t.tag} label={`${t.tag} · ${t.count}`} selected={tags.includes(t.tag)} onPress={() => toggle(tags, t.tag, setTags)} />)}
+            </View>
+          </>
+        ) : null}
+        {facets.data?.collections.length ? (
+          <>
+            <T v="caption" color="textMuted">Collection</T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
+              {facets.data.collections.map((col) => <Chip key={col.id} label={col.name} selected={collectionId === col.id} onPress={() => setCollectionId(collectionId === col.id ? undefined : col.id)} />)}
+            </View>
+          </>
+        ) : null}
+        <Button title="Show results" onPress={() => setFiltersOpen(false)} style={{ marginTop: space.md }} />
+      </Sheet>
+
+      <Sheet visible={collectOpen} onClose={() => setCollectOpen(false)} title="Add to collection">
+        {facets.data?.collections.length ? facets.data.collections.map((col) => (
+          <Button key={col.id} kind="outline" title={`${col.name} (${col.itemCount})`} onPress={() => void bulk.collect(col.id)} style={{ marginBottom: space.sm }} />
+        )) : <T color="textMuted">No collections yet. Create one from Collections.</T>}
+        <Button kind="text" title="Manage collections" onPress={() => { setCollectOpen(false); navigation.navigate('Collections'); }} />
+      </Sheet>
+      {busy ? <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}><Loading label="Working" /></View> : null}
+    </SafeAreaView>
   );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-  },
-  selectionButtonsContainer: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cancelButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.backgroundCard,
-  },
-  cancelButtonText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  deleteButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.error,
-  },
-  deleteButtonDisabled: {
-    backgroundColor: colors.error + '40',
-  },
-  deleteButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.backgroundCard,
-    marginHorizontal: 20,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  searchIconContainer: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 16,
-  },
-  clearButton: {
-    padding: 4,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: colors.textMuted,
-  },
-  collectionsContainer: {
-    flex: 1,
-  },
-  collectionsContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-    paddingTop: 100,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  collectionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  collectionWrapper: {
-    width: '48%',
-    marginBottom: 16,
-    position: 'relative',
-  },
-  collectionCard: {
-    width: '100%',
-    backgroundColor: colors.backgroundCard,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    alignItems: 'center',
-  },
-  collectionCardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '10',
-  },
-  checkboxContainer: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    zIndex: 2,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  editButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    zIndex: 1,
-  },
-  collectionIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  collectionName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  collectionCount: {
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  fab: {
-    position: 'absolute',
-    right: Math.max(0, screenWidth / 6 - 28),
-    bottom: 96,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: colors.backgroundCard,
-    borderRadius: 24,
-    padding: 24,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  deleteModalContent: {
-    backgroundColor: colors.background,
-    borderRadius: 24,
-    padding: 24,
-    marginHorizontal: 20,
-    alignItems: 'center',
-    maxWidth: 400,
-    width: '90%',
-  },
-  deleteIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.backgroundCard,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  deleteTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  deleteMessage: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  modalInput: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: 24,
-  },
-  iconsScroll: {
-    maxHeight: 60,
-    marginBottom: 24,
-  },
-  iconsContent: {
-    paddingVertical: 4,
-  },
-  iconOption: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.border,
-  },
-  iconOptionActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '20',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  modalButtonCancel: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  modalButtonCancelText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  modalButtonCreate: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-  },
-  modalButtonCreateText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  modalButtonDelete: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: colors.error,
-    alignItems: 'center',
-  },
-  modalButtonDeleteText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  tipsOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  tipsCard: {
-    width: '100%',
-    backgroundColor: colors.backgroundCard,
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tipsHeader: {
-    backgroundColor: colors.primary,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  tipsHeaderLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 3,
-  },
-  tipsBody: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 8,
-    gap: 16,
-  },
-  tipRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
-  },
-  tipIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.backgroundSecondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tipTextWrap: {
-    flex: 1,
-  },
-  tipTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 3,
-  },
-  tipDesc: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 19,
-  },
-  tipsDismiss: {
-    marginHorizontal: 24,
-    marginTop: 20,
-    marginBottom: 24,
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  tipsDismissText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  failedCollectionCard: {
-    borderColor: colors.error + '55',
-    borderWidth: 1.5,
-  },
-});
-
-export default LibraryScreen;
+}

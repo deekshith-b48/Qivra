@@ -220,6 +220,10 @@ export class QivraClient {
     return this.request<{ paired: boolean; device: DeviceInfo; server: { id: string; version: string; lan_enabled: boolean }; server_time: string; ai: { available: boolean; providers: Record<string, boolean> } }>('GET', '/api/v1/pairing/status');
   }
 
+  devices() {
+    return this.request<{ devices: DeviceInfo[] }>('GET', '/api/v1/devices');
+  }
+
   revokeDevice(deviceId: string) {
     return this.request<{ revoked: boolean }>('POST', `/api/v1/devices/${encodeURIComponent(deviceId)}/revoke`, {});
   }

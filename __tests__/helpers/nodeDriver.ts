@@ -6,7 +6,7 @@ import { setRandomSource } from '../../src/core/ids';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
 
-setRandomSource((b) => webcrypto.getRandomValues(b));
+setRandomSource((b) => webcrypto.getRandomValues(b as Uint8Array<ArrayBuffer>) as Uint8Array);
 
 export function openNodeDriver(path = ':memory:'): SqlDriver {
   const db = new DatabaseSync(path);

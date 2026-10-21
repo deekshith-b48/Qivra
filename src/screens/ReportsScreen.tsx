@@ -1,0 +1,67 @@
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { CompositeScreenProps } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import React, { useState } from 'react';
+import { View } from 'react-native';
+import { formatLocal } from '../core/dates';
+import type { ReportKind } from '../core/reports';
+import type { RootStackParamList, TabParamList } from '../navigation/types';
+import { generateReport } from '../services/reports';
+import { Banner, Button, Card, Chip, EmptyState, Field, Header, Screen, Section, T, ToggleRow } from '../ui/components';
+import { useAction, useQuery } from '../ui/hooks';
+import { space } from '../ui/theme';
+import { useSettings } from '../ui/useSettings';
+
+type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Reports'>, NativeStackScreenProps<RootStackParamList>>;
+
+const KINDS: [ReportKind, string, string][] = [
+  ['daily', "Today's report", 'Everything you saved today'],
+  ['yesterday', "Yesterday's report", 'Catch up on yesterday'],
+  ['weekly', 'Weekly learning report', 'The last 7 days, clustered by topic'],
+  ['topic', 'Topic report', 'Last 30 days filtered by a topic'],
+  ['developer', 'Developer report', 'Tools, commands & repositories for a topic'],
+];
+
+export default function ReportsScreen({ navigation }: Props) {
+  const settings = useSettings();
+  const [kind, setKind] = useState<ReportKind>('daily');
+  const [topic, setTopic] = useState('');
+  const [useAi, setUseAi] = useState(false);
+  const { busy, run } = useAction();
+  const reports = useQuery((repo) => repo.listReports(), ['reports']);
+  const needsTopic = kind === 'topic' || kind === 'developer';
+
+  return (
+    <Screen>
+      <Header title="Reports" subtitle={`Dates use your timezone: ${settings?.timezone ?? '…'}`} />
+      <Card>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          {KINDS.map(([k, l]) => <Chip key={k} label={l} selected={kind === k} onPress={() => setKind(k)} />)}
+        </View>
+        <T v="small" color="textMuted">{KINDS.find((k) => k[0] === kind)?.[2]}</T>
+        {needsTopic ? <Field label="Topic" value={topic} onChangeText={setTopic} placeholder="e.g. Claude Code, AI agents, React" style={{ marginTop: space.sm }} /> : null}
+        <ToggleRow title="Add an AI executive summary" subtitle={settings?.ai.enabled ? `Uses ${settings.ai.model}; labelled as AI-generated.` : 'Configure a model in Settings → AI models.'} value={useAi && !!settings?.ai.enabled} onChange={setUseAi} />
+        <Button
+          title="Generate"
+          icon="document-text-outline"
+          loading={busy}
+          disabled={needsTopic && !topic.trim()}
+          onPress={() => void run(async () => {
+            const r = await generateReport({ kind, topic: needsTopic ? topic.trim() : undefined, useAi: useAi && settings?.ai.enabled });
+            navigation.navigate('ReportDetail', { id: r.id });
+          }, 'Report failed')}
+        />
+        <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>To report on specific items, select them in Library and choose “Report”.</T>
+      </Card>
+      <Section title="History">
+        {reports.error ? <Banner tone="danger" title="Couldn't load reports" body={reports.error} /> : null}
+        {reports.data?.length ? reports.data.map((r) => (
+          <Card key={r.id} onPress={() => navigation.navigate('ReportDetail', { id: r.id })} label={r.title} style={{ marginBottom: space.sm }}>
+            <T v="subtitle">{r.title}</T>
+            <T v="caption" color="textMuted">{formatLocal(r.createdAt, r.timezone)} · {r.itemIds.length} item(s){r.provider ? ' · AI summary' : ''}{r.exportedAt ? ' · exported' : ''}</T>
+          </Card>
+        )) : <EmptyState icon="document-text-outline" title="No reports yet" body="Generate one above. Reports are saved here and can be exported as Markdown or plain text." />}
+      </Section>
+    </Screen>
+  );
+}

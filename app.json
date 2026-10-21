@@ -1,118 +1,75 @@
 {
   "expo": {
-    "name": "superbrain-mobile",
-    "slug": "superbrain-mobile",
-    "version": "2.0.1",
-    "orientation": "portrait",
+    "name": "Qivra",
+    "slug": "qivra",
+    "version": "1.0.0",
+    "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "sdkVersion": "54.0.0",
     "platforms": [
-      "ios",
-      "android",
-      "web"
+      "android"
     ],
     "entryPoint": "./index.ts",
-    "scheme": "superbrain",
+    "scheme": [
+      "qivra",
+      "superbrain"
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#667eea"
-    },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.superbrain.mobile",
-      "associatedDomains": [
-        "applinks:instagram.com"
-      ]
+      "backgroundColor": "#FFFFFF",
+      "dark": {
+        "image": "./assets/splash-icon.png",
+        "backgroundColor": "#0A0A0A"
+      }
     },
     "android": {
-      "usesCleartextTraffic": true,
+      "package": "com.superbrain.mobile",
+      "versionCode": 3,
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#667eea"
+        "backgroundColor": "#0A0A0A"
       },
-      "notification": {
-        "icon": "./assets/notification-icon.png",
-        "color": "#667eea"
-      },
-      "package": "com.superbrain.mobile",
       "permissions": [
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.VIBRATE",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.SCHEDULE_EXACT_ALARM",
-        "android.permission.USE_EXACT_ALARM",
-        "android.permission.WAKE_LOCK",
-        "android.permission.CAMERA"
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK"
       ],
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "https",
-              "host": "instagram.com",
-              "pathPrefix": "/p"
-            },
-            {
-              "scheme": "https",
-              "host": "www.instagram.com",
-              "pathPrefix": "/p"
-            },
-            {
-              "scheme": "https",
-              "host": "instagram.com",
-              "pathPrefix": "/reel"
-            },
-            {
-              "scheme": "https",
-              "host": "www.instagram.com",
-              "pathPrefix": "/reel"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        },
-        {
-          "action": "SEND",
-          "data": [
-            {
-              "mimeType": "text/plain"
-            }
-          ],
-          "category": [
-            "DEFAULT"
-          ]
-        }
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM"
       ]
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "6b012e21-716f-49b4-9b47-13aa3d9a1fe9"
-      }
     },
     "plugins": [
       [
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#667eea"
+          "color": "#1B7A35"
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "SuperBrain needs camera access to scan QR codes for server connection setup."
+          "cameraPermission": "Qivra uses the camera only to scan the pairing QR code shown by your own server.",
+          "recordAudioAndroid": false
         }
       ],
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true
+        }
+      ],
       "expo-secure-store",
       "expo-background-task",
       "expo-localization"

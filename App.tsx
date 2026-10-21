@@ -1,283 +1,149 @@
-import React, { useEffect, useState } from 'react';
-import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { DarkTheme, DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Linking from 'expo-linking';
-import { Platform, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Screens
-import SplashScreen from './src/screens/SplashScreen';
-import HomeScreen from './src/screens/HomeScreen';
+import { StatusBar } from 'expo-status-bar';
+import React, { useEffect, useState } from 'react';
+import { AppState, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import type { RootStackParamList, TabParamList } from './src/navigation/types';
+import AboutScreen from './src/screens/AboutScreen';
+import AgentScreen from './src/screens/AgentScreen';
+import AiProvidersScreen from './src/screens/AiProvidersScreen';
+import CaptureScreen from './src/screens/CaptureScreen';
+import CollectionsScreen from './src/screens/CollectionsScreen';
+import ConflictsScreen from './src/screens/ConflictsScreen';
+import ConnectServerScreen from './src/screens/ConnectServerScreen';
+import ItemDetailScreen from './src/screens/ItemDetailScreen';
+import JobsScreen from './src/screens/JobsScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
+import PrivacyStorageScreen from './src/screens/PrivacyStorageScreen';
+import QrScanScreen from './src/screens/QrScanScreen';
+import ReportDetailScreen from './src/screens/ReportDetailScreen';
+import ReportsScreen from './src/screens/ReportsScreen';
+import SearchScreen from './src/screens/SearchScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
-import PostDetailScreen from './src/screens/PostDetailScreen';
-import CollectionDetailScreen from './src/screens/CollectionDetailScreen';
-import ShareHandlerScreen from './src/screens/ShareHandlerScreen';
-import FailedAnalysisScreen from './src/screens/FailedAnalysisScreen';
-import RetryQueueScreen from './src/screens/RetryQueueScreen';
-import AIProviderScreen from './src/screens/AIProviderScreen';
-import InstagramScreen from './src/screens/InstagramScreen';
-import DataImportExportScreen from './src/screens/DataImportExportScreen';
-import QRScannerScreen from './src/screens/QRScannerScreen';
-
-// API Service
-import apiService from './src/services/api';
-import * as Notifications from 'expo-notifications';
-import { scheduleWatchLaterNotification, handleMarkAsWatched } from './src/services/notificationService';
-import { Post, Collection } from './src/types';
-
-export type RootStackParamList = {
-  Splash: undefined;
-  Home: undefined;
-  Library: undefined;
-  Settings: undefined;
-  PostDetail: { post: Post };
-  CollectionDetail: { collection: Collection };
-  ShareHandler: { url?: string };
-  FailedAnalysis: undefined;        RetryQueue: undefined;
-  AIProvider: undefined;
-  Instagram: undefined;
-  DataImportExport: undefined;
-  QRScanner: undefined;
-};
+import ShareReceiptScreen from './src/screens/ShareReceiptScreen';
+import TodayScreen from './src/screens/TodayScreen';
+import TranscriptImportScreen from './src/screens/TranscriptImportScreen';
+import { boot, onResume, type BootResult } from './src/services/bootstrap';
+import { Banner, Loading, Screen } from './src/ui/components';
+import { ThemeProvider, useTheme } from './src/ui/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const navigationRef = React.createRef<any>();
+const Tabs = createBottomTabNavigator<TabParamList>();
+const nav = createNavigationContainerRef<RootStackParamList>();
 
-export default function App() {
-  const [isReady, setIsReady] = useState(false);
-  const [initialRoute, setInitialRoute] = useState<'Splash' | 'Home'>('Splash');
-  const [shareUrl, setShareUrl] = useState<string | undefined>(undefined);
+const TAB_ICONS: Record<keyof TabParamList, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
+  Today: ['sunny', 'sunny-outline'],
+  Library: ['library', 'library-outline'],
+  Search: ['search', 'search-outline'],
+  Agent: ['chatbubbles', 'chatbubbles-outline'],
+  Reports: ['document-text', 'document-text-outline'],
+};
+
+function MainTabs() {
+  const { c } = useTheme();
+  return (
+    <Tabs.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor: c.text,
+        tabBarInactiveTintColor: c.textFaint,
+        tabBarStyle: { backgroundColor: c.bg, borderTopColor: c.border, minHeight: 60 },
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
+        tabBarIcon: ({ focused, color, size }) => <Ionicons name={TAB_ICONS[route.name][focused ? 0 : 1]} size={size} color={color} />,
+        tabBarAccessibilityLabel: route.name === 'Agent' ? 'AI Agent' : route.name,
+      })}
+    >
+      <Tabs.Screen name="Today" component={TodayScreen} />
+      <Tabs.Screen name="Library" component={LibraryScreen} />
+      <Tabs.Screen name="Search" component={SearchScreen} />
+      <Tabs.Screen name="Agent" component={AgentScreen} options={{ title: 'AI Agent' }} />
+      <Tabs.Screen name="Reports" component={ReportsScreen} />
+    </Tabs.Navigator>
+  );
+}
+
+function showShare(shared: BootResult['shared']) {
+  if (!shared.results.length && !shared.rejected.length) return;
+  const go = () => (nav.isReady() ? nav.navigate('ShareReceipt', shared) : setTimeout(go, 100));
+  go();
+}
+
+function Root() {
+  const { c } = useTheme();
+  const [state, setState] = useState<{ ready: boolean; boot?: BootResult; error?: string }>({ ready: false });
 
   useEffect(() => {
-    initializeApp();
-
-    // Handle notification action buttons (e.g. "Mark as Watched")
-    // Fires when app is in foreground or background
-    const notifSub = Notifications.addNotificationResponseReceivedListener(async response => {
-      const { actionIdentifier, notification } = response;
-      const shortcode = notification.request.content.data?.shortcode as string | undefined;
-      if (actionIdentifier === 'mark_watched' && shortcode) {
-        await handleMarkAsWatched(shortcode);
-      } else if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-        // User tapped the notification itself — navigate to Home so they see the post
-        if (shortcode) {
-          setTimeout(async () => {
-            try {
-              const cachedJson = await AsyncStorage.getItem('@superbrain_posts_cache');
-              let fullPost = null;
-              if (cachedJson) {
-                const posts = JSON.parse(cachedJson);
-                fullPost = posts.find((p: any) => p.shortcode === shortcode);
-              }
-              if (fullPost && navigationRef.current) {
-                navigationRef.current.navigate('PostDetail', { post: fullPost });
-              } else if (navigationRef.current) {
-                navigationRef.current.navigate('Home');
-              }
-            } catch (e) {
-              if (navigationRef.current) navigationRef.current.navigate('Home');
-            }
-          }, 300);
-        } else if (navigationRef.current) {
-          navigationRef.current.navigate('Home');
-        }
-      }
+    boot()
+      .then((b) => {
+        setState({ ready: true, boot: b });
+        showShare(b.shared);
+      })
+      .catch((e: Error) => setState({ ready: true, error: e.message }));
+    const appSub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void onResume().then(showShare);
     });
-    
-    // CRITICAL: Also listen for URL events (handles share intents)
-    const subscription = Linking.addEventListener('url', ({ url }) => {
-      console.log('App.tsx - URL EVENT RECEIVED:', url);
-      if (url && url.includes('share')) {
-        const parsed = Linking.parse(url);
-        const sharedUrl = parsed.queryParams?.url as string;
-        console.log('App.tsx - Navigating to ShareHandler with URL:', sharedUrl);
-        // Navigate to ShareHandler (app is already running)
-        if (navigationRef.current) {
-          navigationRef.current.navigate('ShareHandler', { url: sharedUrl });
-        }
-      }
+    // The native share activity opens qivra://share after writing the envelope to the inbox.
+    const linkSub = Linking.addEventListener('url', ({ url }) => {
+      if (url.includes('share')) void onResume().then(showShare);
     });
-    
     return () => {
-      subscription.remove();
-      notifSub.remove();
+      appSub.remove();
+      linkSub.remove();
     };
   }, []);
 
-  const initializeApp = async () => {
-    try {
-      // Check for share intent FIRST
-      const url = await Linking.getInitialURL();
-      console.log('App.tsx - Initial URL:', url);
-      
-      if (url) {
-        console.log('App.tsx - URL DETECTED:', url);
-        if (url.includes('share')) {
-          console.log('App.tsx - Share intent detected! Skipping splash, going to Home');
-          const parsed = Linking.parse(url);
-          const sharedUrl = parsed.queryParams?.url as string;
-          console.log('App.tsx - Extracted shared URL:', sharedUrl);
-          
-          setInitialRoute('Home');  // Skip splash, go straight to Home
-          setShareUrl(sharedUrl);
-        } else {
-          console.log('App.tsx - URL does not contain share:', url);
-        }
-      } else {
-        console.log('App.tsx - NO URL DETECTED (getInitialURL returned null)');
-      }
-      
-      // Initialize API service
-      await apiService.initialize();
-
-      // Handle notification tap when app was fully killed
-      // addNotificationResponseReceivedListener doesn't fire in killed state,
-      // so we check getLastNotificationResponseAsync on every cold start
-      const lastResponse = await Notifications.getLastNotificationResponseAsync();
-      if (lastResponse) {
-        const { actionIdentifier, notification } = lastResponse;
-        const shortcode = notification.request.content.data?.shortcode as string | undefined;
-        if (actionIdentifier === 'mark_watched' && shortcode) {
-          await handleMarkAsWatched(shortcode);
-        } else if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-          // Tapped notification body — navigate to Home after app loads
-          setTimeout(async () => {
-            if (shortcode) {
-              try {
-                const cachedJson = await AsyncStorage.getItem('@superbrain_posts_cache');
-                let fullPost = null;
-                if (cachedJson) {
-                  const posts = JSON.parse(cachedJson);
-                  fullPost = posts.find((p: any) => p.shortcode === shortcode);
-                }
-                if (fullPost && navigationRef.current) {
-                  navigationRef.current.navigate('PostDetail', { post: fullPost });
-                } else if (navigationRef.current) {
-                  navigationRef.current.navigate('Home');
-                }
-              } catch (e) {
-                if (navigationRef.current) navigationRef.current.navigate('Home');
-              }
-            } else if (navigationRef.current) {
-              navigationRef.current.navigate('Home');
-            }
-          }, 500);
-        }
-      }
-
-      // Schedule Watch Later notifications in background
-      scheduleWatchLaterNotification().catch(() => {});
-    } catch (error) {
-      console.error('App initialization error:', error);
-    } finally {
-      setIsReady(true);
-      
-      // If we have a share URL, navigate to ShareHandler after Home loads
-      if (shareUrl && navigationRef.current) {
-        setTimeout(() => {
-          console.log('App.tsx - Auto-navigating to ShareHandler with URL:', shareUrl);
-          navigationRef.current?.navigate('ShareHandler', { url: shareUrl });
-        }, 300); // Give Home screen time to load
-      }
-    }
-  };
-
-  if (!isReady) {
-    return null;
+  if (!state.ready) return <View style={{ flex: 1, backgroundColor: c.bg, justifyContent: 'center' }}><Loading label="Opening your library" /></View>;
+  if (state.error) {
+    return (
+      <Screen>
+        <Banner tone="danger" title="Qivra could not open its database" body={`${state.error}\nYour data has not been modified. Restart the app; if this persists, export logs are not collected — reinstalling keeps data unless you clear storage.`} />
+      </Screen>
+    );
   }
+  const base = c.scheme === 'dark' ? DarkTheme : DefaultTheme;
+  return (
+    <NavigationContainer
+      ref={nav}
+      theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
+      linking={{ prefixes: ['qivra://', 'superbrain://'], config: { screens: { Main: { screens: { Today: 'today', Library: 'library', Search: 'search', Agent: 'agent', Reports: 'reports' } }, ConnectServer: 'connect' } } }}
+    >
+      <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
+      <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <Stack.Screen name="Main" component={MainTabs} />
+        <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
+        <Stack.Screen name="Capture" component={CaptureScreen} options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="TranscriptImport" component={TranscriptImportScreen} />
+        <Stack.Screen name="ShareReceipt" component={ShareReceiptScreen} options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="Collections" component={CollectionsScreen} />
+        <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
+        <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="ConnectServer" component={ConnectServerScreen} />
+        <Stack.Screen name="QrScan" component={QrScanScreen} options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="AiProviders" component={AiProvidersScreen} />
+        <Stack.Screen name="PrivacyStorage" component={PrivacyStorageScreen} />
+        <Stack.Screen name="Jobs" component={JobsScreen} />
+        <Stack.Screen name="Conflicts" component={ConflictsScreen} />
+        <Stack.Screen name="About" component={AboutScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
 
+export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationContainer
-        ref={navigationRef}
-        linking={{
-          prefixes: [
-            'superbrain://',
-            'https://instagram.com', 'https://www.instagram.com',
-            'https://youtube.com', 'https://www.youtube.com', 'https://youtu.be',
-          ],
-          config: {
-            screens: {
-              Splash: 'splash',
-              Home: 'home',
-              Library: 'library',
-              Settings: 'settings',
-              ShareHandler: {
-                path: 'share',
-                parse: {
-                  url: (url: string) => decodeURIComponent(url),
-                },
-              },
-            },
-          },
-        }}
-      >
-        <StatusBar style="light" />
-        <Stack.Navigator
-          initialRouteName={initialRoute}
-          screenOptions={{
-            headerShown: false,
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="Splash" component={SplashScreen} />
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="Library" component={LibraryScreen} />
-          <Stack.Screen name="Settings" component={SettingsScreen} />
-          <Stack.Screen 
-            name="PostDetail" 
-            component={PostDetailScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen 
-            name="CollectionDetail" 
-            component={CollectionDetailScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen 
-            name="ShareHandler" 
-            component={ShareHandlerScreen}
-            options={{ 
-              presentation: 'transparentModal',
-              animation: 'slide_from_bottom',
-              headerShown: false,
-            }}
-          />
-          <Stack.Screen
-            name="FailedAnalysis"
-            component={FailedAnalysisScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen
-            name="RetryQueue"
-            component={RetryQueueScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen
-            name="AIProvider"
-            component={AIProviderScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen
-            name="Instagram"
-            component={InstagramScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen
-            name="DataImportExport"
-            component={DataImportExportScreen}
-            options={{ animation: 'slide_from_right' }}
-          />
-          <Stack.Screen
-            name="QRScanner"
-            component={QRScannerScreen}
-            options={{ animation: 'slide_from_bottom' }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <Root />
+        </ThemeProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
