@@ -10,7 +10,7 @@ Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra s
 
 ## Get Qivra
 
-**[Download the latest APK (1.5.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
+**[Download the latest APK (1.6.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
 
 > The APK is signed with the Android debug key. It is meant for personal use and sideloading, not the Play Store.
 
@@ -20,6 +20,7 @@ Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra s
 - **Three tabs and a "+" button:** **Home** shows what needs you, **Library** holds and searches everything, and **Ask** answers questions about your library. The centre **+** pastes a copied link, writes a note, records a voice note or imports a file.
 - **Home feed:** **Ready to review** (new and ready), **Needs you** (needs a transcript or failed), **In progress**, and one older item **from your library** each day. An opt-in **daily digest** notification arrives at 9 am.
 - **Watch inside Qivra:** YouTube items play on the item page. Tap a key moment, a transcript line or an Ask citation to jump straight to that second, and the line being spoken is highlighted as it plays.
+- **Library grid and swipe actions:** videos, websites and notes show as a 2-column grid, and the toggle switches to a list. In the list, **swipe right to archive** and **swipe left to add to a collection or delete**. Each action shows an **Undo** bar for 8 seconds, and a delete isn't written until that bar closes. The same actions are in TalkBack's actions menu.
 - **Ask about this:** every item has a button to chat with just that video or page. Answers cite its moments.
 
 ### Save from anywhere, without leaving the app you are in

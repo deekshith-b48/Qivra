@@ -1,4 +1,5 @@
 /* UI test setup: the app's repository runs on real SQLite (node:sqlite) in memory. */
+import 'react-native-gesture-handler/jestSetup';
 import type { Repo } from '../../src/db/repo';
 
 let mockRepoPromise: Promise<Repo> | null = null;

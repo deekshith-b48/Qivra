@@ -279,3 +279,22 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: space.md, minHeight: 56 },
   fab: { position: 'absolute', right: space.lg, bottom: space.lg, minHeight: 52, borderRadius: radius.pill, paddingHorizontal: space.lg, flexDirection: 'row', alignItems: 'center', gap: space.sm, elevation: 4 },
 });
+
+/** Bottom message with an optional action (e.g. Undo). The caller decides when to hide it. */
+export function Snackbar({ message, actionLabel, onAction }: { message: string | null; actionLabel?: string; onAction?: () => void }) {
+  const { c } = useTheme();
+  if (!message) return null;
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={{ position: 'absolute', left: space.lg, right: space.lg, bottom: space.lg, flexDirection: 'row', alignItems: 'center', backgroundColor: c.primary, borderRadius: radius.lg, paddingLeft: space.lg, paddingRight: space.xs, minHeight: 52, elevation: 6 }}
+    >
+      <T color={c.onPrimary} style={{ flex: 1 }} numberOfLines={2}>{message}</T>
+      {actionLabel && onAction ? (
+        <Pressable onPress={onAction} accessibilityRole="button" accessibilityLabel={actionLabel} style={{ paddingHorizontal: space.md, paddingVertical: space.sm }}>
+          <T color={c.onPrimary} style={{ fontWeight: '700' }}>{actionLabel}</T>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}

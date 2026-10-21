@@ -1,7 +1,7 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { rangeFor } from '../core/dates';
@@ -16,9 +16,10 @@ import { getRepo } from '../services/db';
 import { emit, subscribe } from '../services/events';
 import { generateReport } from '../services/reports';
 import { updateSettings } from '../services/settings';
-import { Banner, Button, Chip, EmptyState, IconButton, Loading, Sheet, T } from '../ui/components';
+import { Banner, Button, Chip, EmptyState, IconButton, Loading, Sheet, Snackbar, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
-import { ItemCard, VideoCard } from '../ui/ItemCard';
+import { ItemCard, VideoCard, VideoTile } from '../ui/ItemCard';
+import { SwipeRow, type SwipeAction } from '../ui/SwipeRow';
 import { Segmented } from '../ui/media';
 import { SearchResults } from '../ui/SearchResults';
 import { VoiceSheet } from '../ui/VoiceSheet';
@@ -27,6 +28,8 @@ import { useSettings, useAiInfo } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Library'>, NativeStackScreenProps<RootStackParamList>>;
 const PAGE = 30;
+/** How long Undo is offered after a quick archive or delete (generous for TalkBack users). */
+const UNDO_MS = 8000;
 type Section = 'videos' | 'websites' | 'notes';
 const SECTION_SOURCES: Record<Section, SourceType[]> = { videos: VIDEO_SOURCES, websites: WEBSITE_SOURCES, notes: NOTE_SOURCES };
 const SORTS: [SortKey, string][] = [['newest', 'Newest'], ['oldest', 'Oldest'], ['updated', 'Recently updated'], ['title', 'Title A–Z']];
@@ -58,6 +61,12 @@ export default function LibraryScreen({ navigation, route }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
   const { busy, run } = useAction();
+  // Single-item quick actions (swipe / TalkBack): deletes wait UNDO_MS so they can be undone.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [snack, setSnack] = useState<{ message: string; undo?: () => void } | null>(null);
+  const [collectFor, setCollectFor] = useState<string[] | null>(null);
+  const snackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDeletes = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(text), 250);
@@ -138,14 +147,74 @@ export default function LibraryScreen({ navigation, route }: Props) {
     }),
     collect: (colId: string) => run(async () => {
       const repo = await getRepo();
-      await repo.addToCollection(colId, ids);
-      setSelected(new Set());
+      const target = collectFor ?? ids;
+      await repo.addToCollection(colId, target);
+      if (collectFor) {
+        const name = facets.data?.collections.find((x) => x.id === colId)?.name ?? 'collection';
+        showSnack(`Added to ${name}`);
+      } else setSelected(new Set());
       setCollectOpen(false);
+      setCollectFor(null);
       emit('items', 'collections');
     }),
   };
 
   const collectionName = facets.data?.collections.find((x) => x.id === collectionId)?.name;
+
+  const commitDeletes = useCallback(async () => {
+    const del = [...pendingDeletes.current];
+    if (!del.length) return;
+    pendingDeletes.current.clear();
+    const repo = await getRepo();
+    await deleteItemFiles(del);
+    await repo.deleteItems(del);
+    setHidden((h) => { const n = new Set(h); for (const d of del) n.delete(d); return n; });
+    emit('items');
+  }, []);
+  // Leaving the screen finishes any delete that is still waiting for Undo.
+  useEffect(() => () => {
+    if (snackTimer.current) clearTimeout(snackTimer.current);
+    void commitDeletes();
+  }, [commitDeletes]);
+
+  function showSnack(message: string, undo?: () => void) {
+    if (snackTimer.current) clearTimeout(snackTimer.current);
+    setSnack({ message, undo });
+    snackTimer.current = setTimeout(() => {
+      setSnack(null);
+      void commitDeletes();
+    }, UNDO_MS);
+  }
+
+  const quick = {
+    archive: (item: Item) => void run(async () => {
+      const repo = await getRepo();
+      const to = !item.archived;
+      await repo.setArchived([item.id], to);
+      emit('items');
+      showSnack(to ? 'Archived' : 'Restored to library', () => void (async () => {
+        await (await getRepo()).setArchived([item.id], !to);
+        emit('items');
+        setSnack(null);
+      })());
+    }),
+    remove: (item: Item) => {
+      pendingDeletes.current.add(item.id);
+      setHidden((h) => new Set(h).add(item.id));
+      showSnack('Deleted', () => {
+        pendingDeletes.current.delete(item.id);
+        setHidden((h) => { const n = new Set(h); n.delete(item.id); return n; });
+        setSnack(null);
+      });
+    },
+    collect: (item: Item) => { setCollectFor([item.id]); setCollectOpen(true); },
+  };
+  const actionsFor = (item: Item): SwipeAction[] => [
+    { name: 'archive', label: item.archived ? 'Restore' : 'Archive', icon: item.archived ? 'arrow-undo-outline' : 'archive-outline', tone: 'accent', run: () => quick.archive(item) },
+    { name: 'collect', label: 'Collection', icon: 'folder-outline', tone: 'info', run: () => quick.collect(item) },
+    { name: 'delete', label: 'Delete', icon: 'trash-outline', tone: 'danger', run: () => quick.remove(item) },
+  ];
+  const visible = hidden.size ? items.filter((i) => !hidden.has(i.id)) : items;
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
@@ -205,29 +274,23 @@ export default function LibraryScreen({ navigation, route }: Props) {
       </View>
       {error ? <View style={{ paddingHorizontal: space.lg }}><Banner tone="danger" title="Couldn't load library" body={error} action={<Button kind="outline" title="Retry" onPress={() => void load(true)} />} /></View> : null}
       {searching ? <SearchResults query={debounced} onOpen={(id) => navigation.navigate('ItemDetail', { id })} /> : <FlatList
-        key={section === 'videos' ? 'video' : grid ? 'grid' : 'list'}
-        data={items}
-        numColumns={grid && section !== 'videos' ? 2 : 1}
+        key={grid ? 'grid' : 'list'}
+        data={visible}
+        numColumns={grid ? 2 : 1}
         keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: space.lg, paddingBottom: 96 }}
-        renderItem={({ item }) => section === 'videos' ? (
-          <VideoCard
-            item={item}
-            timezone={tz}
-            selected={selected.has(item.id)}
-            onPress={() => (selecting ? setSelected((s) => { const n = new Set(s); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n; }) : navigation.navigate('ItemDetail', { id: item.id }))}
-            onLongPress={() => setSelected((s) => new Set(s).add(item.id))}
-          />
-        ) : (
-          <ItemCard
-            item={item}
-            grid={grid}
-            timezone={tz}
-            selected={selected.has(item.id)}
-            onPress={() => (selecting ? setSelected((s) => { const n = new Set(s); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n; }) : navigation.navigate('ItemDetail', { id: item.id }))}
-            onLongPress={() => setSelected((s) => new Set(s).add(item.id))}
-          />
-        )}
+        contentContainerStyle={{ padding: grid ? space.lg - space.xs : space.lg, paddingBottom: 96 }}
+        renderItem={({ item }) => {
+          const onPress = () => (selecting ? setSelected((s) => { const n = new Set(s); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n; }) : navigation.navigate('ItemDetail', { id: item.id }));
+          const onLongPress = () => setSelected((s) => new Set(s).add(item.id));
+          const acts = actionsFor(item);
+          const props = { item, selected: selected.has(item.id), onPress, onLongPress, actions: selecting ? undefined : acts };
+          if (grid) return section === 'videos' ? <VideoTile {...props} /> : <ItemCard {...props} grid timezone={tz} />;
+          return (
+            <SwipeRow enabled={!selecting} left={acts[0]} right={acts.slice(1)}>
+              {section === 'videos' ? <VideoCard {...props} timezone={tz} /> : <ItemCard {...props} timezone={tz} />}
+            </SwipeRow>
+          );
+        }}
         onEndReached={() => { if (!end && !loading) void load(false); }}
         onEndReachedThreshold={0.4}
         initialNumToRender={10}
@@ -297,13 +360,14 @@ export default function LibraryScreen({ navigation, route }: Props) {
         <Button title="Show results" onPress={() => setFiltersOpen(false)} style={{ marginTop: space.md }} />
       </Sheet>
 
-      <Sheet visible={collectOpen} onClose={() => setCollectOpen(false)} title="Add to collection">
+      <Sheet visible={collectOpen} onClose={() => { setCollectOpen(false); setCollectFor(null); }} title={collectFor ? 'Add this item to a collection' : 'Add to collection'}>
         {facets.data?.collections.length ? facets.data.collections.map((col) => (
           <Button key={col.id} kind="outline" title={`${col.name} (${col.itemCount})`} onPress={() => void bulk.collect(col.id)} style={{ marginBottom: space.sm }} />
         )) : <T color="textMuted">No collections yet. Create one from Collections.</T>}
         <Button kind="text" title="Manage collections" onPress={() => { setCollectOpen(false); navigation.navigate('Collections'); }} />
       </Sheet>
       {busy ? <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}><Loading label="Working" /></View> : null}
+      <Snackbar message={snack?.message ?? null} actionLabel={snack?.undo ? 'Undo' : undefined} onAction={snack?.undo} />
     </SafeAreaView>
   );
 }

@@ -1,5 +1,21 @@
 # Test results
 
+## 1.6.0 (2026-10-22): Library grid and swipe actions
+
+- Release APK: `dist/Qivra-1.6.0-release.apk`, version code 9, debug-signed.
+- `tsc` and Biome pass. Jest: 204 passed, 4 live tests skipped. New UI tests cover:
+  - the grid tiles and list cards with their accessibility actions
+  - archive followed by Undo
+  - delete being hidden but not written, Undo restoring it, and leaving the screen committing it
+  - adding a single item to a collection
+- Emulator (API 35, release APK):
+  - The Videos grid showed 2 columns with platform badges.
+  - After switching to list, a swipe right archived a video and showed the Undo bar.
+  - A swipe left showed the Collection and Delete buttons.
+  - Delete followed by Undo after 1 s and after 6 s restored the item, and it was still there after the bar timed out.
+  - The list/grid choice persisted across an app restart.
+- Changed after testing: the Undo window went from 5 s to 8 s, because a 5 s window proved easy to miss.
+
 ## 1.5.0 (2026-10-22): navigation, Home feed, Ask about this, in-app player
 
 - Release APK: `dist/Qivra-1.5.0-release.apk`, version code 8, debug-signed.

@@ -240,3 +240,60 @@ test('daily digest text lists what is ready, else resurfaces something', () => {
   expect(digestMessage([], 0, { title: 'Old gem', url: null })).toEqual({ title: 'From your library', body: 'Revisit: Old gem' });
   expect(digestMessage([], 0, null).body).toMatch(/Nothing new/);
 });
+
+describe('library quick actions', () => {
+  const act$ = (el: unknown, actionName: string) => fireEvent(el as never, 'accessibilityAction', { nativeEvent: { actionName } });
+
+  async function seed() {
+    const repo = await getRepo();
+    const { item } = await repo.createItem({ sourceType: 'youtube', title: 'Hooks deep dive', url: 'https://www.youtube.com/watch?v=abcdefghij1' });
+    await repo.db.run("UPDATE items SET status = 'READY' WHERE id = ?", [item.id]);
+    return { repo, id: item.id };
+  }
+
+  test('videos show as a 2-column grid by default and as cards in list view', async () => {
+    await seed();
+    wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
+    const tile = await screen.findByLabelText('YouTube video: Hooks deep dive. Ready.');
+    expect(tile.props.accessibilityActions.map((a: { name: string }) => a.name)).toEqual(['archive', 'collect', 'delete']);
+    fireEvent.press(screen.getByRole('button', { name: 'List view' }));
+    expect(await screen.findByLabelText(/^YouTube video: Hooks deep dive\. Ready\.$/)).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Grid view' })).toBeTruthy();
+  });
+
+  test('archive is immediate and can be undone', async () => {
+    const { repo, id } = await seed();
+    wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
+    act$(await screen.findByLabelText(/Hooks deep dive/), 'archive');
+    expect(await screen.findByText('Archived')).toBeTruthy();
+    await waitFor(async () => expect((await repo.getItem(id))?.archived).toBe(true));
+    fireEvent.press(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(async () => expect((await repo.getItem(id))?.archived).toBe(false));
+  });
+
+  test('delete hides the item, Undo keeps it, and leaving the screen commits it', async () => {
+    const { repo, id } = await seed();
+    const view = wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
+    act$(await screen.findByLabelText(/Hooks deep dive/), 'delete');
+    await waitFor(() => expect(screen.queryByLabelText(/Hooks deep dive/)).toBeNull());
+    expect(screen.getByText('Deleted')).toBeTruthy();
+    expect((await repo.getItem(id))?.deleted).toBe(false); // nothing written yet
+    fireEvent.press(screen.getByRole('button', { name: 'Undo' }));
+    expect(await screen.findByLabelText(/Hooks deep dive/)).toBeTruthy();
+
+    act$(screen.getByLabelText(/Hooks deep dive/), 'delete');
+    await waitFor(() => expect(screen.queryByLabelText(/Hooks deep dive/)).toBeNull());
+    view.unmount();
+    await waitFor(async () => expect(await repo.getItem(id)).toBeNull());
+  });
+
+  test('add one item to a collection from its row', async () => {
+    const { repo, id } = await seed();
+    const col = await repo.createCollection('Postgres');
+    wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
+    act$(await screen.findByLabelText(/Hooks deep dive/), 'collect');
+    fireEvent.press(await screen.findByRole('button', { name: /Postgres/ }));
+    await waitFor(async () => expect(await repo.itemCollectionIds(id)).toEqual([col.id]));
+    expect(await screen.findByText('Added to Postgres')).toBeTruthy();
+  });
+});

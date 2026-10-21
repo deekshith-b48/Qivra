@@ -64,7 +64,7 @@ export async function getSettings(): Promise<Settings> {
   return {
     timezone: s.timezone && isValidTimeZone(s.timezone) ? s.timezone : deviceTimeZone(),
     theme: s.theme ?? 'system',
-    libraryView: s.libraryView ?? 'list',
+    libraryView: s.libraryView ?? 'grid',
     ai: { ...DEFAULT_AI, ...(s.ai ?? {}) },
     dailyReminder: s.dailyReminder ?? false,
     scheduledDailyReport: s.scheduledDailyReport ?? false,
