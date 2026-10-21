@@ -10,7 +10,10 @@
  *  - Backups disabled (allowBackup=false + data-extraction rules excluding everything).
  *  - Build properties: NDK version available on this machine, ABIs.
  *
- * Native code added: plugins/android/ShareActivity.kt (documented in docs/ARCHITECTURE.md).
+ *  - QivraShareTaskService (not exported): headless JS share processing.
+ *
+ * Native code added: plugins/android/ShareActivity.kt and QivraShareTaskService.kt
+ * (documented in docs/ARCHITECTURE.md).
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -76,6 +79,8 @@ module.exports = function withQivraAndroid(config, opts = {}) {
     delete app.$['android:usesCleartextTraffic'];
     app.activity = (app.activity ?? []).filter((a) => !String(a.$['android:name']).endsWith('ShareActivity'));
     app.activity.push(shareActivity(pkg));
+    app.service = (app.service ?? []).filter((sv) => !String(sv.$['android:name']).endsWith('QivraShareTaskService'));
+    app.service.push({ $: { 'android:name': `${pkg}.QivraShareTaskService`, 'android:exported': 'false', 'android:foregroundServiceType': 'dataSync' } });
     return cfg;
   });
 
@@ -84,8 +89,10 @@ module.exports = function withQivraAndroid(config, opts = {}) {
     const root = cfg.modRequest.platformProjectRoot;
     const javaDir = path.join(root, 'app/src/main/java', ...pkg.split('.'));
     fs.mkdirSync(javaDir, { recursive: true });
-    const src = fs.readFileSync(path.join(cfg.modRequest.projectRoot, 'plugins/android/ShareActivity.kt'), 'utf8');
-    fs.writeFileSync(path.join(javaDir, 'ShareActivity.kt'), src.replace(/__PACKAGE__/g, pkg));
+    for (const file of ['ShareActivity.kt', 'QivraShareTaskService.kt']) {
+      const src = fs.readFileSync(path.join(cfg.modRequest.projectRoot, 'plugins/android', file), 'utf8');
+      fs.writeFileSync(path.join(javaDir, file), src.replace(/__PACKAGE__/g, pkg));
+    }
     const xmlDir = path.join(root, 'app/src/main/res/xml');
     fs.mkdirSync(xmlDir, { recursive: true });
     fs.writeFileSync(path.join(xmlDir, 'qivra_network_security_config.xml'), NSC);

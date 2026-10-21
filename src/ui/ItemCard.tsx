@@ -20,6 +20,25 @@ export function StatusChip({ status }: { status: Item['status'] }) {
   return <Chip label={STATUS_LABELS[status]} tone={tone} />;
 }
 
+/** Compact processing state for list rows: processing / ready / needs transcript. */
+export function statusDot(status: Item['status']): { label: string; tone: 'info' | 'accent' | 'warning' | 'danger' } {
+  if (status === 'READY') return { label: 'Ready', tone: 'accent' };
+  if (status === 'NEEDS_INPUT') return { label: 'Needs transcript', tone: 'warning' };
+  if (isFailed(status)) return { label: STATUS_LABELS[status], tone: 'danger' };
+  return { label: 'Processing', tone: 'info' };
+}
+
+export function StatusDot({ status }: { status: Item['status'] }) {
+  const { c } = useTheme();
+  const { label, tone } = statusDot(status);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c[tone] }} />
+      <T v="caption" color="textMuted">{label}</T>
+    </View>
+  );
+}
+
 export function SyncChip({ status }: { status: Item['syncStatus'] }) {
   if (status === 'local_only' || status === 'synced') return null;
   return <Chip label={status === 'pending' ? 'Not synced yet' : status === 'conflicted' ? 'Sync conflict' : 'Sync failed'} tone={status === 'pending' ? 'neutral' : 'danger'} icon="sync-outline" />;
@@ -28,7 +47,9 @@ export function SyncChip({ status }: { status: Item['syncStatus'] }) {
 export function ItemCard({ item, onPress, onLongPress, selected, timezone, grid }: { item: Item; onPress: () => void; onLongPress?: () => void; selected?: boolean; timezone: string; grid?: boolean }) {
   const { c } = useTheme();
   const title = item.title || item.url || 'Untitled';
-  const label = `${SOURCE_LABELS[item.sourceType]}: ${title}. ${STATUS_LABELS[item.status]}.${selected ? ' Selected.' : ''}`;
+  // A user-corrected summary wins; otherwise the one-sentence TL;DR.
+  const tldr = item.summaryOrigin === 'user' ? item.summary : item.enrichment?.tldr || item.summary;
+  const label = `${SOURCE_LABELS[item.sourceType]}: ${title}. ${statusDot(item.status).label}.${selected ? ' Selected.' : ''}`;
   return (
     <Pressable
       onPress={onPress}
@@ -53,10 +74,10 @@ export function ItemCard({ item, onPress, onLongPress, selected, timezone, grid 
         )}
         <View style={{ flex: grid ? undefined : 1 }}>
           <T v="subtitle" numberOfLines={2}>{title}</T>
-          {item.summary && !grid ? <T v="small" color="textMuted" numberOfLines={2} style={{ marginTop: 2 }}>{item.summary}</T> : null}
+          {tldr && !grid ? <T v="small" color="textMuted" numberOfLines={1} style={{ marginTop: 2 }}>{tldr}</T> : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 6, gap: 6 }}>
             <T v="caption" color="textFaint">{SOURCE_LABELS[item.sourceType]} · {formatLocal(item.capturedAt, timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</T>
-            <StatusChip status={item.status} />
+            <StatusDot status={item.status} />
             <SyncChip status={item.syncStatus} />
           </View>
         </View>

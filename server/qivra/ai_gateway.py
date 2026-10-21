@@ -23,7 +23,8 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 ENV_FILE_NAME = "qivra.env"
-_ENV_KEYS = ("QIVRA_AI_BASE_URL", "QIVRA_AI_API_KEY", "QIVRA_AI_MODEL", "QIVRA_AI_EMBEDDING_MODEL")
+_ENV_KEYS = ("QIVRA_AI_BASE_URL", "QIVRA_AI_API_KEY", "QIVRA_AI_MODEL", "QIVRA_AI_EMBEDDING_MODEL",
+             "QIVRA_TRANSCRIBER", "QIVRA_GROQ_WHISPER_MODEL")
 CHAT_FIELDS = {"messages", "temperature", "max_tokens", "top_p", "stop", "tools", "tool_choice", "response_format"}
 MAX_TOKENS_CAP = 4096
 MAX_EMBED_INPUTS = 256

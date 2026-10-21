@@ -63,9 +63,17 @@ export function parseHtmlMeta(html: string, baseUrl: string): Omit<FetchedMetada
 }
 
 /** HTML fragment → plain text with paragraph breaks. */
+// An opening tag whose quoted attribute values may contain '>' (Wikipedia's data-mw JSON does).
+const OPEN_TAG = /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s=>"'/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))?)*)\s*(\/?)>/g;
+
+/** Drop all attributes, so attribute contents can never leak into extracted text. */
+export function stripAttributes(html: string): string {
+  return html.replace(OPEN_TAG, (_m, name: string, _attrs: string, slash: string) => `<${name}${slash}>`);
+}
+
 export function htmlToText(html: string): string {
   return decodeEntities(
-    html
+    stripAttributes(html)
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(p|div|li|h[1-6]|blockquote|tr)>/gi, '\n')
       .replace(/<[^>]+>/g, ''),
@@ -82,7 +90,7 @@ export function htmlToText(html: string): string {
  * summarise and search typical articles and docs.
  */
 export function extractReadableText(html: string, maxChars = 60_000): string {
-  let body = html.replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|template)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
+  let body = stripAttributes(html).replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|template)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
   const scoped = /<article\b[\s\S]*?<\/article>/i.exec(body)?.[0] ?? /<main\b[\s\S]*?<\/main>/i.exec(body)?.[0];
   if (scoped && scoped.length > 500) body = scoped;
   const blocks: string[] = [];

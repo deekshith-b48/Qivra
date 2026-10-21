@@ -76,7 +76,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .config import QivraConfig
     from .netinfo import choose_port, detect_lan_ips
 
-    from . import ai_gateway
+    from . import ai_gateway, transcribers
     from .config import SERVER_DIR
 
     ai_gateway.load_env_file(SERVER_DIR / ai_gateway.ENV_FILE_NAME)
@@ -160,6 +160,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
               f"{DIM}(key stays on this machine, not shown){RESET}")
     else:
         print(f"  AI for paired phones: off {DIM}(set QIVRA_AI_* in server/{ai_gateway.ENV_FILE_NAME}){RESET}")
+    print(f"  Transcription: {transcribers.banner()}")
     paired = services.store.list_devices()
     print(f"  Paired devices: {sum(1 for d in paired if not d.revoked_at)} active, "
           f"{sum(1 for d in paired if d.revoked_at)} revoked")

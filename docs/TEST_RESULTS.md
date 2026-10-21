@@ -1,5 +1,17 @@
 # Test results
 
+## 1.4.0 (2026-10-22) — background sharing, Groq Whisper, key moments
+
+- Release APK: `dist/Qivra-1.4.0-release.apk` (68 MiB), `com.qivra.app`, version code 7, debug-signed; no provider key in the APK or JS bundle.
+- `tsc` and Biome pass; Jest 191 passed, 4 live skipped; server pytest 89 passed, 5 live skipped. Live Groq tests run once with `QIVRA_LIVE=1` (generated speech; X video).
+- Emulator (API 35, release APK, throwaway server on port 5055 with the Groq gateway), sharing from the home screen with the app force-stopped:
+  - YouTube ("Me at the zoo"): home screen stayed in front; "Ready" notification with an AI one-line summary after 14 s.
+  - Website (Wikipedia "Hummingbird"): "Ready" after 23 s; tapping it opened the item page with TL;DR, "AI-generated" label and key moments; the "Preparing…" notification and the service stopped.
+  - X video: "Ready … Jose is welcomed to Team Cap." after 72 s. Groq rejected X's fragmented-MP4 audio, so the local engine answered; fixed by re-encoding to 16 kHz mono FLAC (test added) — the same post then transcribed through Groq in 2.9 s on the server path (not re-run on the emulator).
+  - First share asked for notification permission once.
+- Found and fixed on the emulator: plain background services are frozen within ~10 s (now a short foreground service); RN's task-finished callback never reached the service (now a result file); expo-notifications taps were lost after a headless start (now native notifications with `qivra://item/<id>`); Wikipedia `data-mw` attributes leaked wiki markup into text (attributes are stripped; test added).
+- Not verified: the iQOO 13 itself, Instagram reels with speech, Android < 13 permission path.
+
 ## 1.3.0 (2026-10-21) — AI through the paired server
 
 - Release APK: `dist/Qivra-1.3.0-release.apk` (68 MiB), package `com.qivra.app`, version code 6, debug-signed. Verified: no provider key in the APK or JS bundle.

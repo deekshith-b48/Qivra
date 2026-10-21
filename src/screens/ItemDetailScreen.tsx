@@ -3,6 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Linking, Pressable, View } from 'react-native';
 import { formatLocal } from '../core/dates';
+import { keyMomentsOf } from '../core/enrich';
 import { extractKeywords, type Keyword } from '../core/highlights';
 import { languageName, LANGUAGES } from '../core/language';
 import { isFailed, isPending, STATUS_LABELS } from '../core/status';
@@ -14,14 +15,12 @@ import { deleteItemFiles, pickMediaFile } from '../services/capture';
 import { getRepo } from '../services/db';
 import { emit } from '../services/events';
 import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
-import { Banner, Button, Card, Chip, Field, Header, IconButton, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
+import { Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard, SyncChip } from '../ui/ItemCard';
-import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, Segmented, TimestampPill, type StepState } from '../ui/media';
+import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, TimestampPill, type StepState } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
 import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
-
-type Tab = 'summary' | 'transcript' | 'highlights';
 
 function stepsFor(item: Item, hasSpeech: boolean, hasArticle: boolean, isVideo: boolean): { label: string; state: StepState }[] {
   const s = item.status;
@@ -45,7 +44,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const { connection } = useConnection();
   const tz = settings?.timezone ?? 'UTC';
   const { busy, run } = useAction();
-  const [tab, setTab] = useState<Tab>('summary');
+  const [contentOpen, setContentOpen] = useState(false);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [edit, setEdit] = useState<null | 'title' | 'note' | 'summary' | 'tags'>(null);
@@ -61,6 +60,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
       item,
       transcripts: await repo.listTranscripts(id),
       jobs: await repo.listJobs({ itemId: id, limit: 10 }),
+      aiJob: await repo.getJob(`job_model_enrich_${id}`),
       media: await repo.listMedia(id),
       collections: await repo.listCollections(),
       memberOf: await repo.itemCollectionIds(id),
@@ -82,7 +82,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const keywords: Keyword[] = useMemo(() => {
     if (!d) return [];
     const base: Segment[] = segs.data?.length ? segs.data : [{ startMs: null, endMs: null, text: [d.item.summary, d.item.note, d.item.metadata?.description ?? ''].join(' ') }];
-    return extractKeywords(base, { tools: d.item.enrichment?.tools ?? [], title: d.item.title, max: 12 });
+    return extractKeywords(base, { tools: d.item.enrichment?.tools ?? [], concepts: d.item.enrichment?.concepts ?? [], title: d.item.title, max: 8 });
   }, [d, segs.data]);
   const terms = keywords.map((k) => k.term);
 
@@ -130,8 +130,8 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     }
     await schedulePipeline(id);
   });
-  const serverAction = (kind: 'captions' | 'transcribe' | 'enrich' | 'transcribe_url') => run(async () => {
-    const what = { captions: 'fetch published captions for this video', transcribe: 'upload the attached media file and transcribe it', enrich: 'send this item and its transcript for AI enrichment', transcribe_url: 'download this post’s audio and transcribe it' }[kind];
+  const serverAction = (kind: 'transcribe' | 'transcribe_url') => run(async () => {
+    const what = { transcribe: 'upload the attached media file and transcribe it', transcribe_url: 'download this post’s audio and transcribe it' }[kind];
     if (!(await confirm('Use your server?', `Qivra will ${what} on ${connection?.serverUrl}.`, 'Continue'))) return;
     await requestServerProcessing(id, kind);
   });
@@ -144,6 +144,17 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   const shownSegs = (segs.data ?? []).map((s, i) => ({ ...s, i })).filter((s) => !focus || s.text.toLowerCase().includes(focus.toLowerCase()));
   const info = item.errorCode?.startsWith('INFO_');
+  const generating = !!d.aiJob && (d.aiJob.status === 'queued' || d.aiJob.status === 'running');
+  const moments = keyMomentsOf(e);
+  // Error banners offer at most one primary and one secondary action.
+  type Action = { title: string; icon: IconName; onPress: () => void };
+  const importT: Action = { title: 'Import transcript', icon: 'document-text-outline', onPress: () => navigation.navigate('TranscriptImport', { itemId: id }) };
+  const retryA: Action = { title: 'Retry', icon: 'refresh', onPress: () => void retry() };
+  const problem: { primary: Action; secondary?: Action } | null =
+    item.status !== 'NEEDS_INPUT' && !isFailed(item.status) && item.status !== 'CANCELLED' ? null
+      : item.errorCode === 'SERVER_NOT_PAIRED' ? { primary: { title: 'Connect server', icon: 'qr-code-outline', onPress: () => navigation.navigate('ConnectServer') }, secondary: importT }
+        : isFailed(item.status) || item.status === 'CANCELLED' ? { primary: retryA, secondary: importT }
+          : { primary: importT, secondary: connection && isVideo ? { ...retryA, title: 'Try server again' } : undefined };
 
   return (
     <Screen padded={false}>
@@ -180,7 +191,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           {item.origin === 'superbrain' ? <Chip label="From SuperBrain" tone="info" /> : null}
         </View>
 
-        <ProgressSteps steps={stepsFor(item, speech.length > 0, articles.length > 0, isVideo)} />
+        {item.status !== 'READY' ? <ProgressSteps steps={stepsFor(item, speech.length > 0, articles.length > 0, isVideo)} /> : null}
 
         {item.status === 'TRANSCRIBING' ? (
           <Banner tone="info" icon="hourglass-outline" title="Transcribing" body={`${item.errorMessage ?? 'Working on the transcript…'} You can leave this page — it continues in the background.`} action={<Button kind="outline" title="Cancel" onPress={() => void run(() => cancelItemProcessing(id))} />} />
@@ -188,112 +199,84 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           <Banner tone="info" icon="sync-outline" title={STATUS_LABELS[item.status]} body="Processing on this phone…" />
         ) : null}
         {info && item.status === 'READY' ? <Banner tone="info" title={item.errorCode === 'INFO_UNREADABLE' ? 'Page could not be read' : 'No speech to transcribe'} body={item.errorMessage ?? undefined} /> : null}
-        {item.status === 'NEEDS_INPUT' || isFailed(item.status) || item.status === 'CANCELLED' ? (
+        {problem ? (
           <Banner
             tone={isFailed(item.status) ? 'danger' : 'warning'}
             title={item.errorCode === 'SERVER_NOT_PAIRED' ? 'Connect your server to transcribe' : STATUS_LABELS[item.status]}
             body={item.errorMessage ?? undefined}
             action={<>
-              {item.errorCode === 'SERVER_NOT_PAIRED' ? <Button kind="outline" title="Connect server" icon="qr-code-outline" onPress={() => navigation.navigate('ConnectServer')} /> : null}
-              <Button kind="outline" title="Import transcript" icon="document-text-outline" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
-              {connection && isVideo && item.errorCode !== 'SERVER_NOT_PAIRED' ? <Button kind="outline" title="Try server again" icon="refresh" onPress={() => void retry()} /> : null}
-              {isFailed(item.status) || item.status === 'CANCELLED' ? <Button kind="outline" title="Retry" icon="refresh" onPress={() => void retry()} /> : null}
+              <Button title={problem.primary.title} icon={problem.primary.icon} onPress={problem.primary.onPress} />
+              {problem.secondary ? <Button kind="outline" title={problem.secondary.title} icon={problem.secondary.icon} onPress={problem.secondary.onPress} /> : null}
             </>}
           />
         ) : null}
         {item.syncStatus === 'conflicted' ? <Banner tone="warning" title="Edited on another device" action={<Button kind="outline" title="Resolve" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
 
-        <View style={{ marginTop: space.md }}>
-          <Segmented<Tab>
-            value={tab}
-            onChange={setTab}
-            options={[
-              { key: 'summary', label: 'Summary' },
-              { key: 'transcript', label: isVideo || !activeT ? 'Transcript' : contentLabel, count: segs.data?.length || undefined },
-              { key: 'highlights', label: 'Highlights', count: keywords.length || undefined },
-            ]}
-          />
-        </View>
-
-        {tab === 'summary' ? (
-          <View>
-            <Section title="Summary" action={<IconButton icon="create-outline" label="Correct summary" onPress={() => startEdit('summary')} />}>
-              {item.summary ? (
-                <Card>
-                  <Provenance origin={item.summaryOrigin} />
-                  <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} selectable />
-                </Card>
-              ) : <T color="textFaint">{isPending(item.status) || item.status === 'TRANSCRIBING' ? 'The summary appears once the transcript is ready.' : 'No summary yet — there is no text to summarise.'}</T>}
-              {e?.keyPoints.length ? (
-                <View style={{ marginTop: space.md }}>
-                  <T v="caption" color="textMuted">KEY POINTS</T>
-                  {e.keyPoints.map((k, i) => (
-                    <View key={i} style={{ flexDirection: 'row', marginTop: 6 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent, marginTop: 8, marginRight: 10 }} />
-                      <HighlightedText text={k} terms={terms} style={{ flex: 1, fontSize: 14 }} />
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
-                <Button kind="tonal" title="Rewrite with AI" icon="sparkles-outline" onPress={() => void run(async () => {
-                  if (!ai?.enabled) return Alert.alert('No AI model configured', 'Add a model in Settings → AI models. The current summary was extracted from the source on this phone.');
-                  await requestModelEnrichment(id);
-                })} loading={busy} />
-                {connection ? <Button kind="outline" title="Enrich on server" icon="server-outline" onPress={() => void serverAction('enrich')} /> : null}
-              </View>
-            </Section>
-
-            {item.metadata?.description && isVideo ? (
-              <Section title="Caption">
-                <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14 }} selectable />
-              </Section>
+        {/* TL;DR */}
+        <Section title="TL;DR" action={<IconButton icon="create-outline" label="Correct summary" onPress={() => startEdit('summary')} />}>
+          <Card>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {item.summary ? <Provenance origin={item.summaryOrigin} /> : null}
+              {generating ? <Provenance origin="generating" /> : null}
+            </View>
+            {item.summary ? (
+              <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} selectable />
+            ) : (
+              <T color="textFaint" style={{ marginTop: space.sm }}>{isPending(item.status) || item.status === 'TRANSCRIBING' ? 'The summary appears once the transcript is ready.' : 'No summary yet — there is no text to summarise.'}</T>
+            )}
+            {item.summary || ai?.enabled ? (
+              <Button kind="text" title="Regenerate" icon="sparkles-outline" disabled={generating} loading={busy} style={{ alignSelf: 'flex-start', marginTop: space.xs }} accessibilityHint="Writes a new AI summary and key moments" onPress={() => void run(async () => {
+                if (!ai?.enabled) return Alert.alert('No AI model configured', 'Add a model in Settings → AI models. The current summary was extracted from the source on this phone.');
+                await requestModelEnrichment(id);
+              })} />
             ) : null}
+          </Card>
+        </Section>
 
-            <Section title="Your note" action={<IconButton icon="create-outline" label="Edit note" onPress={() => startEdit('note')} />}>
-              {item.note ? <T selectable>{item.note}</T> : <T color="textFaint" onPress={() => startEdit('note')}>Add a note — why did you save this?</T>}
-            </Section>
-
-            {e && (e.tools.length || e.repos.length || e.commands.length) ? (
-              <Section title="Tools, repos & commands">
-                {e.tools.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{e.tools.map((t) => <Chip key={t} label={t} tone="accent" onPress={() => { setFocus(t); setTab('highlights'); }} />)}</View> : null}
-                {e.repos.map((r) => (
-                  <T key={r} v="small" color="accent" style={{ marginTop: 6, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(`https://github.com/${r}`)}>github.com/{r}</T>
-                ))}
-                {e.commands.map((cmd) => (
-                  <Card key={cmd.command} style={{ marginTop: space.sm, padding: space.md, backgroundColor: cmd.destructive ? c.dangerSoft : c.surface }}>
-                    <T v="mono" selectable>{cmd.command}</T>
-                    {cmd.destructive ? <T v="small" color="danger" style={{ marginTop: 4 }}>⚠ Potentially destructive: {cmd.reason}</T> : null}
-                    <Button kind="text" title="Copy" icon="copy-outline" onPress={() => void Clipboard.setStringAsync(cmd.command)} style={{ alignSelf: 'flex-start' }} />
-                  </Card>
-                ))}
-                <T v="caption" color="textFaint" style={{ marginTop: 4 }}>Copied verbatim from the source. Qivra never runs commands.</T>
-              </Section>
-            ) : null}
-
-            {e?.actionItems.length ? (
-              <Section title="Action items">{e.actionItems.map((a, i) => <T key={i} v="small" style={{ marginBottom: 4 }}>☐ {a}</T>)}</Section>
-            ) : null}
-
-            <Section title="Tags & collections" action={<IconButton icon="pricetags-outline" label="Edit tags" onPress={() => startEdit('tags')} />}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {item.tags.length ? item.tags.map((t) => <Chip key={t} label={`#${t}`} />) : <T color="textFaint">No tags.</T>}
+        {/* Key moments */}
+        {moments.length ? (
+          <Section title="Key moments">
+            {moments.map((k, i) => (
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, marginBottom: space.sm }}>
+                {k.startMs !== null ? (
+                  <TimestampPill label={formatTimestamp(k.startMs)} onPress={ytId ? () => openAt(k.startMs) : undefined} />
+                ) : (
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent, marginTop: 8, marginRight: 4 }} />
+                )}
+                <HighlightedText text={k.text} terms={terms} style={{ flex: 1, fontSize: 14 }} />
               </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm }}>
-                {d.collections.map((col) => {
-                  const on = d.memberOf.includes(col.id);
-                  return <Chip key={col.id} label={col.name} selected={on} onPress={() => void run(() => repoOp((r) => (on ? r.removeFromCollection(col.id, [id]) : r.addToCollection(col.id, [id]))))} />;
-                })}
-                <Chip label="New collection" icon="add" onPress={() => navigation.navigate('Collections')} />
-              </View>
-            </Section>
+            ))}
+          </Section>
+        ) : null}
+
+        {/* Keywords: tapping one filters the transcript */}
+        {keywords.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.lg }}>
+            {keywords.map((k) => (
+              <Chip key={k.term} label={k.term} tone={k.isTool ? 'accent' : 'neutral'} selected={focus === k.term} onPress={() => {
+                const next = focus === k.term ? null : k.term;
+                setFocus(next);
+                if (next) setContentOpen(true);
+              }} />
+            ))}
           </View>
         ) : null}
 
-        {tab === 'transcript' ? (
-          <View style={{ marginTop: space.md }}>
-            {ordered.length ? (
+        {/* Transcript / article */}
+        {ordered.length ? (
+          <View style={{ marginTop: space.lg }}>
+            <Pressable onPress={() => setContentOpen(!contentOpen)} accessibilityRole="button" accessibilityLabel={`${contentLabel}${segs.data?.length ? `, ${segs.data.length} lines` : ''}`} accessibilityState={{ expanded: contentOpen }} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48 }}>
+              <T v="subtitle" style={{ flex: 1 }}>{contentLabel}{segs.data?.length ? <T v="caption" color="textMuted">  {segs.data.length}</T> : null}</T>
+              <Ionicons name={contentOpen ? 'chevron-up' : 'chevron-down'} size={18} color={c.textMuted} />
+            </Pressable>
+            {contentOpen ? (
               <>
+                {item.metadata?.description && isVideo ? (
+                  <Card style={{ padding: space.md, marginBottom: space.sm }}>
+                    <T v="caption" color="textMuted">CAPTION</T>
+                    <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: 4 }} selectable />
+                  </Card>
+                ) : null}
                 {ordered.length > 1 ? (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                     {ordered.map((t) => (
@@ -328,76 +311,82 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
                   </>
                 ) : null}
               </>
-            ) : (
-              <Card>
-                <T v="subtitle">No transcript yet</T>
-                <T v="small" color="textMuted" style={{ marginTop: 4 }}>
-                  {item.status === 'TRANSCRIBING' ? 'Your server is transcribing this video.' : 'Qivra never invents a transcript. Import captions or a transcript, or let your server transcribe it.'}
-                </T>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
-                  <Button kind="outline" title="Import transcript" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
-                  {connection && isVideo ? <Button kind="outline" title="Transcribe on server" onPress={() => void serverAction('transcribe_url')} /> : null}
-                  {!isVideo ? <Button kind="outline" title="Attach audio/video" onPress={() => void run(() => pickMediaFile(id))} /> : null}
-                  {d.media.length && connection ? <Button kind="outline" title="Transcribe attached file" onPress={() => void serverAction('transcribe')} /> : null}
-                </View>
-              </Card>
-            )}
+            ) : null}
           </View>
-        ) : null}
+        ) : (
+          <Section title="Transcript">
+            <Card>
+              <T v="subtitle">No transcript yet</T>
+              <T v="small" color="textMuted" style={{ marginTop: 4 }}>
+                {item.status === 'TRANSCRIBING' ? 'Your server is transcribing this video.' : 'Qivra never invents a transcript. Import captions or a transcript, or let your server transcribe it.'}
+              </T>
+              {item.metadata?.description && isVideo ? <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: space.sm }} selectable /> : null}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+                <Button kind="outline" title="Import transcript" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
+                {connection && isVideo ? <Button kind="outline" title="Transcribe on server" onPress={() => void serverAction('transcribe_url')} /> : null}
+                {!isVideo ? <Button kind="outline" title="Attach audio/video" onPress={() => void run(() => pickMediaFile(id))} /> : null}
+                {d.media.length && connection ? <Button kind="outline" title="Transcribe attached file" onPress={() => void serverAction('transcribe')} /> : null}
+              </View>
+            </Card>
+          </Section>
+        )}
 
-        {tab === 'highlights' ? (
-          <View style={{ marginTop: space.md }}>
-            {keywords.length ? (
-              <>
-                <T v="small" color="textMuted">The words that matter most here{segs.data?.some((s) => s.startMs !== null) ? ', with the moments they come up' : ''}. Tap one to focus.</T>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm }}>
-                  {keywords.map((k) => <Chip key={k.term} label={`${k.term} · ${k.count}`} tone={k.isTool ? 'accent' : 'neutral'} selected={focus === k.term} onPress={() => setFocus(focus === k.term ? null : k.term)} />)}
-                </View>
-                {keywords.filter((k) => !focus || k.term === focus).slice(0, focus ? 1 : 6).map((k) => (
-                  <Card key={k.term} style={{ marginTop: space.md }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <T v="subtitle" style={{ flex: 1 }}>{k.term}</T>
-                      <T v="caption" color="textMuted">{k.count}× {k.isTool ? '· tool' : ''}</T>
-                    </View>
-                    {k.moments.map((m, i) => (
-                      <View key={i} style={{ flexDirection: 'row', gap: space.md, marginTop: space.sm }}>
-                        {m.startMs !== null ? <TimestampPill label={formatTimestamp(m.startMs)} onPress={ytId ? () => openAt(m.startMs) : undefined} /> : null}
-                        <HighlightedText text={m.text} terms={[k.term]} style={{ flex: 1, fontSize: 14 }} />
-                      </View>
-                    ))}
-                    <Button kind="text" title="Show in transcript" icon="arrow-forward" onPress={() => { setFocus(k.term); setTab('transcript'); }} style={{ alignSelf: 'flex-start' }} />
-                  </Card>
-                ))}
-                {e?.timestamps.length ? (
-                  <Section title="Key moments">
-                    {e.timestamps.map((t, i) => (
-                      <View key={i} style={{ flexDirection: 'row', gap: space.md, marginBottom: space.sm }}>
-                        <TimestampPill label={formatTimestamp(t.ms)} onPress={ytId ? () => openAt(t.ms) : undefined} />
-                        <HighlightedText text={t.label} terms={terms} style={{ flex: 1, fontSize: 14 }} />
-                      </View>
-                    ))}
-                  </Section>
-                ) : null}
-              </>
-            ) : <Card><T color="textMuted">Highlights appear once there is a transcript or article text.</T></Card>}
-          </View>
-        ) : null}
-
-        <Pressable onPress={() => setDetails(!details)} accessibilityRole="button" accessibilityState={{ expanded: details }} style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xl, minHeight: 48 }}>
-          <T v="subtitle" style={{ flex: 1 }}>Processing details</T>
+        {/* Details: note, tags, collections, tools, repos, commands, processing */}
+        <Pressable onPress={() => setDetails(!details)} accessibilityRole="button" accessibilityLabel="Details" accessibilityHint="Note, tags, collections, tools, repos and commands" accessibilityState={{ expanded: details }} style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xl, minHeight: 48 }}>
+          <T v="subtitle" style={{ flex: 1 }}>Details</T>
           <Ionicons name={details ? 'chevron-up' : 'chevron-down'} size={18} color={c.textMuted} />
         </Pressable>
         {details ? (
           <View>
-            {d.jobs.length ? d.jobs.map((j) => (
-              <View key={j.id} style={{ paddingVertical: 4 }}>
-                <T v="small">{j.kind.replace(/_/g, ' ')} — {j.status.replace(/_/g, ' ')}{j.attempts ? ` (attempt ${j.attempts})` : ''}</T>
-                {j.lastError ? <T v="caption" color={j.status === 'failed_permanent' ? 'danger' : 'textMuted'}>{j.lastError}</T> : null}
+            <Section title="Your note" action={<IconButton icon="create-outline" label="Edit note" onPress={() => startEdit('note')} />}>
+              {item.note ? <T selectable>{item.note}</T> : <T color="textFaint" onPress={() => startEdit('note')}>Add a note — why did you save this?</T>}
+            </Section>
+
+            <Section title="Tags & collections" action={<IconButton icon="pricetags-outline" label="Edit tags" onPress={() => startEdit('tags')} />}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {item.tags.length ? item.tags.map((t) => <Chip key={t} label={`#${t}`} />) : <T color="textFaint">No tags.</T>}
               </View>
-            )) : <T v="small" color="textMuted">No processing jobs.</T>}
-            {e ? <T v="caption" color="textFaint">Summary source: {e.origin === 'local' ? 'extracted on this phone' : e.origin === 'model' ? 'AI model' : 'your server'} · {e.provider}</T> : null}
-            {d.media.length ? <T v="caption" color="textFaint">Attached media: {d.media.map((m) => `${m.name} (${(m.size / 1048576).toFixed(1)} MB)`).join(', ')}</T> : null}
-            <Button kind="text" title="Reprocess" icon="refresh" onPress={() => void retry()} style={{ alignSelf: 'flex-start' }} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm }}>
+                {d.collections.map((col) => {
+                  const on = d.memberOf.includes(col.id);
+                  return <Chip key={col.id} label={col.name} selected={on} onPress={() => void run(() => repoOp((r) => (on ? r.removeFromCollection(col.id, [id]) : r.addToCollection(col.id, [id]))))} />;
+                })}
+                <Chip label="New collection" icon="add" onPress={() => navigation.navigate('Collections')} />
+              </View>
+            </Section>
+
+            {e && (e.tools.length || e.repos.length || e.commands.length) ? (
+              <Section title="Tools, repos & commands">
+                {e.tools.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{e.tools.map((t) => <Chip key={t} label={t} tone="accent" onPress={() => { setFocus(t); setContentOpen(true); }} />)}</View> : null}
+                {e.repos.map((r) => (
+                  <T key={r} v="small" color="accent" style={{ marginTop: 6, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(`https://github.com/${r}`)}>github.com/{r}</T>
+                ))}
+                {e.commands.map((cmd) => (
+                  <Card key={cmd.command} style={{ marginTop: space.sm, padding: space.md, backgroundColor: cmd.destructive ? c.dangerSoft : c.surface }}>
+                    <T v="mono" selectable>{cmd.command}</T>
+                    {cmd.destructive ? <T v="small" color="danger" style={{ marginTop: 4 }}>⚠ Potentially destructive: {cmd.reason}</T> : null}
+                    <Button kind="text" title="Copy" icon="copy-outline" onPress={() => void Clipboard.setStringAsync(cmd.command)} style={{ alignSelf: 'flex-start' }} />
+                  </Card>
+                ))}
+                <T v="caption" color="textFaint" style={{ marginTop: 4 }}>Copied verbatim from the source. Qivra never runs commands.</T>
+              </Section>
+            ) : null}
+
+            {e?.actionItems.length ? (
+              <Section title="Action items">{e.actionItems.map((a, i) => <T key={i} v="small" style={{ marginBottom: 4 }}>☐ {a}</T>)}</Section>
+            ) : null}
+
+            <Section title="Processing">
+              {d.jobs.length ? d.jobs.map((j) => (
+                <View key={j.id} style={{ paddingVertical: 4 }}>
+                  <T v="small">{j.kind.replace(/_/g, ' ')} — {j.status.replace(/_/g, ' ')}{j.attempts ? ` (attempt ${j.attempts})` : ''}</T>
+                  {j.lastError ? <T v="caption" color={j.status === 'failed_permanent' ? 'danger' : 'textMuted'}>{j.lastError}</T> : null}
+                </View>
+              )) : <T v="small" color="textMuted">No processing jobs.</T>}
+              {e ? <T v="caption" color="textFaint">Summary source: {e.origin === 'local' ? 'extracted on this phone' : e.origin === 'model' ? 'AI model' : 'your server'} · {e.provider}</T> : null}
+              {d.media.length ? <T v="caption" color="textFaint">Attached media: {d.media.map((m) => `${m.name} (${(m.size / 1048576).toFixed(1)} MB)`).join(', ')}</T> : null}
+              <Button kind="text" title="Reprocess" icon="refresh" onPress={() => void retry()} style={{ alignSelf: 'flex-start' }} />
+            </Section>
           </View>
         ) : null}
 

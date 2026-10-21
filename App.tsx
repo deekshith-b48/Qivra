@@ -114,7 +114,7 @@ function Root() {
     <NavigationContainer
       ref={nav}
       theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
-      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Library: 'library', Search: 'search', Agent: 'agent', Reports: 'reports' } }, ConnectServer: 'connect' } } }}
+      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Library: 'library', Search: 'search', Agent: 'agent', Reports: 'reports' } }, ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
     >
       <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>

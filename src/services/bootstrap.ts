@@ -6,7 +6,7 @@ import { registerBackgroundWork } from './background';
 import { drainShareInbox, type CaptureResult } from './capture';
 import { getRepo } from './db';
 import { runLegacyImport } from './legacyImport';
-import { requestSync, runDueJobs } from './processing';
+import { requestSync, runDueJobs, wakeServerJobs } from './processing';
 import { checkConnection, getConnection } from './server';
 
 setRandomSource((bytes) => Crypto.getRandomValues(bytes));
@@ -26,7 +26,8 @@ export async function boot(): Promise<BootResult> {
   void registerBackgroundWork();
   void (async () => {
     if (await getConnection()) {
-      await checkConnection();
+      const c = await checkConnection();
+      if (c && !c.lastError) await wakeServerJobs(repo);
       if (await repo.syncEnabled()) await requestSync();
     }
     await runDueJobs();
@@ -39,7 +40,10 @@ export async function onResume(): Promise<BootResult['shared']> {
   const shared = await drainShareInbox().catch(() => ({ results: [], rejected: [] }));
   void (async () => {
     // Picks up a server that was (re)started meanwhile, including its AI gateway.
-    if (await getConnection()) await checkConnection().catch(() => undefined);
+    if (await getConnection()) {
+      const c = await checkConnection().catch(() => null);
+      if (c && !c.lastError) await wakeServerJobs(await getRepo());
+    }
     await runDueJobs();
   })();
   return shared;

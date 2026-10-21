@@ -33,6 +33,12 @@ class JobError extends Error {
 }
 
 const VIDEO_LIKE = new Set<string>(VIDEO_SOURCES);
+const SERVER_RETRY_MS = 60_000;
+
+/** Make queued server jobs due now (called when the server is reachable again). */
+export async function wakeServerJobs(repo: Repo): Promise<void> {
+  await repo.db.run(`UPDATE jobs SET run_after = ? WHERE status IN ('queued','failed_retryable') AND kind LIKE 'server_%'`, [new Date().toISOString()]);
+}
 
 async function fetchText(url: string, opts: { accept: string; timeoutMs: number }) {
   const ctl = new AbortController();
@@ -252,14 +258,20 @@ async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, u
   if (!provider) throw new JobError('NO_PROVIDER', reason ?? 'No AI provider configured.', false);
   const { body, timed } = await sourceText(repo, item);
   try {
-    const res = await provider.chat([{ role: 'user', content: enrichmentPrompt(item.title, item.url, item.note, body) }], { maxTokens: 900 });
+    const description = item.metadata?.description ?? '';
+    const prompt = enrichmentPrompt({ title: item.title, url: item.url, note: item.note, body, timed, description });
+    const res = await provider.chat([{ role: 'user', content: prompt }], { maxTokens: 900 });
     await repo.addUsage({ provider: provider.label, model: res.model, kind: 'enrich', promptTokens: res.usage.promptTokens, completionTokens: res.usage.completionTokens });
-    const parsed = parseModelEnrichment(res.content);
+    const evidence = {
+      text: [item.title, item.note, body, description].join('\n'),
+      segmentStarts: timed.flatMap((t) => (t.startMs === null ? [] : [t.startMs])),
+    };
+    const parsed = parseModelEnrichment(res.content, evidence);
     if (!parsed) throw new JobError('BAD_MODEL_OUTPUT', 'The model did not return valid JSON.', true);
     const now = new Date().toISOString();
     const local = item.enrichment ?? localEnrich({ title: item.title, note: item.note, bodyText: body, timedSegments: timed, now });
     const merged = mergeModelEnrichment(local, parsed, provider.label, now);
-    await repo.updateItem(item.id, { enrichment: merged, ...(item.summaryOrigin !== 'user' ? { summary: merged.summary, summaryOrigin: 'model' as const } : {}) });
+    await repo.updateItem(item.id, { enrichment: merged, ...(item.summaryOrigin !== 'user' ? { summary: merged.tldr || merged.summary, summaryOrigin: 'model' as const } : {}) });
     emit('items');
     return { provider: provider.label };
   } catch (e) {
@@ -295,7 +307,7 @@ async function requireClient() {
 }
 
 /** Server-side processing: sync the item up, start the job, then poll until it finishes. */
-async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich'): Promise<Record<string, unknown> | 'pending'> {
+async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich'): Promise<Record<string, unknown> | 'pending' | 'unreachable'> {
   const client = await requireClient();
   const itemId = job.itemId ?? '';
   const item = await repo.getItem(itemId);
@@ -354,6 +366,8 @@ async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'caption
     return { serverJob: sj.id };
   } catch (e) {
     if (e instanceof JobError) throw e;
+    // The laptop is asleep or off the network: wait for it instead of spending attempts.
+    if (e instanceof ApiError && (e.kind === 'offline' || e.kind === 'timeout')) return 'unreachable';
     if (e instanceof ApiError && e.code === 'VALIDATION_ERROR') {
       throw new JobError('SERVER_OUTDATED', 'Your Qivra server is older than this app. Restart it from the latest code (python -m qivra serve --lan).', false);
     }
@@ -415,7 +429,7 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
       if (!jobs.length) break;
       for (const job of jobs) {
         try {
-          let result: Record<string, unknown> | 'pending';
+          let result: Record<string, unknown> | 'pending' | 'unreachable';
           switch (job.kind) {
             case 'local_enrich':
             case 'index':
@@ -451,9 +465,13 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
             default:
               throw new JobError('UNKNOWN_JOB', `Unknown job ${job.kind}`, false);
           }
-          if (result === 'pending') {
-            // Poll the server job again shortly without consuming an attempt.
-            await repo.db.run(`UPDATE jobs SET status = 'queued', attempts = attempts - 1, run_after = ? WHERE id = ?`, [new Date(Date.now() + 15_000).toISOString(), job.id]);
+          if (result === 'pending' || result === 'unreachable') {
+            // Poll again later without consuming an attempt; an unreachable server is retried less often
+            // (and immediately when the app sees the server again, see bootstrap.onResume).
+            const waitMs = result === 'pending' ? 15_000 : SERVER_RETRY_MS;
+            await repo.db.run(`UPDATE jobs SET status = 'queued', attempts = attempts - 1, run_after = ?, last_error_code = ?, last_error = ? WHERE id = ?`, [
+              new Date(Date.now() + waitMs).toISOString(), result === 'unreachable' ? 'SERVER_UNREACHABLE' : null, result === 'unreachable' ? 'Waiting for your Qivra server to be reachable.' : null, job.id,
+            ]);
           } else await repo.completeJob(job.id, result);
         } catch (e) {
           const err = e instanceof JobError ? e : new JobError('INTERNAL', (e as Error)?.message ?? 'Unexpected error', true);

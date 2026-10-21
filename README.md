@@ -12,7 +12,7 @@ Save the useful things you find, keep them searchable on your device, and ask qu
 
 **[Download the latest Android APK](https://github.com/deekshith-b48/Qivra/releases/latest)** · [Browse all releases](https://github.com/deekshith-b48/Qivra/releases)
 
-The latest local build is **1.3.0** (`com.qivra.app`, version code `6`), including voice notes, dictation and AI through your paired server. Open [Qivra-1.3.0-release.apk](dist/Qivra-1.3.0-release.apk) on your Android phone and allow your file manager to install unknown apps when Android prompts you. The GitHub links above point to published releases.
+The latest local build is **1.4.0** (`com.qivra.app`, version code `7`): share from Instagram, X, YouTube or a browser and stay there — Qivra transcribes and summarises in the background and notifies you when it is ready. Open [Qivra-1.4.0-release.apk](dist/Qivra-1.4.0-release.apk) on your Android phone and allow your file manager to install unknown apps when Android prompts you. The GitHub links above point to published releases.
 
 > **Sideloading note:** The APK is signed with the Android debug key, not a private production release key. It is suitable for personal testing and sideloading, but is not a Play Store release. Android treats Qivra as a separate app from SuperBrain; existing SuperBrain data can sync through your paired server.
 

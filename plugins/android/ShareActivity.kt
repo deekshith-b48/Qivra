@@ -1,13 +1,16 @@
 package __PACKAGE__
 
+import android.Manifest
 import android.app.Activity
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
+import com.facebook.react.HeadlessJsTaskService
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -24,9 +27,12 @@ import java.util.concurrent.Executors
  * Shared text is written as-is; shared files are copied from their content://
  * URIs into app-private storage (files/share_inbox/files) with random names and
  * a size cap, while this activity still holds the temporary read grant. A JSON
- * envelope is then written atomically to files/share_inbox and MainActivity is
- * opened with qivra://share. The JS side validates and ingests the envelope, so
- * a share is persisted even if the app is killed before JS runs.
+ * envelope is then written atomically to files/share_inbox. QivraShareTaskService
+ * then ingests and processes it in the background (headless JS) while the user
+ * stays in the app they shared from; a notification opens the result. If the
+ * service cannot start, MainActivity is opened with qivra://share instead. The
+ * envelope is persisted first, so a share survives the app being killed.
+ * Notification permission is asked once, on the first share (Android 13+).
  * Only content:// URIs are accepted (no file:// paths from other apps).
  */
 class ShareActivity : Activity() {
@@ -40,7 +46,6 @@ class ShareActivity : Activity() {
             finish()
             return
         }
-        Toast.makeText(this, "Saving to Qivra…", Toast.LENGTH_SHORT).show()
         val snapshot = Intent(intent)
         executor.execute {
             val ok = try {
@@ -50,18 +55,50 @@ class ShareActivity : Activity() {
                 false
             }
             runOnUiThread {
-                if (ok) {
-                    val open = Intent(Intent.ACTION_VIEW, Uri.parse("qivra://share")).apply {
-                        setClassName(this@ShareActivity, "__PACKAGE__.MainActivity")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    }
-                    startActivity(open)
-                } else {
+                if (!ok) {
                     Toast.makeText(this, "Qivra could not save this share.", Toast.LENGTH_LONG).show()
+                    finish()
+                } else if (startBackgroundProcessing()) {
+                    Toast.makeText(this, "Saved to Qivra — you'll be notified when the summary is ready", Toast.LENGTH_LONG).show()
+                    if (!askNotificationPermissionOnce()) finish()
+                } else {
+                    openApp()
+                    finish()
                 }
-                finish()
             }
         }
+    }
+
+    private fun startBackgroundProcessing(): Boolean = try {
+        HeadlessJsTaskService.acquireWakeLockNow(this)
+        val svc = Intent(this, QivraShareTaskService::class.java)
+        (if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)) != null
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun openApp() {
+        val open = Intent(Intent.ACTION_VIEW, Uri.parse("qivra://share")).apply {
+            setClassName(this@ShareActivity, "__PACKAGE__.MainActivity")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        startActivity(open)
+    }
+
+    /** Returns true when the system dialog is shown (finish happens in the callback). */
+    private fun askNotificationPermissionOnce(): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return false
+        val prefs = getSharedPreferences("qivra_share", MODE_PRIVATE)
+        if (prefs.getBoolean("asked_notifications", false)) return false
+        prefs.edit().putBoolean("asked_notifications", true).apply()
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41)
+        return true
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        finish()
     }
 
     private fun writeEnvelope(src: Intent) {

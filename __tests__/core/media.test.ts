@@ -68,6 +68,29 @@ describe('keyword highlights', () => {
     expect(k.find((x) => x.term === 'the')).toBeUndefined();
   });
 
+  test('recurring two-word phrases beat their single words, filler never surfaces', () => {
+    const talk = [
+      { startMs: 0, endMs: 1000, text: 'Really, guys, this video is actually about the vector database thing.' },
+      { startMs: 4000, endMs: 5000, text: 'A vector database stores embeddings. People really love it, actually.' },
+      { startMs: 8000, endMs: 9000, text: 'Gonna show how embeddings get queried, really fast, guys.' },
+    ];
+    const terms = extractKeywords(talk).map((k) => k.term);
+    expect(terms).toContain('vector database');
+    expect(terms).toContain('embeddings');
+    expect(terms).not.toContain('vector');
+    expect(terms).not.toContain('database');
+    for (const filler of ['really', 'guys', 'actually', 'video', 'gonna', 'thing', 'people']) expect(terms).not.toContain(filler);
+  });
+
+  test('model concepts come first but only when they occur in the text; capped at 8', () => {
+    const k = extractKeywords(segs, { concepts: ['dry run', 'quantum computing'], tools: ['Claude Code'] });
+    expect(k.map((x) => x.term)).toEqual(expect.arrayContaining(['Claude Code', 'dry run']));
+    expect(k.find((x) => x.term === 'quantum computing')).toBeUndefined();
+    expect(k.find((x) => x.term === 'dry run')).toMatchObject({ count: 1, moments: [{ startMs: 9000 }] });
+    const many = Array.from({ length: 12 }, (_, i) => `alpha${i} beta${i} alpha${i} beta${i}`).join('. ');
+    expect(extractKeywords([{ startMs: null, endMs: null, text: many }]).length).toBeLessThanOrEqual(8);
+  });
+
   test('splitHighlights marks whole-word matches only', () => {
     expect(splitHighlights('Hooks and webhooks; hooks!', ['hooks'])).toEqual([
       { text: 'Hooks', hit: true }, { text: ' and webhooks; ', hit: false }, { text: 'hooks', hit: true }, { text: '!', hit: false },
@@ -99,6 +122,15 @@ test('words that appear once (e.g. in a short post) are not highlighted as keywo
 test('article extraction stops at references and strips citation markers', () => {
   const html = '<article><p>Knowledge management is a discipline about organising what people know.[12]</p><h2>References</h2><ul><li>Smith (2009). doi:10.1/x</li></ul><p>After refs paragraph that should be dropped entirely.</p></article>';
   expect(extractReadableText(html)).toBe('Knowledge management is a discipline about organising what people know.');
+});
+
+test('attribute contents never leak into article text (Wikipedia data-mw holds raw ">")', () => {
+  const html = `<article><table data-mw='{"parts":[{"wt":"* <small>Anonymous, 1827</small>\\n* [[Elephas]]"}]}' class="infobox"><tr><td>Infobox</td></tr></table>`
+    + '<p data-x="a > b" id=lead>Elephants are the largest living land animals on Earth today.</p>'
+    + '<ul><li data-mw="{&quot;wt&quot;:&quot;x&quot;} > <small>">Elephants live in herds led by an older female.</li></ul></article>';
+  const text = extractReadableText(html);
+  expect(text).toBe('Elephants are the largest living land animals on Earth today.\n\n• Elephants live in herds led by an older female.');
+  expect(htmlToText('<span title="1 > 0">ok</span>')).toBe('ok');
 });
 
 test('keyword moments in untimed text are the sentences that mention the term', () => {

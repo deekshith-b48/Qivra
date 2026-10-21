@@ -29,27 +29,76 @@ export function countTerm(text: string, term: string): number {
   return text.match(termRegex(term))?.length ?? 0;
 }
 
-export function extractKeywords(segments: Segment[], opts: { tools?: string[]; title?: string; max?: number } = {}): Keyword[] {
-  const max = opts.max ?? 10;
+// Spoken filler and generic words that make poor highlights even when frequent.
+const FILLER = new Set(
+  `really gonna wanna gotta video videos guys actually thing things people basically literally kind sort stuff pretty
+something anything everything nothing someone everyone maybe probably definitely obviously honestly totally simply
+just like good great nice cool awesome amazing super much many lots little bit able sure well even still back
+time times today right left look looking looks lets need needs needed said says say saying talk talking tell
+mean means start started going come comes coming give take put keep makes making work works working first last
+next new different same whole every always never ever again already actually channel subscribe click link
+watch watching comment comments episode part here there where yeah yes okay hello welcome thanks`.split(/\s+/),
+);
+
+const meaningful = (w: string) => w.length >= 3 && !FILLER.has(w) && !/[./]/.test(w) && !/^\d/.test(w);
+
+/** Words of `text` in order, lowercased, with stopwords removed in place (so bigrams never jump over them). */
+function words(text: string): (string | null)[] {
+  return (text.toLowerCase().match(/[a-z0-9][a-z0-9+#.'-]*/g) ?? []).map((raw) => {
+    const w = raw.replace(/[.'-]+$/, '');
+    const kept = tokenize(w);
+    return kept.length === 1 && kept[0] === w && meaningful(w) ? w : null;
+  });
+}
+
+export function extractKeywords(
+  segments: Segment[],
+  opts: { tools?: string[]; title?: string; max?: number; concepts?: string[] } = {},
+): Keyword[] {
+  const max = opts.max ?? 8;
   const full = segments.map((s) => s.text).join(' ');
   if (!full.trim()) return [];
   const candidates = new Map<string, { count: number; isTool: boolean }>();
+  // Whole-word containment: "claude code" contains "claude", not "code review".
+  const within = (outer: string, inner: string) => ` ${outer.toLowerCase()} `.includes(` ${inner.toLowerCase()} `);
+  const related = (term: string) => [...candidates.entries()].filter(([k]) => within(k, term) || within(term, k));
+  const overlaps = (term: string) => related(term).length > 0;
   for (const tool of opts.tools ?? []) {
     const n = countTerm(full, tool);
     if (n > 0) candidates.set(tool, { count: n, isTool: true });
   }
-  const titleTerms = new Set(tokenize(opts.title ?? ''));
-  const counts = new Map<string, number>();
-  for (const w of tokenize(full)) counts.set(w, (counts.get(w) ?? 0) + 1);
-  const toolWords = new Set([...candidates.keys()].flatMap((t) => t.toLowerCase().split(/\s+/)));
-  const ranked = [...counts.entries()]
-    // A keyword must recur in the content itself; title terms only get a ranking boost.
-    .filter(([w, n]) => w.length >= 4 && !toolWords.has(w) && n >= 2 && !/[./]/.test(w))
-    .map(([w, n]) => ({ w, n, score: n * (titleTerms.has(w) ? 2 : 1) * Math.log(2 + w.length) }))
-    .sort((a, b) => b.score - a.score);
-  for (const r of ranked) {
+  // Model concepts are copied from the source; keep only those that really occur here.
+  for (const concept of opts.concepts ?? []) {
     if (candidates.size >= max) break;
-    candidates.set(r.w, { count: r.n, isTool: false });
+    const n = countTerm(full, concept);
+    if (n > 0 && !overlaps(concept)) candidates.set(concept, { count: n, isTool: false });
+  }
+  if (candidates.size < max) {
+    const titleTerms = new Set(tokenize(opts.title ?? ''));
+    const uni = new Map<string, number>();
+    const bi = new Map<string, number>();
+    for (const seg of segments) {
+      const ws = words(seg.text);
+      ws.forEach((w, i) => {
+        if (!w) return;
+        uni.set(w, (uni.get(w) ?? 0) + 1);
+        const nx = ws[i + 1];
+        if (nx && nx !== w) bi.set(`${w} ${nx}`, (bi.get(`${w} ${nx}`) ?? 0) + 1);
+      });
+    }
+    const boost = (t: string) => (t.split(' ').some((w) => titleTerms.has(w)) ? 2 : 1);
+    const ranked = [
+      // A keyword must recur in the content itself; title terms only get a ranking boost.
+      ...[...bi.entries()].filter(([, n]) => n >= 2).map(([t, n]) => ({ t, n, score: n * boost(t) * 1.5 * Math.log(2 + t.length) })),
+      ...[...uni.entries()].filter(([w, n]) => n >= 2 && w.length >= 4).map(([t, n]) => ({ t, n, score: n * boost(t) * Math.log(2 + t.length) })),
+    ].sort((a, b) => b.score - a.score);
+    for (const r of ranked) {
+      if (candidates.size >= max) break;
+      const rel = related(r.t);
+      // A word that mostly appears inside an already-chosen phrase adds nothing.
+      if (rel.length && (r.t.includes(' ') || r.n < 2 * Math.max(...rel.map(([, v]) => v.count)))) continue;
+      candidates.set(r.t, { count: r.n, isTool: false });
+    }
   }
   // Untimed text (articles, posts) is split into sentences so a "moment" is the sentence that mentions the term.
   const momentSegs: Segment[] = segments.flatMap((s) =>

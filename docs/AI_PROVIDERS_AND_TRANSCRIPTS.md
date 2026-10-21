@@ -39,10 +39,23 @@ On-device LLM inference was evaluated and not implemented: running a useful mode
 ## Automatic transcripts for shared videos (1.1.0)
 
 1. **YouTube:** the phone asks YouTube's player endpoint (the Android client) for the caption tracks YouTube publishes and downloads one (human captions in your language > the video's auto-captions > any) — `src/core/youtubeCaptions.ts`.
-2. **Instagram, X, and YouTube without captions:** if paired and "Auto-transcribe shared videos" is on (default), the app queues a `transcribe_url` job on the server (`server/qivra/media.py`): yt-dlp fetches only the audio of the public post (allow-listed hosts, no cookies, ≤ 60 min, ≤ 300 MB), faster-whisper transcribes it locally with timestamps and language detection, the temp file is deleted. The phone polls the job and pulls the transcript plus post details (title, uploader, caption, thumbnail).
+2. **Instagram, X, and YouTube without captions:** if paired and "Auto-transcribe shared videos" is on (default), the app queues a `transcribe_url` job on the server (`server/qivra/media.py`): yt-dlp fetches only the audio of the public post (allow-listed hosts, no cookies, ≤ 60 min, ≤ 300 MB), the configured speech-to-text engine transcribes it with timestamps and language detection (see *Server transcription engines* below), the temp file is deleted. The phone polls the job and pulls the transcript plus post details (title, uploader, caption, thumbnail).
 3. **Honest outcomes:** music-only / silent / image posts → `NO_SPEECH` / `NO_AUDIO` / `NO_MEDIA_IN_POST` → item is Ready with "No speech to transcribe"; private or login-gated → `LOGIN_REQUIRED`; platform bot checks → `BOT_CHECK` (retried); not paired → the page explains and offers Connect / Import transcript.
 4. **Websites / GitHub:** readable article text (or README) is extracted on the phone and stored as an "article" record, so it is searchable, summarised and highlighted.
 5. **Highlights:** `src/core/highlights.ts` ranks detected tools and recurring terms, finds the timestamped lines (or sentences) that mention them, and the UI marks every occurrence; YouTube timestamps open the video at that second.
+
+### Server transcription engines (`server/qivra/transcribers.py`)
+
+Chosen with `QIVRA_TRANSCRIBER` in `server/qivra.env` (or the environment); the startup banner prints the active engine on the `Transcription:` line, and `/api/v1/pairing/status` reports it under `transcription` (`engine`, `model`, `cloud`, `fallback`).
+
+| `QIVRA_TRANSCRIBER` | What happens | Audio leaves the machine? |
+|---|---|---|
+| `groq` | Groq's hosted Whisper (`whisper-large-v3-turbo`, override with `QIVRA_GROQ_WHISPER_MODEL`): multipart upload to `{QIVRA_AI_BASE_URL}/audio/transcriptions` with `response_format=verbose_json`, using the gateway key. Segments keep start/end times; the language name is stored as an ISO code (`English` → `en`); provider `groq-whisper-large-v3-turbo`. Only offered when `QIVRA_AI_BASE_URL` is `https://api.groq.com/openai/v1` and a key is set. If Groq fails — unreachable, 429 rate limit, 5xx, rejected key, invalid response, or audio over 25 MB (not uploaded) — the server falls back to transcribe-anything, then faster-whisper. | Yes, to Groq (the key stays on the server and is never logged or sent to phones) |
+| `auto` (default) | transcribe-anything (MLX on Apple Silicon) → faster-whisper if it fails; elsewhere faster-whisper. Never picks Groq. | No |
+| `transcribe-anything` / `faster-whisper` | That local engine only, no fallback. | No |
+| `superbrain` | SuperBrain's legacy analyzer (may itself call Groq). | Depends |
+
+Local engines never fall back to a cloud engine. A reel takes roughly a minute with local Whisper on a laptop and a few seconds with Groq. Live check: `QIVRA_LIVE=1 .venv/bin/python -m pytest -q -s tests/test_qivra_transcribers.py -k live` (sends a generated WAV to Groq).
 
 ## Transcripts
 
@@ -51,7 +64,7 @@ On-device LLM inference was evaluated and not implemented: running a useful mode
 | SRT / WebVTT / TXT file | Share sheet, or Add transcript → file (document picker / SAF) | ≤ 5 MB; parsed on device |
 | Pasted text | Capture → Transcript, or item → Add transcript | `[mm:ss] text` lines keep timestamps |
 | YouTube captions | Item → "Captions via server" | Server job using the optional `youtube-transcript-api`; only captions YouTube publishes; fails honestly with `CAPTIONS_UNAVAILABLE` / `CAPTIONS_NOT_FOUND` |
-| Audio/video you are allowed to process | Share or Capture → Audio/video (≤ 200 MB), then "Transcribe on server" (explicit, confirmed upload) | Server Whisper: Groq Whisper API (key) then local `openai-whisper` + ffmpeg |
+| Audio/video you are allowed to process | Share or Capture → Audio/video (≤ 200 MB), then "Transcribe on server" (explicit, confirmed upload) | Server engine from `QIVRA_TRANSCRIBER` (Groq Whisper with local fallback, or local only) |
 | Instagram | — | Not downloaded by Qivra. Save the link, add your own transcript, or use SuperBrain's legacy analyzer on the server with your own account at your own risk |
 
 Parsing (`src/core/transcripts.ts`, mirrored in `server/qivra/transcripts.py`): tags/entities stripped, rolling-caption duplicates merged, timestamps kept only when present in the source. Chunks for search never split a timed segment, so every hit has a real time range.

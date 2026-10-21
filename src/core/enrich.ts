@@ -18,13 +18,23 @@ export interface ExtractedCommand {
   reason?: string;
 }
 
+/** A key point, optionally anchored to the transcript moment it comes from. */
+export interface KeyMoment {
+  text: string;
+  startMs: number | null;
+}
+
 export interface Enrichment {
   origin: 'local' | 'model' | 'server';
   version: number;
   provider: string;
   generatedAt: string;
   summary: string;
+  /** One-sentence summary. Absent on enrichments stored before 1.4. */
+  tldr?: string;
   keyPoints: string[];
+  /** Key points with their real segment start. Absent on enrichments stored before 1.4. */
+  keyMoments?: KeyMoment[];
   concepts: string[];
   tools: string[];
   commands: ExtractedCommand[];
@@ -95,6 +105,19 @@ here's there's it's don't i'm you're we're they're that's let's video today guys
 );
 
 const ACTION_RE = /\b(you should|make sure to|remember to|don't forget to|try to|need to|first,|next,|then,|finally,|step \d+)/i;
+
+/** Key points with timestamps when known; older enrichments only stored plain strings. */
+export function keyMomentsOf(e: Pick<Enrichment, 'keyPoints' | 'keyMoments'> | null | undefined): KeyMoment[] {
+  if (!e) return [];
+  if (e.keyMoments?.length) return e.keyMoments;
+  return (e.keyPoints ?? []).map((p) => (typeof p === 'string' ? { text: p, startMs: null } : (p as KeyMoment)));
+}
+
+export function firstSentence(text: string): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  const m = /^.{20,}?[.!?](?=\s|$)/.exec(t);
+  return m ? m[0] : t;
+}
 
 export function detectDestructive(command: string): { destructive: boolean; reason?: string } {
   for (const [re, reason] of DESTRUCTIVE) if (re.test(command)) return { destructive: true, reason };
@@ -214,6 +237,13 @@ export function localEnrich(input: EnrichInput): Enrichment {
   const actionItems = splitSentences(input.bodyText).filter((s) => ACTION_RE.test(s)).slice(0, 8);
   const scores = keywordScores(all);
   const concepts = [...scores.entries()].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([w]) => w);
+  const timed = (input.timedSegments ?? []).filter((s): s is { startMs: number; text: string } => s.startMs !== null);
+  const flat = (t: string) => t.replace(/\s+/g, ' ');
+  // Extractive key points are real sentences, so the segment that contains their opening words is where they were said.
+  const keyMoments: KeyMoment[] = keyPoints.map((p) => {
+    const head = flat(p).slice(0, 25);
+    return { text: p, startMs: timed.find((s) => flat(s.text).includes(head))?.startMs ?? null };
+  });
   const timestamps: { ms: number; label: string }[] = [];
   if (input.timedSegments?.length) {
     const kp = new Set(keyPoints.map((p) => p.slice(0, 40)));
@@ -231,7 +261,9 @@ export function localEnrich(input: EnrichInput): Enrichment {
     provider: 'qivra-local-extractive',
     generatedAt: input.now,
     summary,
+    tldr: firstSentence(summary),
     keyPoints,
+    keyMoments,
     concepts,
     tools,
     commands,

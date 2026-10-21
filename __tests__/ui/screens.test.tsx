@@ -64,7 +64,7 @@ test('connect screen validates manual pairing input before any network call', as
   expect(screen.getByRole('button', { name: 'Scan QR code' })).toBeTruthy();
 });
 
-test('video page: summary, transcript with timestamps, keyword highlights, destructive command flag', async () => {
+test('video page: one scroll with TL;DR, key moments, keyword chips filtering a collapsible transcript, details', async () => {
   const repo = await getRepo();
   const { item } = await repo.createItem({ sourceType: 'youtube', title: 'Hooks tutorial', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
   await repo.upsertTranscript({ itemId: item.id, language: 'en', languageMethod: 'provider', source: 'youtube_captions', provider: 'youtube-captions', segments: [
@@ -73,19 +73,50 @@ test('video page: summary, transcript with timestamps, keyword highlights, destr
   ] });
   await repo.updateItem(item.id, {
     summary: 'Configure hooks before packaging.', summaryOrigin: 'local',
-    enrichment: { origin: 'local', version: 1, provider: 'qivra-local-extractive', generatedAt: '2026-10-21T00:00:00Z', summary: 'Configure hooks.', keyPoints: [], concepts: [], tools: [], commands: [{ command: 'rm -rf build', destructive: true, reason: 'Recursively/forcibly deletes files' }], repos: [], urls: [], tags: [], followUpQuestions: [], actionItems: [], timestamps: [] },
+    enrichment: { origin: 'local', version: 1, provider: 'qivra-local-extractive', generatedAt: '2026-10-21T00:00:00Z', summary: 'Configure hooks.', keyPoints: ['Hooks run before packaging'], keyMoments: [{ text: 'Hooks run before packaging', startMs: 61000 }], concepts: [], tools: [], commands: [{ command: 'rm -rf build', destructive: true, reason: 'Recursively/forcibly deletes files' }], repos: [], urls: [], tags: [], followUpQuestions: [], actionItems: [], timestamps: [] },
   });
   wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
   expect(await screen.findByText('Hooks tutorial')).toBeTruthy();
+  expect(screen.queryByRole('tab')).toBeNull(); // no tabs any more
+  expect(screen.getByText('TL;DR')).toBeTruthy();
   expect(screen.getByText('Extracted on device')).toBeTruthy();
-  expect(screen.getByText(/Potentially destructive/)).toBeTruthy();
-  expect(screen.getByLabelText(/Transcript: done/)).toBeTruthy(); // progress steps
-  fireEvent.press(screen.getByRole('tab', { name: /Transcript/ }));
-  expect(await screen.findByText('1:01')).toBeTruthy();
-  expect(screen.getByLabelText('Play from 1:01')).toBeTruthy(); // YouTube timestamps are tappable
-  fireEvent.press(screen.getByRole('tab', { name: /Highlights/ }));
-  expect(await screen.findByText(/^hooks · 3$/)).toBeTruthy();
-  expect(screen.getAllByText('Hooks').length).toBeGreaterThan(0); // highlighted span
+  expect(screen.queryByText('AI summary · generating…')).toBeNull();
+  expect(screen.getByText('Key moments')).toBeTruthy();
+  expect(screen.getByLabelText('Play from 1:01')).toBeTruthy(); // key moment timestamp is tappable on YouTube
+  expect(screen.queryByRole('button', { name: 'Enrich on server' })).toBeNull();
+  // Transcript is collapsed until a keyword chip is tapped, which also filters it.
+  expect(screen.queryByText('1:10')).toBeNull();
+  fireEvent.press(await screen.findByRole('button', { name: 'hooks' }));
+  expect(await screen.findByText('Showing lines with “hooks” ✕')).toBeTruthy();
+  expect(screen.getByText('1:10')).toBeTruthy();
+  expect(screen.getByLabelText(/^Transcript, 2 lines$/)).toBeTruthy();
+  // Details (note, tags, commands…) are collapsed by default.
+  expect(screen.queryByText(/Potentially destructive/)).toBeNull();
+  fireEvent.press(screen.getByRole('button', { name: 'Details' }));
+  expect(await screen.findByText(/Potentially destructive/)).toBeTruthy();
+  expect(screen.getByText('Your note')).toBeTruthy();
+});
+
+test('item page shows the generating state while an AI summary job is queued', async () => {
+  const repo = await getRepo();
+  const { item } = await repo.createItem({ sourceType: 'web', title: 'An article', url: 'https://example.com/a' });
+  await repo.updateItem(item.id, { summary: 'Local summary.', summaryOrigin: 'local' });
+  await repo.enqueueJob({ id: `job_model_enrich_${item.id}`, kind: 'model_enrich', itemId: item.id, retry: true, maxAttempts: 3, runAfter: '2999-01-01T00:00:00Z' });
+  wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
+  expect(await screen.findByText('AI summary · generating…')).toBeTruthy();
+  expect(screen.getByText('Extracted on device')).toBeTruthy();
+});
+
+test('error banner offers one primary and one secondary action', async () => {
+  const repo = await getRepo();
+  const { item } = await repo.createItem({ sourceType: 'instagram', title: 'Reel', url: 'https://www.instagram.com/reel/abc/' });
+  await repo.setStatus(item.id, 'METADATA_CHECK');
+  await repo.setStatus(item.id, 'NEEDS_INPUT', { code: 'SERVER_NOT_PAIRED', message: 'Pair your server.' });
+  wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
+  expect(await screen.findByText('Connect your server to transcribe')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Connect server' })).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Import transcript' }).length).toBeGreaterThan(0);
+  for (const extra of ['Retry', 'Try server again']) expect(screen.queryByRole('button', { name: extra })).toBeNull();
 });
 
 test('agent answers from saved items with a tappable citation when no model is configured', async () => {
