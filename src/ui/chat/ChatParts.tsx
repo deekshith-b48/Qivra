@@ -56,7 +56,9 @@ export function AssistantMessage({ message, isLast, onCite, onTime, onSources, o
   footer?: React.ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
-  const label = message.mode === 'model' ? (message.provider ?? 'AI') : message.mode === 'retrieval_only' ? 'From your saved items (no AI model)' : 'No evidence found';
+  const label = message.mode === 'model' ? (message.provider ?? 'AI')
+    : message.mode === 'general' ? `General answer · not from your library${message.provider ? ` · ${message.provider.split(' · ').pop()}` : ''}`
+      : message.mode === 'retrieval_only' ? 'From your saved items (no AI model)' : 'Nothing found in your library';
   return (
     <View style={{ flexDirection: 'row', gap: space.md, marginBottom: space.xl }}>
       <Avatar />
@@ -104,7 +106,23 @@ export function StreamingMessage({ text, status }: { text: string; status: 'sear
   );
 }
 
-export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, placeholder }: {
+export type AskMode = 'library' | 'general';
+
+/** Library ↔ General switch shown inside the composer. */
+function ModeChip({ mode, onToggle }: { mode: AskMode; onToggle: () => void }) {
+  const { c } = useTheme();
+  const general = mode === 'general';
+  return (
+    <Pressable onPress={onToggle} accessibilityRole="switch" accessibilityState={{ checked: general }}
+      accessibilityLabel={general ? 'General mode: chat about anything. Tap for library mode' : 'Library mode: answers from your saved items. Tap for general mode'}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, height: 32, paddingHorizontal: 10, marginRight: 4, borderRadius: 16, backgroundColor: general ? `${c.info}22` : c.accentSoft }}>
+      <Ionicons name={general ? 'globe-outline' : 'library-outline'} size={15} color={general ? c.info : c.accent} />
+      <T v="caption" style={{ fontWeight: '700', color: general ? c.info : c.accent }}>{general ? 'General' : 'Library'}</T>
+    </Pressable>
+  );
+}
+
+export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, placeholder, mode, onToggleMode }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
@@ -112,12 +130,14 @@ export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, 
   onVoice: () => void;
   streaming: boolean;
   placeholder: string;
+  mode?: AskMode;
+  onToggleMode?: () => void;
 }) {
   const { c } = useTheme();
   const canSend = !!value.trim() && !streaming;
   return (
-    <View style={{ paddingHorizontal: space.md, paddingTop: space.sm, paddingBottom: space.sm, backgroundColor: c.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 26, borderWidth: 1, borderColor: c.border, paddingLeft: space.lg, paddingRight: 6, paddingVertical: 6 }}>
+    <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.md, backgroundColor: c.bg, borderTopWidth: 1, borderColor: c.border }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 24, borderWidth: 1, borderColor: c.border, paddingLeft: space.lg, paddingRight: 6, paddingVertical: 6 }}>
         <TextInput
           value={value}
           onChangeText={onChange}
@@ -127,6 +147,7 @@ export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, 
           multiline
           style={[type.body, { flex: 1, color: c.text, maxHeight: 140, minHeight: 40, paddingTop: 8, paddingBottom: 8 }]}
         />
+        {mode && onToggleMode && !streaming ? <View style={{ height: 40, justifyContent: 'center' }}><ModeChip mode={mode} onToggle={onToggleMode} /></View> : null}
         {!value.trim() && !streaming ? (
           <Pressable onPress={onVoice} accessibilityRole="button" accessibilityLabel="Ask by voice" hitSlop={6} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
             <Ionicons name="mic-outline" size={22} color={c.textMuted} />

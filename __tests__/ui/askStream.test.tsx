@@ -68,3 +68,16 @@ test('regenerate removes the last question and answer before asking again', asyn
   expect(await dropLastExchange(id)).toBe('second');
   await waitFor(async () => expect((await repo.listMessages(id)).map((m) => m.content)).toEqual(['first', 'a1']));
 });
+
+test('the Library / General switch changes the placeholder and is sent with the question', async () => {
+  render(<ThemeProvider><AgentScreen navigation={nav()} route={{ key: 'a', name: 'Agent' } as never} /></ThemeProvider>);
+  const chip = await screen.findByRole('switch');
+  expect(chip.props.accessibilityLabel).toMatch(/^Library mode/);
+  expect(screen.getByPlaceholderText('Ask about your library…')).toBeTruthy();
+  fireEvent.press(chip);
+  expect(screen.getByRole('switch').props.accessibilityLabel).toMatch(/^General mode/);
+  fireEvent.changeText(screen.getByPlaceholderText('Ask anything…'), 'What is the capital of France?');
+  fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(jest.mocked(ask).mock.calls.at(-1)?.[2]).toMatchObject({ mode: 'general' }));
+  await act(async () => { release(); });
+});

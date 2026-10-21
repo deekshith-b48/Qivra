@@ -10,7 +10,7 @@ Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra s
 
 ## Get Qivra
 
-**[Download the latest APK (1.7.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
+**[Download the latest APK (1.7.1)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
 
 > The APK is signed with the Android debug key. It is meant for personal use and sideloading, not the Play Store.
 
@@ -52,6 +52,7 @@ Qivra never makes up a transcript. A music-only reel finishes as "No speech to t
   - Each answer has **Copy**, **Regenerate** and **Sources**.
   - Tables, code blocks and lists render properly, and citations appear as numbered pills.
   - Timestamps in "Ask about this" answers play the video from that second.
+  - A **Library / General** switch in the message box. Library answers only from what you saved, with sources. General chats about anything, labelled as not from your library. Greetings get a friendly reply, and when your library has nothing on a question, **Answer generally** asks again in General mode.
 - **Smart collections:** collections that fill themselves from rules (source, status, tags, concepts, unread, saved recently). Topics shared by 3 or more items are suggested automatically.
 - **Flashcards:** "Make flashcards" on any item turns its summary and key moments into question-and-answer cards. They are written by AI when available, or as fill-in-the-blank cards made on the phone. Review them with Again/Hard/Good/Easy spaced repetition; Home shows how many are due.
 - **Ask:** questions across the whole library, or about one item. Answers come only from your saved items and cite numbered sources [S1]. Saved content is treated as untrusted data, which guards against prompt injection. Without a model, Qivra returns the matching passages instead.

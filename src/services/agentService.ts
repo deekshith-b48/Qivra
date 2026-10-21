@@ -53,6 +53,8 @@ export interface AskStream {
   signal?: AbortSignal;
   /** Called once the user message is stored, so the conversation shows it immediately. */
   onConversation?: (conversationId: string) => void;
+  /** 'library' (default) answers from saved items; 'general' chats like a normal assistant. */
+  mode?: 'library' | 'general';
 }
 
 const STOPPED_NOTE = '\n\n_(stopped)_';
@@ -74,7 +76,7 @@ export async function ask(conversationId: string | null, question: string, strea
       now: Date.now(), timezone: s.timezone, provider, providerUnavailableReason: reason ?? undefined, history,
       onDelta: stream.onDelta ? (t) => { partial += t; stream.onDelta!(t); } : undefined,
       onRoundReset: () => { partial = ''; stream.onRoundReset?.(); },
-      onStatus: stream.onStatus, signal: stream.signal,
+      onStatus: stream.onStatus, signal: stream.signal, mode: stream.mode,
     });
   } catch (e) {
     if (!stream.signal?.aborted) throw e;

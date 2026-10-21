@@ -35,7 +35,7 @@ export function validateCitations(answer: string, validIds: string[]): CitationC
     })
     .replace(/[ \t]+([.,;:])/g, '$1')
     .trim();
-  if (validIds.length && !cited.length) warnings.push('This answer has no citations. Check it against the sources listed below.');
+  if (validIds.length && !cited.length) warnings.push('No saved item was cited, so this answer may not come from your library.');
   return { text, cited, warnings };
 }
 

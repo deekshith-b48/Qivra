@@ -76,8 +76,8 @@ function MainTabs() {
             tabBarButton: () => (
               <Pressable onPress={() => setCaptureOpen(true)} accessibilityRole="button" accessibilityLabel="Save something" accessibilityHint="Paste a link, write a note, record a voice note or import a file"
                 style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', marginTop: -6 }}>
-                  <Ionicons name="add" size={30} color={c.onPrimary} />
+                <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="add" size={28} color={c.onPrimary} />
                 </View>
               </Pressable>
             ),

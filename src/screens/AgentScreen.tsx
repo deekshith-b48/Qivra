@@ -13,7 +13,7 @@ import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { ask, askAboutItem, dropLastExchange } from '../services/agentService';
 import { getRepo } from '../services/db';
 import { generateReport } from '../services/reports';
-import { AssistantMessage, Composer, SourcesSheet, StreamingMessage, UserBubble } from '../ui/chat/ChatParts';
+import { type AskMode, AssistantMessage, Composer, SourcesSheet, StreamingMessage, UserBubble } from '../ui/chat/ChatParts';
 import { Banner, Button, IconButton, Sheet, T } from '../ui/components';
 import { confirm, useQuery } from '../ui/hooks';
 import { radius, space, useTheme } from '../ui/theme';
@@ -54,6 +54,7 @@ export default function AgentScreen({ navigation, route }: Props) {
   const [voice, setVoice] = useState(false);
   const [sourcesFor, setSourcesFor] = useState<Message | null>(null);
   const [live, setLive] = useState<Live | null>(null);
+  const [mode, setMode] = useState<AskMode>('library');
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
@@ -82,7 +83,8 @@ export default function AgentScreen({ navigation, route }: Props) {
     scrollToEnd();
   };
 
-  const send = async (text: string) => {
+  const send = async (text: string, modeOverride?: AskMode) => {
+    const askMode = modeOverride ?? mode;
     const q = text.trim();
     if (!q || live) return;
     setInput('');
@@ -100,6 +102,7 @@ export default function AgentScreen({ navigation, route }: Props) {
       onStatus: (status: Live['status']) => setLive((l) => (l ? { ...l, status } : l)),
       onConversation: (id: string) => setConvId(id),
       signal: ctl.signal,
+      mode: askMode,
     };
     try {
       const r = scopeId ? await askAboutItem(convId, scopeId, q, stream) : await ask(convId, q, stream);
@@ -115,10 +118,15 @@ export default function AgentScreen({ navigation, route }: Props) {
     }
   };
 
-  const regenerate = async () => {
+  const regenerate = async (modeOverride?: AskMode) => {
     if (!convId || live) return;
     const q = await dropLastExchange(convId);
-    if (q) await send(q);
+    if (q) await send(q, modeOverride);
+  };
+  // "Answer generally": switch to General and ask the same question again.
+  const answerGenerally = () => {
+    setMode('general');
+    void regenerate('general');
   };
 
   const runProposal = async (p: ActionProposal) => {
@@ -147,7 +155,8 @@ export default function AgentScreen({ navigation, route }: Props) {
   // While streaming, the stored question already shows; the live answer goes below it.
   const showLive = !!live && (data.length === 0 || data[data.length - 1].role === 'user');
   const empty = !data.length && !live;
-  const subtitle = ai?.enabled ? `${ai.model}${ai.source === 'server' ? ' · via your server' : ''}` : 'No AI model · answers quote your saved items';
+  const subtitle = !ai?.enabled ? 'No AI model · answers quote your saved items'
+    : `${mode === 'general' && !scopeId ? 'General chat' : 'Your library'} · ${ai.model}${ai.source === 'server' ? ' via your server' : ''}`;
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
@@ -212,10 +221,17 @@ export default function AgentScreen({ navigation, route }: Props) {
               onCite={citeIn(m)}
               onTime={m.citations[0] ? (ms) => openSource(m.citations[0].itemId, ms) : undefined}
               onSources={() => setSourcesFor(m)}
-              onRegenerate={() => void regenerate()}
-              footer={(m.proposals as ActionProposal[]).map((p, i) => (
-                <Banner key={i} tone="accent" title={`Suggested: ${p.tool.replace(/_/g, ' ')}`} body={`${p.reason} Nothing happens until you confirm.`} action={p.tool === 'create_report' ? <Button kind="outline" title="Review & create" onPress={() => void runProposal(p)} /> : undefined} />
-              ))}
+              onRegenerate={() => void regenerate(m.mode === 'general' ? 'general' : undefined)}
+              footer={<>
+                {/* Nothing usable from the library (no match, or an answer citing nothing): offer a general answer. */}
+                {(m.mode === 'no_evidence' || (m.mode === 'model' && !m.citations.length)) && m.id === lastAssistant?.id && !live && !scopeId && ai?.enabled ? (
+                  <Button kind="tonal" title="Answer generally" icon="globe-outline" onPress={answerGenerally} style={{ alignSelf: 'flex-start', marginTop: space.sm }}
+                    accessibilityHint="Asks again in General mode; the answer will not come from your library" />
+                ) : null}
+                {(m.proposals as ActionProposal[]).map((p, i) => (
+                  <Banner key={i} tone="accent" title={`Suggested: ${p.tool.replace(/_/g, ' ')}`} body={`${p.reason} Nothing happens until you confirm.`} action={p.tool === 'create_report' ? <Button kind="outline" title="Review & create" onPress={() => void runProposal(p)} /> : undefined} />
+                ))}
+              </>}
             />
           )}
           ListFooterComponent={
@@ -232,7 +248,9 @@ export default function AgentScreen({ navigation, route }: Props) {
           onStop={() => abortRef.current?.abort()}
           onVoice={() => setVoice(true)}
           streaming={!!live}
-          placeholder={scopeId ? 'Ask about this item…' : 'Ask anything about your library…'}
+          placeholder={scopeId ? 'Ask about this item…' : mode === 'general' ? 'Ask anything…' : 'Ask about your library…'}
+          mode={scopeId ? undefined : mode}
+          onToggleMode={() => setMode((m) => (m === 'library' ? 'general' : 'library'))}
         />
       </KeyboardAvoidingView>
       <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={setInput} onOpenSettings={() => navigation.navigate('VoiceSettings')} />

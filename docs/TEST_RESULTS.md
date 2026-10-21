@@ -1,5 +1,14 @@
 # Test results
 
+## 1.7.1 (2026-10-22): conversational Ask and layout
+
+- Release APK: `dist/Qivra-1.7.1-release.apk`, version code 11. Jest: 254 passed, 4 live tests skipped. Server pytest: 96 passed.
+- Emulator (release APK, throwaway server with the Groq gateway):
+  - "Heyy" in Library mode got a friendly greeting labelled as a general answer, where 1.7.0 said "I couldn't find anything…".
+  - "Explain quantum tunnelling simply" in Library mode: the answer cited nothing, so "Answer generally" appeared. Pressing it switched to General, which streamed a full Markdown answer with headings, an analogy and bullets.
+  - The composer sits clear of the tab bar, and the "+" button no longer overlaps it.
+- The "no citations" warning no longer refers to "sources listed below" when there are none.
+
 ## 1.7.0 (2026-10-22): modern Ask, smart collections, report upgrades, flashcards
 
 - Release APK: `dist/Qivra-1.7.0-release.apk`, version code 10, debug-signed. New native module: `expo-print`.
