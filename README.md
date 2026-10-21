@@ -1,100 +1,148 @@
 # Qivra
 
-A private, local-first knowledge vault for Android. Save links, notes, transcripts and media from any app, search everything offline, ask questions answered from your own library with citations, and generate daily or topic reports. Optionally pair with your own laptop server for sync and heavier processing.
+**A private, local-first knowledge vault for Android.**
 
-Qivra is built on [SuperBrain](https://github.com/sidinsearch/superbrain) (AGPL-3.0) — see [docs/SUPERBRAIN_TO_QIVRA_MIGRATION.md](docs/SUPERBRAIN_TO_QIVRA_MIGRATION.md).
+Save the useful things you find, keep them searchable on your device, and ask questions grounded in your own library. Qivra turns shared links, notes, articles, and transcripts into a personal knowledge base—with an optional server you control for sync and heavier processing.
 
-| Path | What |
-|---|---|
-| `App.tsx`, `src/` | React Native (Expo SDK 54, RN 0.81, TypeScript) Android app |
-| `src/core/` | Pure logic: URLs, share payloads, transcripts, enrichment, search, dates, QR, agent, reports, API client |
-| `src/db/`, `src/sync/` | SQLite schema/migrations, repository, sync engine |
-| `src/services/`, `src/screens/`, `src/ui/` | Device services, screens, design system |
-| `plugins/` | Expo config plugin + native `ShareActivity.kt` |
-| `server/` | SuperBrain FastAPI backend + the Qivra `/api/v1` package (`server/qivra/`) |
-| `docs/` | Architecture, pairing, AI/transcripts, security, test results |
+[![Latest release](https://img.shields.io/github/v/release/deekshith-b48/Qivra?label=latest%20release)](https://github.com/deekshith-b48/Qivra/releases/latest)
+[![Android](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)](https://github.com/deekshith-b48/Qivra)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-## Install the APK
+## Get Qivra
 
-The release APK is `dist/Qivra-1.1.0-release.apk`. On the phone: open the file and allow "Install unknown apps" for your file manager when Android asks. Since 1.1.0 the package is **`com.qivra.app`**, so it installs alongside SuperBrain (1.0.0 used SuperBrain's id and could not replace a differently-signed SuperBrain install). SuperBrain data reaches Qivra through the server: pair once and the server's SuperBrain items sync down.
+**[Download the latest Android APK](https://github.com/deekshith-b48/Qivra/releases/latest)** · [Browse all releases](https://github.com/deekshith-b48/Qivra/releases)
 
-### What happens when you share a video or link
+The current release is **1.1.0** (`com.qivra.app`, version code `4`). Download `Qivra-1.1.0-release.apk`, open it on your Android phone, and allow your file manager to install unknown apps when Android prompts you.
 
-| Shared | Transcript | Summary & highlights |
+> **Sideloading note:** The APK is signed with the Android debug key, not a private production release key. It is suitable for personal testing and sideloading, but is not a Play Store release. Android treats Qivra as a separate app from SuperBrain; existing SuperBrain data can sync through your paired server.
+
+## Your knowledge, ready when you are
+
+| Save | Understand | Rediscover |
 |---|---|---|
-| YouTube (incl. Shorts) | Captions YouTube publishes, fetched on the phone; otherwise your server | Extracted on the phone; keyword highlights with timestamps you can tap to play |
-| Instagram reel / X video | Your paired server downloads the public audio (yt-dlp) and transcribes it with local Whisper | Same; caption text is used too |
-| Music-only / silent / image posts | "No speech to transcribe" — never invented | From caption/post text |
-| Websites, GitHub | Article text / README extracted on the phone | Same |
+| Share links from Android, capture notes, and import transcripts or supported files. | Extract useful article text, summaries, key points, and timestamped transcript highlights. | Search your local library, browse videos, websites, and notes, and group saved items into collections. |
+| Keep a durable record even when you are offline. | Ask questions and get answers tied to numbered sources from your own library. | Create daily or topic reports from the information you have saved. |
 
-Each item opens on its own page with **Summary · Transcript (or Article) · Highlights** tabs and a live progress bar; the Library is split into **Videos · Websites · Notes**.
+### Built for a personal library
 
-The APK in this repo is **signed with the Android debug key** (no release keystore exists yet). It is fine for personal sideloading, not for the Play Store.
+- **Local-first storage:** Your library lives in a SQLite database on your device. Full-text search uses SQLite FTS5 and remains available without a server.
+- **Useful without an AI model:** Qivra can extract summaries and key points locally and provide retrieval-based answers with citations. Optional OpenAI-compatible models add generated answers, enrichment, or semantic search.
+- **Video pages, not just bookmarks:** Shared videos get their own detail page with summary, transcript, and highlights. YouTube captions are fetched on the phone when available; supported public video links can use your paired server for transcription.
+- **Keep your context:** Search and organize saved articles, transcripts, notes, and other captured items together.
+- **Sync on your terms:** Pair with your own laptop server to sync devices and run heavier processing. The server is optional for core capture, local search, and library use.
+- **Grounded answers:** Agent responses cite saved items and transcript passages. When no model is configured, Qivra uses retrieval instead of pretending a model answered.
 
-## Run the local server (optional, needed for Instagram/X transcription)
+For precise provider behavior, transcript sources, and limitations, see [AI providers and transcripts](docs/AI_PROVIDERS_AND_TRANSCRIPTS.md).
+
+## How it works
+
+```text
+Share or capture
+       │
+       ▼
+Your local Qivra library ──► extract, index, and organize
+       │                              │
+       │ optional server              ├──► offline search
+       ▼                              ├──► cited answers
+Sync and heavier processing           └──► reports
+```
+
+### Video and link processing
+
+Qivra shows progress as an item is processed and preserves honest outcomes:
+
+- **YouTube:** The app fetches captions published by YouTube when available. Captions are not invented when a video has none.
+- **Supported public video links:** With a paired server, eligible links can be transcribed using locally run Whisper. Private or login-gated posts may not be available.
+- **Articles and GitHub pages:** Readable page text is extracted and indexed for search.
+- **Highlights:** Transcript moments keep their timestamps, so supported video highlights can open at the relevant point.
+
+Processing details and source-specific behavior are documented in [AI providers and transcripts](docs/AI_PROVIDERS_AND_TRANSCRIPTS.md).
+
+## Optional: connect your own server
+
+The companion server is useful for syncing with a laptop, processing supported video audio, and using server-side AI providers. It runs on your own machine; Qivra does not require a hosted Qivra account.
 
 ```bash
 cd server
-python3 -m venv .venv && .venv/bin/pip install -r requirements-qivra.txt -r requirements-media.txt
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-qivra.txt -r requirements-media.txt
 .venv/bin/python -m qivra serve --lan
 ```
 
-`requirements-media.txt` (yt-dlp + faster-whisper, free and local) enables automatic video transcription; the Whisper model (`QIVRA_WHISPER_MODEL`, default `base`, ~145 MB) downloads on first use. Only public posts work — no login cookies are used.
+The server prints its working local and LAN addresses, a one-time pairing code, and a QR code. In Qivra, open **Settings → Connect to My Server → Scan QR code**. Use `--lan` only when you want another device on your network to connect; without it, the server listens on loopback only.
 
-It prints the **real** local and LAN URLs (only after a health check), a one-time Access ID and a QR code. In the app: Settings → Connect to My Server → Scan QR code. Without `--lan` the server listens on 127.0.0.1 only. Details: [docs/LOCAL_SERVER_AND_QR_PAIRING.md](docs/LOCAL_SERVER_AND_QR_PAIRING.md).
+`requirements-media.txt` enables local Whisper transcription for supported public video links. The selected Whisper model downloads on first use. See [Local server and QR pairing](docs/LOCAL_SERVER_AND_QR_PAIRING.md) for network setup, pairing, TLS, and troubleshooting.
 
-The full SuperBrain analysis pipeline (Instagram download, Whisper, vision) needs `server/requirements.txt` and `python start.py` once for its setup wizard; Qivra pairing does not.
+## Privacy by design
 
-## Develop
+- Your library is stored in app-private storage on your device.
+- Qivra has no ads, analytics, or crash-reporting service.
+- An external AI endpoint is optional. Qivra asks for consent before sending saved content outside your network; API keys are stored in Android Keystore-backed secure storage.
+- Server pairing uses a short-lived, one-time code and per-device credentials. The server listens on loopback by default; LAN access is opt-in.
+- Camera access is used for pairing QR scans, and notifications are optional. Files are selected through Android's document picker or shared into Qivra.
 
-Requirements: Node 20+, JDK 17–21, Android SDK (platform 36, build-tools 36), Python 3.11+ for the server.
+Read the full [security and privacy notes](docs/SECURITY_AND_PRIVACY.md) before exposing a server to a network.
+
+## Development
+
+### Requirements
+
+- Node.js 20 or newer
+- JDK 17–21 and Android SDK (platform 36, build-tools 36) for Android builds
+- Python 3.11 or newer for the server
+
+### Install and validate
 
 ```bash
 npm ci
-npx tsc --noEmit                 # type-check
+npx tsc --noEmit
 npx biome lint src App.tsx index.ts __tests__ plugins
-npx jest                         # unit, DB, integration (starts the real server) and UI tests
-cd server && .venv/bin/python -m pytest -q tests
+npx jest
+
+cd server
+.venv/bin/python -m pytest -q tests
 ```
 
-### Build the APK
+The server test command assumes the server virtual environment and dependencies are installed. See the server setup above.
+
+### Build a release APK
+
+Set `JAVA_HOME` and `ANDROID_HOME` to your local JDK and Android SDK paths, then run:
 
 ```bash
-export JAVA_HOME=/path/to/jdk-21 ANDROID_HOME=/path/to/android-sdk
 QIVRA_ANDROID_ABIS=arm64-v8a,x86_64 npx expo prebuild --platform android --clean --no-install
 echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-cd android && ./gradlew assembleRelease
-# → android/app/build/outputs/apk/release/app-release.apk
+cd android
+./gradlew assembleRelease
 ```
 
-`QIVRA_NDK_VERSION` pins the NDK if the default one is not installed. `android/` is generated — change native config in `plugins/withQivraAndroid.js`, not in `android/`.
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. `QIVRA_NDK_VERSION` can pin the NDK when needed. Android project files are generated: make native configuration changes in [`plugins/withQivraAndroid.js`](plugins/withQivraAndroid.js), then regenerate the project.
 
-### Emulator / device testing
+For emulator testing, the emulator reaches a server on the development machine at `http://10.0.2.2:<port>`. For USB testing in loopback mode, use `adb reverse tcp:5001 tcp:5001`.
 
-- Emulator: `avdmanager create avd -n qivra -k "system-images;android-35;google_apis;arm64-v8a"`, `emulator -avd qivra`, `adb install dist/Qivra-*.apk`. The emulator reaches the laptop server at `http://10.0.2.2:<port>`.
-- USB phone with the server in localhost mode: `adb reverse tcp:5001 tcp:5001`, then use `http://127.0.0.1:5001`.
-- Same Wi-Fi: `python -m qivra serve --lan`; allow incoming connections for Python in the firewall.
+## Project map
 
-## Permissions
+| Path | Purpose |
+|---|---|
+| `App.tsx`, `src/screens/`, `src/ui/` | React Native app, navigation, screens, and shared interface components |
+| `src/core/` | Platform-independent capture, enrichment, transcript, search, agent, report, and API logic |
+| `src/db/`, `src/sync/` | SQLite schema and migrations, repository, and synchronization engine |
+| `src/services/` | Device storage, capture, processing, pairing, and background task integrations |
+| `plugins/` | Expo configuration and Android share-target integration |
+| `server/qivra/` | Qivra server API, pairing, jobs, media, and knowledge features |
+| `server/core/`, `server/analyzers/` | SuperBrain server components and analysis pipeline |
+| `docs/` | Architecture, setup, privacy, provider behavior, migration, and test results |
 
-| Permission | Why | When asked |
-|---|---|---|
-| INTERNET, ACCESS_NETWORK_STATE | metadata lookups, your server, your AI endpoint | install time |
-| CAMERA | scanning the pairing QR | only when you tap "Scan QR code" |
-| POST_NOTIFICATIONS | optional daily review reminder | only when you turn the reminder on |
-| RECEIVE_BOOT_COMPLETED, WAKE_LOCK | WorkManager background processing | install time |
-| VIBRATE | declared by expo-notifications | install time |
-
-No storage, microphone or location permission: files come through Android's document picker / share sheet (content URIs).
+For the layer boundaries and data flow, start with [the architecture guide](docs/ARCHITECTURE.md).
 
 ## Troubleshooting
 
-- **"Not a Qivra server"** — wrong port; the server picks 5001 if 5000 is taken (macOS AirPlay). Copy the printed URL.
-- **Timeouts on Wi-Fi** — firewall, guest network, or client isolation on the router.
-- **Code expired/used** — press Enter in the server terminal or `python -m qivra pair --port <port>`.
-- **Device revoked** — Disconnect in the app and pair again.
-- **Expo Go** — not supported (the project is SDK 54 and needs native share code); use the APK.
+- **"Not a Qivra server":** Use the exact address printed by the server. If port 5000 is occupied, Qivra may use port 5001.
+- **The phone cannot reach the server:** Check that both devices are on the same Wi-Fi, that the server was started with `--lan`, and that the firewall permits Python connections. Guest Wi-Fi may isolate devices.
+- **Pairing code expired or was already used:** Generate a new code from the server terminal and scan again.
+- **A video has no transcript:** Captions may not be published, or the link may be private, login-gated, or unsupported. Pair a server for eligible transcription jobs; Qivra does not fabricate transcripts.
+- **Expo Go does not work:** This app requires native Android integrations. Install a development or release APK instead.
 
-## License
+## Lineage and license
 
-AGPL-3.0 (inherited from SuperBrain). See `LICENSE` and the licensing section of the migration document.
+Qivra is built on [SuperBrain](https://github.com/sidinsearch/superbrain), with the migration and licensing context documented in [SuperBrain to Qivra migration](docs/SUPERBRAIN_TO_QIVRA_MIGRATION.md). This project is licensed under **AGPL-3.0**; see [LICENSE](LICENSE).
