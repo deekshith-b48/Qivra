@@ -197,6 +197,7 @@ export function extractiveSummary(text: string, maxSentences = 3): { summary: st
 
 export interface EnrichInput {
   title: string;
+  url?: string | null;
   note: string;
   bodyText: string; // transcript / description / pasted text
   timedSegments?: { startMs: number | null; text: string }[];
@@ -207,7 +208,7 @@ export function localEnrich(input: EnrichInput): Enrichment {
   const all = [input.title, input.note, input.bodyText].filter(Boolean).join('\n');
   const tools = extractTools(all);
   const commands = extractCommands(all);
-  const repos = extractRepos(all);
+  const repos = extractRepos([input.url ?? '', all].join('\n'));
   const urls = extractUrls(all).slice(0, 30);
   const { summary, keyPoints } = extractiveSummary(input.bodyText || input.note || input.title);
   const actionItems = splitSentences(input.bodyText).filter((s) => ACTION_RE.test(s)).slice(0, 8);

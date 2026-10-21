@@ -1175,7 +1175,9 @@ def launch_backend():
 
     # ── Port conflict check ───────────────────────────────────────────────────
     PORT = 5000
-    pid = _check_port(PORT)
+    # Qivra: never offer to kill whatever owns the port (on macOS 5000 is AirPlay/ControlCenter);
+    # the Qivra launcher picks the next free port and prints the real one.
+    pid = None
     if pid is not None:
         if pid > 0:
             warn(f"Port {PORT} is already in use by PID {BOLD}{pid}{RESET}.")
@@ -1268,88 +1270,20 @@ def launch_backend():
                 info(f"Try manually:  kill -9 {pid}")
             sys.exit(1)
 
-    token = TOKEN_FILE.read_text(encoding='utf-8', errors='ignore').strip() if TOKEN_FILE.exists() else "—"
-    local_ip = _detect_local_ip()
-
-    # tunnel startup
-    public_url: str | None = None
-    tunnel_type: str = ""
-    
+    # Qivra: no public tunnels and no master-token QR. The Qivra launcher binds to
+    # loopback unless --lan is given, health-checks itself, and prints a one-time
+    # pairing code (see docs/LOCAL_SERVER_AND_QR_PAIRING.md).
     if NGROK_ENABLED.exists():
-        token_txt = NGROK_TOKEN.read_text(encoding='utf-8', errors='ignore').strip() if NGROK_TOKEN.exists() else ""
-        if not token_txt:
-            warn("Ngrok is enabled but no Authtoken was found.")
-            setup_remote_access()
-
-        info("Starting ngrok in background...")
-        public_url = _start_ngrok(PORT)
-        if public_url:
-            tunnel_type = "ngrok"
-            ok(f"ngrok active  →  {GREEN}{BOLD}{public_url}{RESET}")
-        else:
-            warn("ngrok failed. Falling back to localtunnel...")
-
-    if not public_url:
-        public_url = _start_localtunnel(PORT)
-        if public_url:
-            tunnel_type = "localtunnel"
-            ok(f"localtunnel active  →  {GREEN}{BOLD}{public_url}{RESET}")
-        
-    tunnel_line = ""
-    tunnel_hint = ""
-    
-    if public_url:
-        tunnel_line = f"    Public URL     →  {GREEN}{BOLD}{public_url}{RESET}  {DIM}({tunnel_type}){RESET}"
-        tunnel_hint = f"           · public     →  {GREEN}{public_url}{RESET}"
-    elif NGROK_ENABLED.exists():
-        tunnel_line = f"    Public URL     →  {YELLOW}(failed to start ngrok and localtunnel){RESET}"
-        tunnel_hint = f"           · public     →  run manually: {DIM}ngrok http {PORT}{RESET}"
+        warn("Public tunnels (ngrok/localtunnel) are no longer started automatically.")
+        info("Use a VPN you control for remote access; see docs/LOCAL_SERVER_AND_QR_PAIRING.md.")
+    args = [str(VENV_PYTHON), "-m", "qivra", "serve"]
+    if "--lan" in sys.argv:
+        args.append("--lan")
     else:
-        tunnel_line = f"    Public URL     →  {YELLOW}(failed to start localtunnel){RESET}"
-        tunnel_hint = f"           · public     →  configure ngrok via {DIM}python start.py --reset{RESET} or ensure node/npx is installed"
-
-    # ── Generate and display QR code ──────────────────────────────────────────
-    qr_url = public_url if public_url else f"http://{local_ip}:{PORT}"
-    _display_connect_qr(qr_url, token)
-
-    print(f"""
-  {GREEN}{BOLD}Backend is starting up!{RESET}
-
-    Local URL      →  {CYAN}http://127.0.0.1:{PORT}{RESET}
-    Network URL    →  {CYAN}http://{local_ip}:{PORT}{RESET}
-{(tunnel_line + chr(10)) if tunnel_line else ''}    API docs       →  {CYAN}http://127.0.0.1:{PORT}/docs{RESET}
-    Access Token   →  {BOLD}{MAGENTA}{token}{RESET}
-
-  {DIM}Keep this terminal open. Press Ctrl+C to stop the server.{RESET}
-
-  {YELLOW}Mobile app setup:{RESET}
-    {BOLD}Option A — Scan QR code (easiest):{RESET}
-      1. Open the app  →  Settings  →  tap the {BOLD}QR icon{RESET} 📷
-      2. Scan the QR code shown above
-      3. Done — auto-connected!
-
-    {BOLD}Option B — Manual setup:{RESET}
-      1. Build / install the SuperBrain APK on your Android device.
-      2. Open the app  →  tap the ⚙ settings icon.
-      3. Set {BOLD}Server URL{RESET} to:
-           · Same WiFi  →  http://{local_ip}:{PORT}
-{tunnel_hint}
-           · Port fwd   →  http://<your-public-ip>:{PORT}
-      4. Set {BOLD}Access Token{RESET} to: {BOLD}{MAGENTA}{token}{RESET}
-      5. Tap {BOLD}Save{RESET}  →  Connected!
-
-  {YELLOW}Data Management:{RESET}
-    • {BOLD}Export:{RESET}   In app Settings  →  Data Import/Export  →  choose format (JSON/ZIP)
-    • {BOLD}Import:{RESET}   Upload backup file in app  →  Data Import/Export  →  select file
-    • {BOLD}Reset:{RESET}    Run  {BOLD}python reset.py{RESET}  for safe data cleanup options
-
-  {DIM}Security Note: Keep token.txt private. Anyone with this token can use your API.{RESET}
-  {DIM}The app securely stores your Access Token locally — it's never transmitted anywhere but your server.{RESET}
-""")
-
+        info("Starting in localhost-only mode. Re-run with  python start.py --lan  to pair phones on Wi-Fi.")
     os.chdir(BASE_DIR)
     try:
-        subprocess.run([str(VENV_PYTHON), "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", str(PORT), "--reload"], check=True)
+        subprocess.run(args, check=True)
     except KeyboardInterrupt:
         pass
 

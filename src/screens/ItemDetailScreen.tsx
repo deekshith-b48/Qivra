@@ -8,6 +8,7 @@ import { formatTimestamp } from '../core/transcripts';
 import { SOURCE_LABELS } from '../core/url';
 import type { RootProps } from '../navigation/types';
 import { deleteItemFiles, pickMediaFile } from '../services/capture';
+import { getRepo } from '../services/db';
 import { emit } from '../services/events';
 import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
 import { Banner, Button, Card, Chip, Divider, Field, Header, IconButton, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
@@ -47,7 +48,6 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   useEffect(() => {
     void (async () => {
-      const { getRepo } = await import('../services/db');
       await (await getRepo()).markViewed(id);
     })();
   }, [id]);
@@ -67,8 +67,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   }
   const { item } = d;
   const e = item.enrichment;
-  const repoOp = async (fn: (repo: Awaited<ReturnType<typeof import('../services/db').getRepo>>) => Promise<unknown>) => {
-    const { getRepo } = await import('../services/db');
+  const repoOp = async (fn: (repo: Awaited<ReturnType<typeof getRepo>>) => Promise<unknown>) => {
     await fn(await getRepo());
     emit('items');
   };

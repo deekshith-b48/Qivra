@@ -61,6 +61,7 @@ export function mediaKindOf(name: string, mime: string): 'audio' | 'video' | nul
 
 /** Strip path components and control characters from a display name. */
 export function safeFileName(name: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point
   const base = (name.split(/[\\/]/).pop() ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   return base.slice(0, 120) || 'file';
 }

@@ -1,7 +1,7 @@
 /** Qivra UI kit: small, accessible building blocks on top of the theme tokens. */
 
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import type React from 'react';
 import {
   ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
   type PressableProps, type StyleProp, type TextInputProps, type TextProps, type TextStyle, type ViewStyle,

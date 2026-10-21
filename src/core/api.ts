@@ -184,7 +184,7 @@ export class QivraClient {
     }
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? this.timeoutMs);
-    let res;
+    let res: Awaited<ReturnType<FetchLike>>;
     try {
       res = await this.fetchImpl(`${this.baseUrl}${path}`, { method, headers, body: payload, signal: ctl.signal });
     } catch (e) {

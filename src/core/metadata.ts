@@ -26,7 +26,7 @@ const MAX_HTML = 1_500_000;
 export function decodeEntities(s: string): string {
   return s
     .replace(/&#(\d+);/g, (_m, n: string) => String.fromCharCode(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_m, n: string) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, n: string) => String.fromCharCode(Number.parseInt(n, 16)))
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&lt;/g, '<')
@@ -69,6 +69,10 @@ export function stripMarkdown(md: string): string {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]+>/g, '')
     .replace(/^#+\s*/gm, '')
+    .replace(/(\*\*|__)/g, '')
+    .replace(/^\s*>\s?(\[![A-Z]+\]\s*)?/gm, '')
+    .replace(/\[![A-Z]+\]\s*/g, '')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:)!?]|$)/g, '$1$2')
     .trim();
 }
 

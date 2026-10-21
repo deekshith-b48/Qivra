@@ -130,12 +130,15 @@ export class Repo {
 
   /** Create an item, or return the existing one when the dedupe key matches. */
   async createItem(input: NewItem): Promise<{ item: Item; duplicate: boolean }> {
-    const existing = await this.findDuplicate(input.dedupeKey ?? null);
-    if (existing) return { item: existing, duplicate: true };
     const now = this.now();
     const id = input.id ?? newId('it');
     const sync = await this.syncEnabled();
-    await this.db.transaction(async (tx) => {
+    // Duplicate check and insert happen in one transaction, so concurrent captures cannot both insert.
+    const dupId = await this.db.transaction(async (tx) => {
+      if (input.dedupeKey) {
+        const dup = await tx.get<{ id: string }>('SELECT id FROM items WHERE dedupe_key = ? AND deleted = 0 ORDER BY captured_at LIMIT 1', [input.dedupeKey]);
+        if (dup) return dup.id;
+      }
       await tx.run(
         `INSERT INTO items (id, source_type, url, dedupe_key, title, note, author, summary, summary_origin, status, origin,
            captured_at, created_at, updated_at, sync_status)
@@ -148,7 +151,9 @@ export class Repo {
       );
       for (const tag of input.tags ?? []) await this.addTag(id, tag, 'user', tx);
       await this.reindexMeta(id, tx);
+      return null;
     });
+    if (dupId) return { item: (await this.getItem(dupId)) as Item, duplicate: true };
     return { item: (await this.getItem(id)) as Item, duplicate: false };
   }
 

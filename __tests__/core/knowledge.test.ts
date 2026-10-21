@@ -1,3 +1,4 @@
+import { stripMarkdown } from '../../src/core/metadata';
 import { chunkSegments, detectFormat, formatTimestamp, parseTranscript, TranscriptParseError } from '../../src/core/transcripts';
 import { detectLanguage, isValidLanguageCode } from '../../src/core/language';
 import { backoffMs, canTransition, InvalidTransitionError, transition } from '../../src/core/status';
@@ -166,6 +167,16 @@ describe('search helpers', () => {
     expect(cosine([1, 0], [0, 1])).toBeCloseTo(0);
   });
   test('snippet', () => {
-    expect(snippet('x'.repeat(300) + ' claude code ' + 'y'.repeat(300), 'claude', 20)).toMatch(/^…x+ claude code y+…$/);
+    expect(snippet(`${'x'.repeat(300)} claude code ${'y'.repeat(300)}`, 'claude', 20)).toMatch(/^…x+ claude code y+…$/);
   });
+});
+
+test('an item whose own URL is a GitHub repo counts as a repository', () => {
+  const e = localEnrich({ title: 'claude-code', url: 'https://github.com/anthropics/claude-code', note: '', bodyText: 'An agentic coding tool.', now: 'x' });
+  expect(e.repos).toEqual(['anthropics/claude-code']);
+});
+
+test('README markdown is reduced to plain text but code is kept', () => {
+  const out = stripMarkdown('# Title\n> [!IMPORTANT]\n> Read **this** and *that*.\n```bash\nnpx foo\n```\n![img](x.png) [link](http://a)');
+  expect(out).toBe('Title\nRead this and that.\n\nnpx foo\n\n link');
 });

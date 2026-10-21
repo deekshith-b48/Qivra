@@ -237,3 +237,13 @@ describe('export and delete', () => {
     expect(await repo.getMeta('app.onboarded')).toBe('1');
   });
 });
+
+describe('concurrency', () => {
+  test('concurrent captures of the same link create exactly one item', async () => {
+    const repo = await freshRepo();
+    const results = await Promise.all(Array.from({ length: 5 }, () => repo.createItem({ sourceType: 'youtube', url: yt.url, dedupeKey: yt.dedupeKey })));
+    expect(results.filter((r) => !r.duplicate)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.item.id)).size).toBe(1);
+    expect(await repo.countItems({})).toBe(1);
+  });
+});

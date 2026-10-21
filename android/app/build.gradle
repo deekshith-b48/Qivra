@@ -2,8 +2,6 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-import java.util.Base64
-
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -94,8 +92,8 @@ android {
         applicationId 'com.superbrain.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "2.0.1"
+        versionCode 3
+        versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -106,23 +104,6 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            if (System.getenv("ANDROID_KEYSTORE_BASE64") != null && System.getenv("ANDROID_KEYSTORE_BASE64") != "") {
-                def keystorePath = "$rootDir/release.keystore"
-                def keystoreBytes = Base64.getDecoder().decode(System.getenv("ANDROID_KEYSTORE_BASE64"))
-                new File(keystorePath).withOutputStream { out -> out.write(keystoreBytes) }
-                storeFile file(keystorePath)
-                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias System.getenv("ANDROID_KEYSTORE_KEY_ALIAS")
-                keyPassword System.getenv("ANDROID_KEYSTORE_KEY_PASSWORD")
-            } else {
-                // Local development fallback only. CI always provides ANDROID_KEYSTORE_BASE64.
-                storeFile file('debug.keystore')
-                storePassword 'android'
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
-            }
-        }
     }
     buildTypes {
         debug {
@@ -131,7 +112,7 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.release
+            signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

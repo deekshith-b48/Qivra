@@ -35,5 +35,6 @@ export function looksLikeInjection(text: string): boolean {
 
 /** Neutralise markup so untrusted text cannot break out of its <source> block. */
 export function neutralise(text: string, limit = 1500): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: removes NUL bytes from untrusted text
   return (text ?? '').replace(/</g, '‹').replace(/>/g, '›').replace(/\u0000/g, '').slice(0, limit);
 }

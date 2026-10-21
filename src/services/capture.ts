@@ -101,8 +101,23 @@ async function storeMedia(srcUri: string, name: string, mime: string, size: numb
   return { uri: dest, name: safeFileName(name), mime: mime || 'application/octet-stream', size };
 }
 
-/** Process envelopes written by the native ShareActivity. Durable: envelopes are deleted only after ingestion. */
-export async function drainShareInbox(): Promise<{ results: CaptureResult[]; rejected: { name: string; reason: string }[] }> {
+type DrainResult = { results: CaptureResult[]; rejected: { name: string; reason: string }[] };
+let draining: Promise<DrainResult> | null = null;
+
+/**
+ * Process envelopes written by the native ShareActivity. Durable: envelopes are deleted only after ingestion.
+ * Serialized: app-resume, the qivra://share link and boot can all fire at once; concurrent drains
+ * would read the same envelope twice.
+ */
+export function drainShareInbox(): Promise<DrainResult> {
+  const run = (draining ?? Promise.resolve({ results: [], rejected: [] } as DrainResult)).then(() => drainOnce(), () => drainOnce());
+  draining = run.finally(() => {
+    if (draining === run) draining = null;
+  }) as Promise<DrainResult>;
+  return run;
+}
+
+async function drainOnce(): Promise<DrainResult> {
   const dir = SHARE_INBOX_DIR();
   const info = await FS.getInfoAsync(dir);
   if (!info.exists) return { results: [], rejected: [] };

@@ -8,6 +8,9 @@
 
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
+import { drainShareInbox } from './capture';
+import { getRepo } from './db';
+import { requestSync, runDueJobs } from './processing';
 
 export const BACKGROUND_TASK = 'qivra-background-work';
 
@@ -15,9 +18,6 @@ export function defineBackgroundTask(): void {
   if (TaskManager.isTaskDefined(BACKGROUND_TASK)) return;
   TaskManager.defineTask(BACKGROUND_TASK, async () => {
     try {
-      const { getRepo } = await import('./db');
-      const { drainShareInbox } = await import('./capture');
-      const { runDueJobs, requestSync } = await import('./processing');
       const repo = await getRepo();
       await repo.recoverRunningJobs();
       await drainShareInbox();

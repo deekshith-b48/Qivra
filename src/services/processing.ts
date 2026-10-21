@@ -22,6 +22,7 @@ import { loadProvider } from './ai';
 import { getRepo } from './db';
 import { emit } from './events';
 import { getClient, getConnection } from './server';
+import { generateReport } from './reports';
 import { getSettings } from './settings';
 
 class JobError extends Error {
@@ -126,7 +127,7 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
 
 async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { startMs: number | null; text: string }[], finish: boolean): Promise<void> {
   const now = new Date().toISOString();
-  const local = localEnrich({ title: item.title, note: item.note, bodyText: body, timedSegments: timed, now });
+  const local = localEnrich({ title: item.title, url: item.url, note: item.note, bodyText: body, timedSegments: timed, now });
   // Keep a newer model/server enrichment; refresh evidence fields from the local pass.
   const prev = item.enrichment;
   const enrichment: Enrichment = prev && prev.origin !== 'local' ? { ...prev, tools: local.tools, commands: local.commands, repos: local.repos, urls: local.urls, timestamps: local.timestamps } : local;
@@ -268,7 +269,6 @@ async function handleSync(repo: Repo): Promise<Record<string, unknown>> {
 async function handleScheduledReport(): Promise<Record<string, unknown>> {
   const s = await getSettings();
   if (!s.scheduledDailyReport) return { skipped: true };
-  const { generateReport } = await import('./reports');
   const r = await generateReport({ kind: 'yesterday' });
   return { reportId: r.id };
 }

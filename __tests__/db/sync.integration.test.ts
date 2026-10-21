@@ -35,8 +35,12 @@ async function startServer(port: number, dataDir: string): Promise<{ proc: Child
     env: { ...process.env, DATABASE_PATH: join(dataDir, 'server.db'), QIVRA_DATA_DIR: join(dataDir, 'data'), NO_COLOR: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  proc.stdout!.on('data', (d) => (out += d.toString()));
-  proc.stderr!.on('data', (d) => (out += d.toString()));
+  proc.stdout!.on('data', (d) => {
+    out += d.toString();
+  });
+  proc.stderr!.on('data', (d) => {
+    out += d.toString();
+  });
   const deadline = Date.now() + 20_000;
   while (!/Access ID/.test(out)) {
     if (Date.now() > deadline || proc.exitCode !== null) throw new Error(`server did not start:\n${out}`);

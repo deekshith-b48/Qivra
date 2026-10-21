@@ -3,9 +3,11 @@
  * Contrast: text ≥ 7:1, muted text ≥ 4.5:1, accent text ≥ 4.5:1 in both themes.
  */
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import type React from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { subscribe } from '../services/events';
+import { getSettings } from '../services/settings';
 
 export interface Palette {
   scheme: 'light' | 'dark';
@@ -98,7 +100,6 @@ export function ThemeProvider({ children, initial = 'system' }: { children: Reac
   useEffect(() => {
     const load = async () => {
       try {
-        const { getSettings } = await import('../services/settings');
         setPref((await getSettings()).theme);
       } catch {
         /* keep current */

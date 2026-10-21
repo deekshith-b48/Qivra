@@ -15,6 +15,7 @@ import { Banner, Button, Chip, IconButton, Loading, Sheet, T } from '../ui/compo
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { radius, space, type, useTheme } from '../ui/theme';
 import { useSettings } from '../ui/useSettings';
+import { Markdown } from '../ui/Markdown';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Agent'>, NativeStackScreenProps<RootStackParamList>>;
 
@@ -90,7 +91,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           renderItem={({ item: m }) => (
             <View style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'stretch', maxWidth: m.role === 'user' ? '85%' : '100%', marginBottom: space.md }}>
               <View style={{ backgroundColor: m.role === 'user' ? c.primary : c.surface, borderRadius: radius.lg, padding: space.md }}>
-                <T color={m.role === 'user' ? c.onPrimary : 'text'} selectable>{m.content}</T>
+                {m.role === 'user' ? <T color={c.onPrimary} selectable>{m.content}</T> : <Markdown source={m.content} />}
               </View>
               {m.role === 'assistant' ? (
                 <View style={{ marginTop: 6 }}>

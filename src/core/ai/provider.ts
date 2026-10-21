@@ -71,7 +71,7 @@ export function createOpenAICompatProvider(cfg: OpenAICompatConfig, fetchImpl: F
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     signal?.addEventListener('abort', () => ctl.abort());
-    let res;
+    let res: Awaited<ReturnType<FetchLike>>;
     try {
       res = await fetchImpl(`${base}${path}`, {
         method: 'POST',
