@@ -29,20 +29,24 @@ test('onboarding marks the app onboarded and opens the main tabs', async () => {
   expect(await (await getRepo()).getMeta('app.onboarded')).toBe('1');
 });
 
-test('library shows empty state, then real items, and filters by text', async () => {
+test('library has Videos / Websites / Notes sections with real items and text filter', async () => {
   wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
-  expect(await screen.findByText('Your library is empty')).toBeTruthy();
+  expect(await screen.findByText('No videos yet')).toBeTruthy();
   const repo = await getRepo();
   await act(async () => {
+    await repo.createItem({ sourceType: 'instagram', title: 'Reel about agents', url: 'https://www.instagram.com/reel/abc/' });
     await repo.createItem({ sourceType: 'github', title: 'anthropics/claude-code', url: 'https://github.com/anthropics/claude-code' });
     await repo.createItem({ sourceType: 'note', title: 'Pasta recipe' });
     emit('items');
   });
+  expect(await screen.findByText('Reel about agents')).toBeTruthy();
+  expect(screen.queryByText('anthropics/claude-code')).toBeNull();
+  fireEvent.press(screen.getByRole('tab', { name: /Websites/ }));
   expect(await screen.findByText('anthropics/claude-code')).toBeTruthy();
-  expect(screen.getByText('Pasta recipe')).toBeTruthy();
+  fireEvent.press(screen.getByRole('tab', { name: /Notes/ }));
+  expect(await screen.findByText('Pasta recipe')).toBeTruthy();
   fireEvent.changeText(screen.getByLabelText('Filter your library'), 'claude');
-  await waitFor(() => expect(screen.queryByText('Pasta recipe')).toBeNull(), { timeout: 3000 });
-  expect(screen.getByText('anthropics/claude-code')).toBeTruthy();
+  await waitFor(() => expect(screen.getByText('No matches')).toBeTruthy(), { timeout: 3000 });
 });
 
 test('connect screen validates manual pairing input before any network call', async () => {
@@ -60,20 +64,28 @@ test('connect screen validates manual pairing input before any network call', as
   expect(screen.getByRole('button', { name: 'Scan QR code' })).toBeTruthy();
 });
 
-test('item detail shows timestamped transcript, provenance and flags destructive commands', async () => {
+test('video page: summary, transcript with timestamps, keyword highlights, destructive command flag', async () => {
   const repo = await getRepo();
   const { item } = await repo.createItem({ sourceType: 'youtube', title: 'Hooks tutorial', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
-  await repo.upsertTranscript({ itemId: item.id, language: 'en', source: 'import_srt', segments: [{ startMs: 61000, endMs: 64000, text: 'Run rm -rf build before packaging.' }] });
+  await repo.upsertTranscript({ itemId: item.id, language: 'en', languageMethod: 'provider', source: 'youtube_captions', provider: 'youtube-captions', segments: [
+    { startMs: 61000, endMs: 64000, text: 'Hooks run before packaging, so hooks matter.' },
+    { startMs: 70000, endMs: 72000, text: 'Configure hooks in settings.' },
+  ] });
   await repo.updateItem(item.id, {
-    summary: 'Configure hooks.', summaryOrigin: 'local',
-    enrichment: { origin: 'local', version: 1, provider: 'qivra-local-extractive', generatedAt: '2026-10-21T00:00:00Z', summary: 'Configure hooks.', keyPoints: [], concepts: [], tools: ['Claude Code'], commands: [{ command: 'rm -rf build', destructive: true, reason: 'Recursively/forcibly deletes files' }], repos: [], urls: [], tags: [], followUpQuestions: [], actionItems: [], timestamps: [] },
+    summary: 'Configure hooks before packaging.', summaryOrigin: 'local',
+    enrichment: { origin: 'local', version: 1, provider: 'qivra-local-extractive', generatedAt: '2026-10-21T00:00:00Z', summary: 'Configure hooks.', keyPoints: [], concepts: [], tools: [], commands: [{ command: 'rm -rf build', destructive: true, reason: 'Recursively/forcibly deletes files' }], repos: [], urls: [], tags: [], followUpQuestions: [], actionItems: [], timestamps: [] },
   });
   wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
   expect(await screen.findByText('Hooks tutorial')).toBeTruthy();
-  expect(await screen.findByText('1:01')).toBeTruthy();
   expect(screen.getByText('Extracted on device')).toBeTruthy();
   expect(screen.getByText(/Potentially destructive/)).toBeTruthy();
-  expect(screen.getByLabelText('Back')).toBeTruthy();
+  expect(screen.getByLabelText(/Transcript: done/)).toBeTruthy(); // progress steps
+  fireEvent.press(screen.getByRole('tab', { name: /Transcript/ }));
+  expect(await screen.findByText('1:01')).toBeTruthy();
+  expect(screen.getByLabelText('Play from 1:01')).toBeTruthy(); // YouTube timestamps are tappable
+  fireEvent.press(screen.getByRole('tab', { name: /Highlights/ }));
+  expect(await screen.findByText(/^hooks · 3$/)).toBeTruthy();
+  expect(screen.getAllByText('Hooks').length).toBeGreaterThan(0); // highlighted span
 });
 
 test('agent answers from saved items with a tappable citation when no model is configured', async () => {

@@ -111,6 +111,7 @@ export type JobKind =
   | 'server_metadata'
   | 'server_captions'
   | 'server_transcribe'
+  | 'server_transcribe_url'
   | 'server_enrich'
   | 'model_enrich'
   | 'embed'

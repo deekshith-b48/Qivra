@@ -138,6 +138,7 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
         <T v="mono" selectable>.venv/bin/python -m qivra serve --lan</T>
         <T v="small" color="textMuted" style={{ marginTop: 4 }}>2. It prints the real server URL, a one-time Access ID and a QR code (valid ~5 minutes). Press Enter there for a new one.</T>
         <T v="small" color="textMuted">3. Keep the phone on the same Wi-Fi, then scan or type the code below.</T>
+        <T v="small" color="textMuted" style={{ marginTop: 4 }}>Once paired, shared Instagram and X videos are transcribed automatically by the server (install the media extras there: .venv/bin/pip install -r requirements-media.txt).</T>
       </Card>
 
       {stage.k === 'probing' ? <Card style={{ marginTop: space.md }}><T>Checking {stage.payload.serverUrl}…</T><Loading /></Card> : null}

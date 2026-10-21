@@ -323,3 +323,15 @@ def test_legacy_superbrain_rows_are_mirrored(tmp_path):
     assert ent["data"]["tags"] == ["ai", "education"]
     assert env.services.store.list_transcripts("sb_YT_abc")[0]["text"] == "spoken words"
     assert env.services.store.mirror_legacy_analyses() == 0  # idempotent
+
+
+def test_device_push_keeps_server_owned_fields(paired):
+    env, h, _ = paired
+    r = env.phone.post("/api/v1/sync", headers=h, json={"cursor": 0, "changes": [{"id": "p1", "data": {"title": "Reel"}}]}).json()
+    env.services.store.server_update_item("p1", {"metadata": {"thumbnail": "https://cdn/x.jpg"}})
+    server_rev = env.services.store.get_entity("item", "p1")["revision"]
+    push = env.phone.post("/api/v1/sync", headers=h, json={"cursor": r["cursor"], "changes": [
+        {"id": "p1", "base_revision": server_rev, "data": {"title": "Reel", "note": "mine"}}]}).json()
+    assert push["applied"]
+    data = env.services.store.get_entity("item", "p1")["data"]
+    assert data["note"] == "mine" and data["metadata"]["thumbnail"] == "https://cdn/x.jpg"

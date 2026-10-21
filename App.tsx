@@ -70,7 +70,9 @@ function MainTabs() {
 
 function showShare(shared: BootResult['shared']) {
   if (!shared.results.length && !shared.rejected.length) return;
-  const go = () => (nav.isReady() ? nav.navigate('ShareReceipt', shared) : setTimeout(go, 100));
+  const single = shared.results.length === 1 && !shared.rejected.length && shared.results[0].itemId && !shared.results[0].error ? shared.results[0].itemId : null;
+  // One shared item opens straight on its own page (live progress); several, or failures, show a receipt.
+  const go = () => (nav.isReady() ? (single ? nav.navigate('ItemDetail', { id: single }) : nav.navigate('ShareReceipt', shared)) : setTimeout(go, 100));
   go();
 }
 
@@ -111,7 +113,7 @@ function Root() {
     <NavigationContainer
       ref={nav}
       theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
-      linking={{ prefixes: ['qivra://', 'superbrain://'], config: { screens: { Main: { screens: { Today: 'today', Library: 'library', Search: 'search', Agent: 'agent', Reports: 'reports' } }, ConnectServer: 'connect' } } }}
+      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Library: 'library', Search: 'search', Agent: 'agent', Reports: 'reports' } }, ConnectServer: 'connect' } } }}
     >
       <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>

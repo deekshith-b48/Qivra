@@ -1,0 +1,6 @@
+# Optional: automatic transcription of shared YouTube / Instagram / X videos (job "transcribe_url").
+# Free and local: yt-dlp downloads public audio, faster-whisper transcribes on the CPU.
+# Model size via QIVRA_WHISPER_MODEL (tiny, base [default], small, medium); first use downloads it.
+yt-dlp>=2025.1
+faster-whisper>=1.1
+av>=14,<16

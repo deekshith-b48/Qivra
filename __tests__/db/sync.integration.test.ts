@@ -181,3 +181,29 @@ maybe('sync with the real local server', () => {
     await expect(new QivraClient({ baseUrl: `http://127.0.0.1:${port + 1}`, retries: 0 }).health(1000)).rejects.toMatchObject({ kind: 'offline' });
   });
 });
+
+maybe('server-side processing does not create conflicts', () => {
+  test('a server-made revision is rebased, not raised as a conflict', async () => {
+    const port = await freePort();
+    const dir = mkdtempSync(join(tmpdir(), 'qivra-int2-'));
+    const srv = await startServer(port, dir);
+    try {
+      const base = `http://127.0.0.1:${port}`;
+      const A = await device(base, 'Phone');
+      await enableSync(A.repo);
+      const { item } = await A.repo.createItem({ sourceType: 'instagram', title: '', url: 'https://www.instagram.com/reel/abc/' });
+      await runSync(A.repo, A.client);
+      // Simulate the server's transcription job patching post details via the store (updated_by = 'server').
+      const py = spawn(PY, ['-c', `import sys; sys.path.insert(0,'.'); from qivra.store import QivraStore; s=QivraStore(r'${join(dir, 'server.db')}'); s.server_update_item('${item.id}', {'metadata': {'title': 'Reel title'}})`], { cwd: SERVER_DIR });
+      await new Promise((r) => py.once('exit', r));
+      await A.repo.updateItem(item.id, { note: 'my note' });
+      const s = await runSync(A.repo, A.client);
+      const s2 = await runSync(A.repo, A.client);
+      expect(s.conflicts + s2.conflicts).toBe(0);
+      expect(await A.repo.openConflicts()).toEqual([]);
+      expect((await A.repo.getItem(item.id))?.syncStatus).toBe('synced');
+    } finally {
+      srv.proc.kill('SIGTERM');
+    }
+  }, 60_000);
+});

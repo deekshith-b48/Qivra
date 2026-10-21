@@ -62,6 +62,45 @@ export function parseHtmlMeta(html: string, baseUrl: string): Omit<FetchedMetada
   };
 }
 
+/** HTML fragment → plain text with paragraph breaks. */
+export function htmlToText(html: string): string {
+  return decodeEntities(
+    html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6]|blockquote|tr)>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  )
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n\s*/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Readable article text from a web page: drops scripts, navigation, headers,
+ * footers and asides, prefers <article>/<main>, keeps headings, paragraphs,
+ * list items and code blocks. Not a full Readability port, but enough to
+ * summarise and search typical articles and docs.
+ */
+export function extractReadableText(html: string, maxChars = 60_000): string {
+  let body = html.replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|template)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ');
+  const scoped = /<article\b[\s\S]*?<\/article>/i.exec(body)?.[0] ?? /<main\b[\s\S]*?<\/main>/i.exec(body)?.[0];
+  if (scoped && scoped.length > 500) body = scoped;
+  const blocks: string[] = [];
+  for (const m of body.matchAll(/<(h[1-3]|p|li|pre|blockquote)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const tag = m[1].toLowerCase();
+    const text = htmlToText(m[2]).replace(/\[(\d+|citation needed|edit)\]/gi, '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    // Stop at back-matter: references, bibliographies and link lists are not the article.
+    if (tag.startsWith('h') && /^(references|notes|citations|sources|bibliography|further reading|external links|see also|footnotes)$/i.test(text)) break;
+    if (tag === 'li' && (/(doi:|isbn|retrieved |archived from|^\^)/i.test(text) || text.split(/\s+/).length < 4)) continue;
+    if (tag.startsWith('h') && /^contents$/i.test(text)) continue;
+    if (tag === 'p' && text.length < 25 && !/[.!?]$/.test(text)) continue;
+    blocks.push(tag.startsWith('h') ? `${text}` : tag === 'li' ? `• ${text}` : text);
+  }
+  const out = blocks.join('\n\n');
+  return out.length > maxChars ? `${out.slice(0, maxChars)}…` : out;
+}
+
 export function stripMarkdown(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, (block) => block.replace(/```\w*/g, '')) // keep code (commands) but drop fences
@@ -98,7 +137,16 @@ export async function fetchMetadata(info: UrlInfo, fetchText: FetchText): Promis
       author: j.owner?.login ?? '', siteName: 'GitHub', bodyText: readme, provider: 'github-api',
     };
   }
+  if (info.sourceType === 'x') {
+    // X's public oEmbed endpoint returns the post text as a small HTML blockquote.
+    const r = await fetchText(`https://publish.twitter.com/oembed?omit_script=1&dnt=1&url=${encodeURIComponent(info.url)}`, { accept: 'application/json', timeoutMs: 8000 });
+    if (!r.ok) return { ...empty, siteName: 'X', provider: 'x-oembed-unavailable' };
+    const j = JSON.parse(r.text) as { author_name?: string; html?: string };
+    const text = htmlToText((j.html ?? '').replace(/&mdash;[\s\S]*$/, '')).replace(/\s*(https?:\/\/)?pic\.(twitter|x)\.com\/\S+/g, '').replace(/\s*https?:\/\/t\.co\/\S+/g, '').trim();
+    return { ...empty, title: text.slice(0, 140), description: text, author: j.author_name ?? '', siteName: 'X', bodyText: text, provider: 'x-oembed' };
+  }
   const r = await fetchText(info.url, { accept: 'text/html,application/xhtml+xml', timeoutMs: 10_000 });
   if (!r.ok || !/html/i.test(r.contentType) || r.text.length > MAX_HTML) return null;
-  return { ...parseHtmlMeta(r.text, info.url), bodyText: '', provider: 'html-meta' };
+  const meta = parseHtmlMeta(r.text, info.url);
+  return { ...meta, bodyText: info.sourceType === 'web' ? extractReadableText(r.text) : '', provider: 'html-meta' };
 }

@@ -8,7 +8,7 @@ import { rangeFor } from '../core/dates';
 import { languageName } from '../core/language';
 import type { LibraryFilter, SortKey } from '../core/search';
 import { ALL_STATUSES, STATUS_LABELS, type ItemStatus } from '../core/status';
-import { SOURCE_LABELS, type SourceType } from '../core/url';
+import { NOTE_SOURCES, SOURCE_LABELS, VIDEO_SOURCES, WEBSITE_SOURCES, type SourceType } from '../core/url';
 import type { Item } from '../db/types';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { deleteItemFiles } from '../services/capture';
@@ -18,12 +18,15 @@ import { generateReport } from '../services/reports';
 import { updateSettings } from '../services/settings';
 import { Banner, Button, Chip, EmptyState, Fab, IconButton, Loading, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
-import { ItemCard } from '../ui/ItemCard';
+import { ItemCard, VideoCard } from '../ui/ItemCard';
+import { Segmented } from '../ui/media';
 import { radius, space, type, useTheme } from '../ui/theme';
 import { useSettings } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Library'>, NativeStackScreenProps<RootStackParamList>>;
 const PAGE = 30;
+type Section = 'videos' | 'websites' | 'notes';
+const SECTION_SOURCES: Record<Section, SourceType[]> = { videos: VIDEO_SOURCES, websites: WEBSITE_SOURCES, notes: NOTE_SOURCES };
 const SORTS: [SortKey, string][] = [['newest', 'Newest'], ['oldest', 'Oldest'], ['updated', 'Recently updated'], ['title', 'Title A–Z']];
 const DATES: [string, string][] = [['any', 'Any time'], ['today', 'Today'], ['week', 'Last 7 days'], ['last30', 'Last 30 days']];
 
@@ -42,6 +45,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
   const [date, setDate] = useState('any');
   const [collectionId, setCollectionId] = useState<string | undefined>(route.params?.collectionId);
   const [archived, setArchived] = useState(false);
+  const [section, setSection] = useState<Section>('videos');
   const [items, setItems] = useState<Item[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -59,14 +63,16 @@ export default function LibraryScreen({ navigation, route }: Props) {
   useEffect(() => setCollectionId(route.params?.collectionId), [route.params?.collectionId]);
 
   const filter: LibraryFilter = useMemo(() => {
-    const f: LibraryFilter = { text: debounced, sourceTypes: sources, statuses, languages, tags, collectionId, archived };
+    const allowed = SECTION_SOURCES[section];
+    const chosen = sources.filter((s) => allowed.includes(s));
+    const f: LibraryFilter = { text: debounced, sourceTypes: chosen.length ? chosen : allowed, statuses, languages, tags, collectionId, archived };
     if (date !== 'any') {
       const r = rangeFor(date as 'today' | 'week' | 'last30', Date.now(), tz);
       f.fromIso = r.startIso;
       f.toIso = r.endIso;
     }
     return f;
-  }, [debounced, sources, statuses, languages, tags, collectionId, archived, date, tz]);
+  }, [debounced, sources, statuses, languages, tags, collectionId, archived, date, tz, section]);
 
   const load = useCallback(async (reset: boolean) => {
     try {
@@ -97,7 +103,12 @@ export default function LibraryScreen({ navigation, route }: Props) {
     tags: (await repo.allTags()).slice(0, 30),
     languages: (await repo.db.all<{ language: string }>(`SELECT DISTINCT language FROM items WHERE deleted = 0 AND language != 'und'`)).map((r) => r.language),
     collections: await repo.listCollections(),
-  }), ['items', 'collections']);
+    counts: {
+      videos: await repo.countItems({ sourceTypes: VIDEO_SOURCES, archived, collectionId }),
+      websites: await repo.countItems({ sourceTypes: WEBSITE_SOURCES, archived, collectionId }),
+      notes: await repo.countItems({ sourceTypes: NOTE_SOURCES, archived, collectionId }),
+    },
+  }), ['items', 'collections'], [archived, collectionId]);
 
   const toggle = <T,>(list: T[], v: T, set: (x: T[]) => void) => set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const activeFilters = sources.length + statuses.length + languages.length + tags.length + (date !== 'any' ? 1 : 0) + (collectionId ? 1 : 0);
@@ -169,6 +180,17 @@ export default function LibraryScreen({ navigation, route }: Props) {
           {text ? <IconButton icon="close-circle" label="Clear text" onPress={() => setText('')} color={c.textMuted} /> : null}
           <IconButton icon="options-outline" label={`Filters${activeFilters ? `, ${activeFilters} active` : ''}`} onPress={() => setFiltersOpen(true)} />
         </View>
+        <View style={{ marginTop: space.md }}>
+          <Segmented<Section>
+            value={section}
+            onChange={(k) => { setSection(k); setSelected(new Set()); }}
+            options={[
+              { key: 'videos', label: 'Videos', count: facets.data?.counts.videos },
+              { key: 'websites', label: 'Websites', count: facets.data?.counts.websites },
+              { key: 'notes', label: 'Notes', count: facets.data?.counts.notes },
+            ]}
+          />
+        </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm, flexWrap: 'wrap' }}>
           <T v="caption" color="textMuted" style={{ marginRight: space.sm }}>{total} item{total === 1 ? '' : 's'}</T>
           {collectionName ? <Chip label={collectionName} selected onPress={() => setCollectionId(undefined)} /> : null}
@@ -177,12 +199,20 @@ export default function LibraryScreen({ navigation, route }: Props) {
       </View>
       {error ? <View style={{ paddingHorizontal: space.lg }}><Banner tone="danger" title="Couldn't load library" body={error} action={<Button kind="outline" title="Retry" onPress={() => void load(true)} />} /></View> : null}
       <FlatList
-        key={grid ? 'grid' : 'list'}
+        key={section === 'videos' ? 'video' : grid ? 'grid' : 'list'}
         data={items}
-        numColumns={grid ? 2 : 1}
+        numColumns={grid && section !== 'videos' ? 2 : 1}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ padding: space.lg, paddingBottom: 96 }}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => section === 'videos' ? (
+          <VideoCard
+            item={item}
+            timezone={tz}
+            selected={selected.has(item.id)}
+            onPress={() => (selecting ? setSelected((s) => { const n = new Set(s); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n; }) : navigation.navigate('ItemDetail', { id: item.id }))}
+            onLongPress={() => setSelected((s) => new Set(s).add(item.id))}
+          />
+        ) : (
           <ItemCard
             item={item}
             grid={grid}
@@ -206,7 +236,12 @@ export default function LibraryScreen({ navigation, route }: Props) {
           ) : archived ? (
             <EmptyState icon="archive-outline" title="Archive is empty" body="Archived items are hidden from the library but kept and searchable here." />
           ) : (
-            <EmptyState icon="library-outline" title="Your library is empty" body="Share links, notes or transcript files to Qivra, or add one now." action={<Button title="Save something" icon="add" onPress={() => navigation.navigate('Capture')} />} />
+            <EmptyState
+              icon={section === 'videos' ? 'play-circle-outline' : section === 'websites' ? 'globe-outline' : 'document-text-outline'}
+              title={section === 'videos' ? 'No videos yet' : section === 'websites' ? 'No websites yet' : 'No notes yet'}
+              body={section === 'videos' ? 'Share a YouTube, Instagram or X video to Qivra — it is transcribed and summarised automatically.' : section === 'websites' ? 'Share any article or GitHub link; Qivra extracts the text and summarises it.' : 'Write a note, paste text, or import a transcript file.'}
+              action={<Button title={section === 'notes' ? 'New note' : 'Save a link'} icon="add" onPress={() => navigation.navigate('Capture', { mode: section === 'notes' ? 'note' : 'link' })} />}
+            />
           )
         ) : null}
       />

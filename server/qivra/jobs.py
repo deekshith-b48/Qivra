@@ -23,7 +23,7 @@ from .util import now_iso
 
 log = logging.getLogger("qivra.jobs")
 
-JOB_KINDS = ("metadata", "captions", "transcribe", "enrich")
+JOB_KINDS = ("metadata", "captions", "transcribe", "transcribe_url", "enrich")
 ENRICHMENT_VERSION = 1
 
 
@@ -135,6 +135,37 @@ class JobRunner:
         tr = self.store.upsert_transcript(item["id"], text=text, segments=[], language=language or "und",
                                           kind="original", source="server_whisper", provider=provider)
         return {"transcript_id": tr["id"], "chars": len(text), "language": language, "provider": provider}
+
+    def _job_transcribe_url(self, item: dict) -> dict:
+        from .config import get_config
+        from .media import MediaError, clean_caption, transcribe_url
+        url = item["data"].get("url") or ""
+        if not url:
+            raise JobFailure("NO_URL", "Item has no URL.", False)
+        try:
+            out = transcribe_url(url, get_config().data_dir)
+        except MediaError as exc:
+            meta = getattr(exc, "meta", None)
+            if meta:
+                self._apply_post_meta(item, meta)
+            raise JobFailure(exc.code, exc.message, exc.retryable) from exc
+        segs = out["segments"]
+        tr = self.store.upsert_transcript(item["id"], text=segments_to_text(segs), segments=segs,
+                                          language=out["language"], kind="original", source="server_whisper",
+                                          provider=out["provider"])
+        meta = self._apply_post_meta(item, out["meta"])
+        return {"transcript_id": tr["id"], "segments": len(segs), "language": out["language"],
+                "provider": out["provider"], "meta": meta}
+
+    def _apply_post_meta(self, item: dict, meta: dict) -> dict:
+        from .media import clean_caption
+        meta = {**meta, "description": clean_caption(meta.get("description", ""))}
+        patch = {"metadata": {**(item["data"].get("metadata") or {}), **meta, "fetchedAt": now_iso(),
+                              "provider": "server:yt-dlp"}}
+        if not item["data"].get("title") and meta.get("title"):
+            patch["title"] = meta["title"]
+        self.store.server_update_item(item["id"], patch)
+        return meta
 
     def _job_enrich(self, item: dict) -> dict:
         if not ai.provider_status()["available"]:

@@ -302,7 +302,7 @@ async def upload_media(request: Request, item_id: str, file: UploadFile = File(.
 
 # ── jobs ─────────────────────────────────────────────────────────────────────
 class ProcessRequest(BaseModel):
-    kind: Literal["metadata", "captions", "transcribe", "enrich"]
+    kind: Literal["metadata", "captions", "transcribe", "transcribe_url", "enrich"]
     idempotency_key: str | None = Field(default=None, max_length=100)
 
 
@@ -401,6 +401,9 @@ def delete_report(request: Request, report_id: str, _: Device = Depends(require_
 
 
 # ── sync ─────────────────────────────────────────────────────────────────────
+SERVER_OWNED_FIELDS = ("metadata", "enrichment")
+
+
 class SyncChange(BaseModel):
     kind: Literal["item", "collection"] = "item"
     id: str = Field(min_length=1, max_length=80)
@@ -427,6 +430,12 @@ def sync(request: Request, body: SyncRequest, device: Device = Depends(require_d
     for ch in body.changes:
         _check_id(ch.id)
         data = _validate_item_data({**ch.data, "id": ch.id}) if ch.kind == "item" else _validate_collection(ch.data)
+        if ch.kind == "item":
+            current = store.get_entity("item", ch.id)
+            # Server-produced fields (post details, enrichment) survive device pushes that don't carry them.
+            for key in SERVER_OWNED_FIELDS:
+                if current and key not in data and key in current["data"]:
+                    data[key] = current["data"][key]
         status, ent = store.put_entity(ch.kind, ch.id, data, base_revision=ch.base_revision, deleted=ch.deleted,
                                        actor=device.id)
         if status == "applied":

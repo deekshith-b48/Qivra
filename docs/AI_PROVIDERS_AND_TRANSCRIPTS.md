@@ -26,6 +26,14 @@ Server enrichment (`process kind=enrich`) and server agent answers use `core/mod
 
 On-device LLM inference was evaluated and not implemented: running a useful model on typical Android hardware needs a native runtime (llama.cpp/MLC) that is not available as a maintained Expo module and would add hundreds of MB.
 
+## Automatic transcripts for shared videos (1.1.0)
+
+1. **YouTube:** the phone asks YouTube's player endpoint (the Android client) for the caption tracks YouTube publishes and downloads one (human captions in your language > the video's auto-captions > any) — `src/core/youtubeCaptions.ts`.
+2. **Instagram, X, and YouTube without captions:** if paired and "Auto-transcribe shared videos" is on (default), the app queues a `transcribe_url` job on the server (`server/qivra/media.py`): yt-dlp fetches only the audio of the public post (allow-listed hosts, no cookies, ≤ 60 min, ≤ 300 MB), faster-whisper transcribes it locally with timestamps and language detection, the temp file is deleted. The phone polls the job and pulls the transcript plus post details (title, uploader, caption, thumbnail).
+3. **Honest outcomes:** music-only / silent / image posts → `NO_SPEECH` / `NO_AUDIO` / `NO_MEDIA_IN_POST` → item is Ready with "No speech to transcribe"; private or login-gated → `LOGIN_REQUIRED`; platform bot checks → `BOT_CHECK` (retried); not paired → the page explains and offers Connect / Import transcript.
+4. **Websites / GitHub:** readable article text (or README) is extracted on the phone and stored as an "article" record, so it is searchable, summarised and highlighted.
+5. **Highlights:** `src/core/highlights.ts` ranks detected tools and recurring terms, finds the timestamped lines (or sentences) that mention them, and the UI marks every occurrence; YouTube timestamps open the video at that second.
+
 ## Transcripts
 
 | Source | How | Notes |

@@ -1,4 +1,4 @@
-package com.superbrain.mobile
+package com.qivra.app
 
 import android.os.Build
 import android.os.Bundle

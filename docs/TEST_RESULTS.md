@@ -1,5 +1,26 @@
 # Test results
 
+## 1.1.0 (2026-10-21) — `com.qivra.app`, automatic transcripts, video pages
+
+| Check | Result |
+|---|---|
+| `tsc`, Biome | pass, 0 findings |
+| Jest | 152 passed, 4 skipped (opt-in live tests; run with `QIVRA_LIVE=1`, all 4 passed: YouTube captions, Shorts, X oEmbed, article extraction) |
+| Server pytest | 58 passed, 4 skipped (opt-in live; with `QIVRA_LIVE=1`: X video transcribed by faster-whisper, music-only reel → `NO_SPEECH`, silent reel → `NO_AUDIO`, YouTube via server → `BOT_CHECK` because YouTube bot-checks yt-dlp from this IP — the phone fetches YouTube captions directly instead) |
+| Release build | `dist/Qivra-1.1.0-release.apk`, package `com.qivra.app`, versionCode 4; installs next to `com.superbrain.mobile` (verified on emulator) |
+
+Emulator (API 35) with the release APK and a real server (`python -m qivra serve`, emulator → `http://10.0.2.2:5055`):
+
+- Pairing by manual entry → Connected.
+- YouTube share → opens its own page; captions fetched on the phone (timestamped), extracted summary with highlighted keywords, progress Saved → Transcript → Summary → Ready.
+- X video share → "Transcribing on your Qivra server…" → server Whisper transcript ("Jose, team cap, welcome to the team!") merged into the page; thumbnail from server. Found and fixed: the app did not re-poll a waiting server job (now self-schedules).
+- Instagram reels → music-only and silent reels finish honestly ("No speech to transcribe") with thumbnail/caption from the server. Found and fixed: server post details were lost on no-speech, and server-side patches surfaced as sync conflicts (now merged/rebased; integration test added).
+- Wikipedia pages → article text, extractive summary, 12 keyword highlights with sentence moments. Found and fixed: default HTTP User-Agent was blocked by Wikipedia; references/TOC leaked into the summary.
+- Library sections Videos · Websites · Notes with counts; Recent videos on Today.
+
+Not verified: an Instagram reel **with speech** (no such public test reel available here; the same pipeline transcribed the X video), a physical iQOO 13 install, camera QR scanning.
+
+
 Recorded 2026-10-21 on macOS (arm64), Node 26.10, JDK 21, Python 3.13, Android SDK 36, branch `feature/qivra-react-native-android`.
 
 ## Baseline (unmodified SuperBrain, commit cbc1f42)

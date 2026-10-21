@@ -1,4 +1,4 @@
-package com.superbrain.mobile
+package com.qivra.app
 
 import android.app.Activity
 import android.content.ContentResolver
@@ -52,7 +52,7 @@ class ShareActivity : Activity() {
             runOnUiThread {
                 if (ok) {
                     val open = Intent(Intent.ACTION_VIEW, Uri.parse("qivra://share")).apply {
-                        setClassName(this@ShareActivity, "com.superbrain.mobile.MainActivity")
+                        setClassName(this@ShareActivity, "com.qivra.app.MainActivity")
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     }
                     startActivity(open)

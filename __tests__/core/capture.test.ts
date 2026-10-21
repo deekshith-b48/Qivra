@@ -106,3 +106,18 @@ describe('network policy', () => {
     expect(checkServerUrl('nonsense')).toMatchObject({ ok: false, code: 'INVALID_URL' });
   });
 });
+
+describe('X / Twitter links', () => {
+  test.each([
+    ['https://twitter.com/captainamerica/status/719944021058060289?s=20', 'https://x.com/captainamerica/status/719944021058060289'],
+    ['https://x.com/i/status/719944021058060289', 'https://x.com/i/status/719944021058060289'],
+    ['https://mobile.twitter.com/someone/status/1234567890123', 'https://x.com/someone/status/1234567890123'],
+  ])('%s', (raw, url) => {
+    const info = analyzeUrl(raw);
+    expect(info).toMatchObject({ sourceType: 'x', url });
+    expect(info?.dedupeKey).toBe(`x:${url.split('/').pop()}`);
+  });
+  test('profile pages are plain web links', () => {
+    expect(analyzeUrl('https://x.com/anthropicai')?.sourceType).toBe('web');
+  });
+});

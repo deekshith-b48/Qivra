@@ -37,6 +37,10 @@ Status legend: **Retained** (kept as-is) · **Adapted** (kept, changed) · **Red
 - **Server, new:** `qivra/` package mounted on SuperBrain's FastAPI `app`; mirrors `analyses` rows into Qivra items (`sb_<shortcode>`) and `audio_transcription` into transcripts, without modifying SuperBrain tables.
 - **App:** link-detection rules from `link_checker.py`/`urlUtils.ts`; the expo-sqlite/expo-camera/document-picker stack and the `com.superbrain.mobile` application id. All SuperBrain screens and services were replaced; the old ones are in commit `cbc1f42`.
 
+## Package id change (1.1.0)
+
+1.0.0 kept SuperBrain's `com.superbrain.mobile` for in-place upgrades. Android only allows an update signed with the same key, and SuperBrain's release key is not available, so installing over SuperBrain failed ("package conflicts with an existing package"). 1.1.0 uses **`com.qivra.app`** and installs alongside SuperBrain. The on-device SuperBrain import therefore no longer runs on fresh installs (different app sandbox); SuperBrain data arrives through the paired server, which mirrors SuperBrain's `analyses` table.
+
 ## Data migration
 
 - **Device:** on first launch `src/services/legacyImport.ts` reads SuperBrain's `superbrain_local.db` (`posts`) or the `@superbrain_posts_cache` AsyncStorage key, plus `@superbrain_collections`, and imports them once into `qivra.db` (`importLegacy`, tested). Old files are left untouched. Summaries are labelled "From your server" (they came from SuperBrain's AI pipeline).

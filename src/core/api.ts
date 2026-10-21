@@ -240,7 +240,7 @@ export class QivraClient {
     return this.request<{ transcripts: ServerTranscript[] }>('GET', `/api/v1/items/${encodeURIComponent(itemId)}/transcripts`);
   }
 
-  process(itemId: string, kind: 'metadata' | 'captions' | 'transcribe' | 'enrich', idempotencyKey: string) {
+  process(itemId: string, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich', idempotencyKey: string) {
     return this.request<{ job: ServerJob; created: boolean }>('POST', `/api/v1/items/${encodeURIComponent(itemId)}/process`, { kind, idempotency_key: idempotencyKey }, { idempotent: true });
   }
 

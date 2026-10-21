@@ -5,11 +5,19 @@
  * extended with GitHub and podcast detection.
  */
 
-export type SourceType = 'youtube' | 'instagram' | 'github' | 'podcast' | 'web' | 'note' | 'file' | 'text';
+export type SourceType = 'youtube' | 'instagram' | 'x' | 'github' | 'podcast' | 'web' | 'note' | 'file' | 'text';
+
+/** Short-form/long-form video platforms whose speech Qivra transcribes. */
+export const VIDEO_SOURCES: SourceType[] = ['youtube', 'instagram', 'x', 'podcast'];
+export const WEBSITE_SOURCES: SourceType[] = ['web', 'github'];
+export const NOTE_SOURCES: SourceType[] = ['note', 'text', 'file'];
+/** Transcript-table sources that hold article/README text rather than speech. */
+export const ARTICLE_SOURCES = new Set(['web_article', 'github_readme']);
 
 export const SOURCE_LABELS: Record<SourceType, string> = {
   youtube: 'YouTube',
   instagram: 'Instagram',
+  x: 'X',
   github: 'GitHub',
   podcast: 'Podcast',
   web: 'Web',
@@ -31,6 +39,7 @@ export interface UrlInfo {
   dedupeKey: string;
   youtubeId?: string;
   instagramShortcode?: string;
+  xStatusId?: string;
   githubRepo?: string; // owner/name
   host: string;
 }
@@ -65,6 +74,14 @@ export function youtubeIdOf(u: URL): string | undefined {
 export function instagramShortcodeOf(u: URL): string | undefined {
   if (stripWww(u.hostname.toLowerCase()) !== 'instagram.com') return undefined;
   const m = /^\/(?:[A-Za-z0-9_.]+\/)?(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/.exec(u.pathname);
+  return m?.[1];
+}
+
+/** x.com / twitter.com status links → status id. */
+export function xStatusIdOf(u: URL): string | undefined {
+  const host = stripWww(u.hostname.toLowerCase());
+  if (!['x.com', 'twitter.com', 'mobile.twitter.com', 'mobile.x.com', 'fxtwitter.com', 'vxtwitter.com'].includes(host)) return undefined;
+  const m = /^\/(?:[A-Za-z0-9_]{1,15}|i(?:\/web)?)\/status(?:es)?\/(\d{5,25})/.exec(u.pathname);
   return m?.[1];
 }
 
@@ -126,6 +143,12 @@ export function analyzeUrl(raw: string): UrlInfo | null {
       instagramShortcode: ig,
       host: 'instagram.com',
     };
+  }
+  const xs = xStatusIdOf(u);
+  if (xs) {
+    const user = /^\/([A-Za-z0-9_]{1,15})\/status/.exec(u.pathname)?.[1];
+    const url = `https://x.com/${user && user !== 'i' ? user : 'i'}/status/${xs}`;
+    return { url, sourceType: 'x', dedupeKey: `x:${xs}`, xStatusId: xs, host: 'x.com' };
   }
   const gh = githubRepoOf(u);
   if (gh) {

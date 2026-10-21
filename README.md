@@ -16,17 +16,30 @@ Qivra is built on [SuperBrain](https://github.com/sidinsearch/superbrain) (AGPL-
 
 ## Install the APK
 
-The release APK is in `dist/` after a build (see below). On the phone: open the file, allow "Install unknown apps" for your file manager when Android asks, and install. It replaces an installed SuperBrain app (same application id), keeping and importing its data — but only if SuperBrain was signed with the same key; otherwise uninstall SuperBrain first.
+The release APK is `dist/Qivra-1.1.0-release.apk`. On the phone: open the file and allow "Install unknown apps" for your file manager when Android asks. Since 1.1.0 the package is **`com.qivra.app`**, so it installs alongside SuperBrain (1.0.0 used SuperBrain's id and could not replace a differently-signed SuperBrain install). SuperBrain data reaches Qivra through the server: pair once and the server's SuperBrain items sync down.
+
+### What happens when you share a video or link
+
+| Shared | Transcript | Summary & highlights |
+|---|---|---|
+| YouTube (incl. Shorts) | Captions YouTube publishes, fetched on the phone; otherwise your server | Extracted on the phone; keyword highlights with timestamps you can tap to play |
+| Instagram reel / X video | Your paired server downloads the public audio (yt-dlp) and transcribes it with local Whisper | Same; caption text is used too |
+| Music-only / silent / image posts | "No speech to transcribe" — never invented | From caption/post text |
+| Websites, GitHub | Article text / README extracted on the phone | Same |
+
+Each item opens on its own page with **Summary · Transcript (or Article) · Highlights** tabs and a live progress bar; the Library is split into **Videos · Websites · Notes**.
 
 The APK in this repo is **signed with the Android debug key** (no release keystore exists yet). It is fine for personal sideloading, not for the Play Store.
 
-## Run the local server (optional)
+## Run the local server (optional, needed for Instagram/X transcription)
 
 ```bash
 cd server
-python3 -m venv .venv && .venv/bin/pip install -r requirements-qivra.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements-qivra.txt -r requirements-media.txt
 .venv/bin/python -m qivra serve --lan
 ```
+
+`requirements-media.txt` (yt-dlp + faster-whisper, free and local) enables automatic video transcription; the Whisper model (`QIVRA_WHISPER_MODEL`, default `base`, ~145 MB) downloads on first use. Only public posts work — no login cookies are used.
 
 It prints the **real** local and LAN URLs (only after a health check), a one-time Access ID and a QR code. In the app: Settings → Connect to My Server → Scan QR code. Without `--lan` the server listens on 127.0.0.1 only. Details: [docs/LOCAL_SERVER_AND_QR_PAIRING.md](docs/LOCAL_SERVER_AND_QR_PAIRING.md).
 

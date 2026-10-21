@@ -24,6 +24,8 @@ export interface Settings {
   dailyReminder: boolean;
   scheduledDailyReport: boolean;
   serverProcessing: boolean;
+  /** Automatically transcribe shared Instagram/X/YouTube videos on the paired server. */
+  autoTranscribe: boolean;
 }
 
 export const DEFAULT_AI: AiSettings = { enabled: false, baseUrl: '', model: '', embeddingModel: '', externalConsent: false, autoEnrich: false };
@@ -55,6 +57,7 @@ export async function getSettings(): Promise<Settings> {
     dailyReminder: s.dailyReminder ?? false,
     scheduledDailyReport: s.scheduledDailyReport ?? false,
     serverProcessing: s.serverProcessing ?? false,
+    autoTranscribe: s.autoTranscribe ?? true,
   };
 }
 

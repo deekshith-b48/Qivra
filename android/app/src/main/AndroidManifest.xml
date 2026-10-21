@@ -57,10 +57,9 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="qivra"/>
-        <data android:scheme="superbrain"/>
       </intent-filter>
     </activity>
-    <activity android:name="com.superbrain.mobile.ShareActivity" android:exported="true" android:label="@string/app_name" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:noHistory="true" android:excludeFromRecents="true" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:taskAffinity="">
+    <activity android:name="com.qivra.app.ShareActivity" android:exported="true" android:label="@string/app_name" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:noHistory="true" android:excludeFromRecents="true" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:taskAffinity="">
       <intent-filter>
         <action android:name="android.intent.action.SEND"/>
         <category android:name="android.intent.category.DEFAULT"/>

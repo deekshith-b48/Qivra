@@ -14,7 +14,8 @@ import { detectLanguage } from '../core/language';
 import { fetchMetadata } from '../core/metadata';
 import { ProviderError } from '../core/ai/provider';
 import { isFailed, type ItemStatus } from '../core/status';
-import { analyzeUrl } from '../core/url';
+import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
+import { CaptionsUnavailable, fetchYouTubeCaptions } from '../core/youtubeCaptions';
 import type { Repo } from '../db/repo';
 import type { Item, Job } from '../db/types';
 import { runSync } from '../sync/engine';
@@ -31,13 +32,14 @@ class JobError extends Error {
   }
 }
 
-const VIDEO_LIKE = new Set(['youtube', 'instagram', 'podcast']);
+const VIDEO_LIKE = new Set<string>(VIDEO_SOURCES);
 
 async function fetchText(url: string, opts: { accept: string; timeoutMs: number }) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), opts.timeoutMs);
   try {
-    const res = await fetch(url, { headers: { Accept: opts.accept }, signal: ctl.signal });
+    // Some sites (e.g. Wikipedia) reject the HTTP library's default User-Agent.
+    const res = await fetch(url, { headers: { Accept: opts.accept, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36 Qivra/1.1' }, signal: ctl.signal });
     const len = Number(res.headers.get('content-length') ?? 0);
     if (len > 3_000_000) return { ok: false, status: 413, text: '', contentType: '' };
     return { ok: res.ok, status: res.status, text: await res.text(), contentType: res.headers.get('content-type') ?? '' };
@@ -57,19 +59,20 @@ async function moveTo(repo: Repo, item: Item, to: ItemStatus, error?: { code: st
 /** Schedule (or re-run) local processing for an item. */
 export async function schedulePipeline(itemId: string, opts: { force?: boolean } = {}): Promise<void> {
   const repo = await getRepo();
-  await repo.enqueueJob({ id: `job_local_enrich_${itemId}`, kind: 'local_enrich', itemId, retry: true, maxAttempts: 3, ...(opts.force ? {} : {}) });
+  void opts;
+  await repo.enqueueJob({ id: `job_local_enrich_${itemId}`, kind: 'local_enrich', itemId, retry: true, maxAttempts: 3 });
   emit('jobs');
   void runDueJobs();
 }
 
-async function sourceText(repo: Repo, item: Item): Promise<{ body: string; timed: { startMs: number | null; text: string }[]; hasTranscript: boolean }> {
+async function sourceText(repo: Repo, item: Item): Promise<{ body: string; timed: { startMs: number | null; text: string }[]; hasSpeech: boolean }> {
   const transcripts = (await repo.listTranscripts(item.id)).filter((t) => t.kind === 'original');
   const timed: { startMs: number | null; text: string }[] = [];
   for (const t of transcripts.slice(0, 2)) for (const s of await repo.getSegments(t.id)) timed.push({ startMs: s.startMs, text: s.text });
   const parts = [...transcripts.map((t) => t.text), item.metadata?.description ?? ''];
   const meta = item.metadata as (Item['metadata'] & { bodyText?: string }) | null;
   if (meta?.bodyText) parts.push(meta.bodyText);
-  return { body: parts.filter(Boolean).join('\n\n'), timed, hasTranscript: transcripts.length > 0 };
+  return { body: parts.filter(Boolean).join('\n\n'), timed, hasSpeech: transcripts.some((t) => !ARTICLE_SOURCES.has(t.source)) };
 }
 
 async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, unknown>> {
@@ -87,12 +90,21 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
         const meta = await fetchMetadata(info, fetchText);
         if (meta) {
           item = (await repo.updateItem(item.id, {
-            metadata: { title: meta.title, description: meta.description, siteName: meta.siteName, imageUrl: meta.imageUrl, author: meta.author, fetchedAt: new Date().toISOString(), provider: meta.provider, ...(meta.bodyText ? { bodyText: meta.bodyText } : {}) } as Item['metadata'],
+            metadata: { title: meta.title, description: meta.description, siteName: meta.siteName, imageUrl: meta.imageUrl, author: meta.author, fetchedAt: new Date().toISOString(), provider: meta.provider },
             title: item.title || meta.title,
             author: item.author || meta.author,
             siteName: meta.siteName,
             thumbnailUrl: item.thumbnailUrl || meta.imageUrl,
           })) ?? item;
+          // Website article text / GitHub README become an "article" record: searchable, highlightable, summarised.
+          if (meta.bodyText && (item.sourceType === 'web' || item.sourceType === 'github')) {
+            const lang = detectLanguage(meta.bodyText);
+            await repo.upsertTranscript({
+              itemId: item.id, language: lang.code, languageMethod: 'heuristic', kind: 'original',
+              source: item.sourceType === 'github' ? 'github_readme' : 'web_article', provider: meta.provider, format: 'txt',
+              segments: [{ startMs: null, endMs: null, text: meta.bodyText }],
+            });
+          }
         } else {
           item = (await repo.updateItem(item.id, { metadata: { fetchedAt: new Date().toISOString(), provider: 'unavailable' } })) ?? item;
         }
@@ -102,18 +114,32 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
     }
   }
 
-  // 2. Transcript gate for video/audio sources.
-  const { body, timed, hasTranscript } = await sourceText(repo, item);
-  if (VIDEO_LIKE.has(item.sourceType) && !hasTranscript) {
-    await enrichAndIndex(repo, item, body, timed, false);
-    await moveTo(repo, (await repo.getItem(item.id))!, 'NEEDS_INPUT', {
-      code: 'TRANSCRIPT_MISSING',
-      message: 'No transcript yet. Import captions/subtitles (SRT, VTT, TXT), paste one, or ask your server to fetch captions.',
-    });
-    return { status: 'NEEDS_INPUT' };
+  // 2. Speech transcript for video posts: YouTube captions on the phone, otherwise the paired server.
+  let src = await sourceText(repo, item);
+  if (VIDEO_LIKE.has(item.sourceType) && !src.hasSpeech) {
+    const outcome = await obtainTranscript(repo, item);
+    if (outcome === 'stored') src = await sourceText(repo, item);
+    else {
+      await enrichAndIndex(repo, item, src.body, src.timed, false);
+      const cur = (await repo.getItem(item.id))!;
+      if (outcome.kind === 'waiting') {
+        await moveTo(repo, cur, 'TRANSCRIBING', { code: 'INFO_TRANSCRIBING', message: outcome.message });
+        return { status: 'TRANSCRIBING' };
+      }
+      if (outcome.kind === 'no_speech') {
+        // Nothing to transcribe (music-only reel, image post, text-only tweet): finish with what the post says.
+        await moveTo(repo, cur, 'ENRICHING');
+        await enrichAndIndex(repo, (await repo.getItem(item.id))!, src.body, src.timed, true);
+        await repo.db.run('UPDATE items SET error_code = ?, error_message = ? WHERE id = ?', ['INFO_NO_SPEECH', outcome.message, item.id]);
+        emit('items');
+        return { status: 'READY', note: 'no_speech' };
+      }
+      await moveTo(repo, cur, 'NEEDS_INPUT', { code: outcome.code, message: outcome.message });
+      return { status: 'NEEDS_INPUT' };
+    }
   }
-  if (item.sourceType === 'file' && !hasTranscript && (await repo.listMedia(item.id)).length) {
-    await enrichAndIndex(repo, item, body, timed, false);
+  if (item.sourceType === 'file' && !src.hasSpeech && (await repo.listMedia(item.id)).length) {
+    await enrichAndIndex(repo, item, src.body, src.timed, false);
     await moveTo(repo, (await repo.getItem(item.id))!, 'NEEDS_INPUT', {
       code: 'TRANSCRIPTION_REQUIRED',
       message: 'This media file needs a transcript. Import one, or send it to your paired server for transcription.',
@@ -121,8 +147,70 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
     return { status: 'NEEDS_INPUT' };
   }
   item = await moveTo(repo, item, 'ENRICHING');
-  await enrichAndIndex(repo, item, body, timed, true);
+  await enrichAndIndex(repo, item, src.body, src.timed, true);
   return { status: 'READY' };
+}
+
+type TranscriptOutcome =
+  | 'stored'
+  | { kind: 'waiting'; message: string }
+  | { kind: 'no_speech'; message: string }
+  | { kind: 'needs_input'; code: string; message: string };
+
+const NO_SPEECH_CODES = new Set(['NO_SPEECH', 'NO_AUDIO', 'NO_MEDIA_IN_POST']);
+const SERVER_TRANSCRIBABLE = new Set(['youtube', 'instagram', 'x']);
+
+async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutcome> {
+  let captionNote = '';
+  if (item.sourceType === 'youtube' && item.url) {
+    const videoId = analyzeUrl(item.url)?.youtubeId;
+    if (videoId) {
+      try {
+        const caps = await fetchYouTubeCaptions(videoId, fetch as never, [deviceLanguage(), 'en']);
+        await repo.upsertTranscript({
+          itemId: item.id, language: caps.language, languageMethod: 'provider', kind: 'original', source: 'youtube_captions',
+          provider: caps.kind === 'asr' ? 'youtube-auto-captions' : 'youtube-captions', format: 'srv3', segments: caps.segments,
+        });
+        return 'stored';
+      } catch (e) {
+        captionNote = e instanceof CaptionsUnavailable ? e.message : 'Could not reach YouTube for captions.';
+      }
+    }
+  }
+  const serverJob = await repo.getJob(`job_server_transcribe_url_${item.id}`);
+  if (serverJob?.status === 'failed_permanent') {
+    if (NO_SPEECH_CODES.has(serverJob.lastErrorCode ?? '')) return { kind: 'no_speech', message: serverJob.lastError ?? 'No speech in this post.' };
+    return { kind: 'needs_input', code: serverJob.lastErrorCode ?? 'SERVER_FAILED', message: `${serverJob.lastError ?? 'Server transcription failed.'} You can import a transcript instead.` };
+  }
+  if (serverJob && ['queued', 'running', 'failed_retryable'].includes(serverJob.status)) {
+    return { kind: 'waiting', message: 'Transcribing on your Qivra server…' };
+  }
+  const settings = await getSettings();
+  const connected = !!(await getConnection());
+  if (connected && settings.autoTranscribe && SERVER_TRANSCRIBABLE.has(item.sourceType) && serverJob?.status !== 'succeeded') {
+    await repo.enqueueJob({ id: `job_server_transcribe_url_${item.id}`, kind: 'server_transcribe_url', itemId: item.id, retry: true, maxAttempts: 4 });
+    emit('jobs');
+    return { kind: 'waiting', message: 'Transcribing on your Qivra server…' };
+  }
+  if (item.sourceType === 'x' && (item.metadata?.description ?? '').trim()) {
+    return { kind: 'no_speech', message: connected ? 'No video to transcribe in this post.' : 'Using the post text. Pair your server to transcribe X videos.' };
+  }
+  const why = item.sourceType === 'youtube' ? `${captionNote || 'No captions on YouTube.'} ` : '';
+  return {
+    kind: 'needs_input',
+    code: connected ? 'TRANSCRIPT_MISSING' : 'SERVER_NOT_PAIRED',
+    message: connected
+      ? `${why}Import a transcript (SRT, VTT, TXT) or paste one.`
+      : `${why}Instagram and X videos are transcribed automatically by your Qivra server — pair it in Settings → Connect to My Server, or import a transcript.`,
+  };
+}
+
+function deviceLanguage(): string {
+  try {
+    return (Intl.DateTimeFormat().resolvedOptions().locale ?? 'en').split('-')[0];
+  } catch {
+    return 'en';
+  }
 }
 
 async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { startMs: number | null; text: string }[], finish: boolean): Promise<void> {
@@ -146,6 +234,12 @@ async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { sta
   cur = await moveTo(repo, cur, 'INDEXING');
   await repo.reindexMeta(cur.id);
   await moveTo(repo, cur, 'READY');
+  if (item.url && (item.sourceType === 'web' || item.sourceType === 'github') && !(await repo.listTranscripts(item.id)).length && !item.note) {
+    await repo.db.run('UPDATE items SET error_code = ?, error_message = ? WHERE id = ?', [
+      'INFO_UNREADABLE', 'Qivra could not read this page (the site may block apps or need JavaScript). Open the original, or add a note.', item.id,
+    ]);
+  }
+  if (await repo.syncEnabled()) await repo.enqueueJob({ id: 'job_sync', kind: 'sync', retry: true, maxAttempts: 6 });
   const s = await getSettings();
   if (s.ai.enabled && s.ai.autoEnrich) await repo.enqueueJob({ id: `job_model_enrich_${item.id}`, kind: 'model_enrich', itemId: item.id, retry: true, maxAttempts: 3 });
   if (s.ai.enabled && s.ai.embeddingModel) await repo.enqueueJob({ id: 'job_embed', kind: 'embed', retry: true, maxAttempts: 3 });
@@ -202,7 +296,7 @@ async function requireClient() {
 }
 
 /** Server-side processing: sync the item up, start the job, then poll until it finishes. */
-async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'captions' | 'transcribe' | 'enrich'): Promise<Record<string, unknown> | 'pending'> {
+async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich'): Promise<Record<string, unknown> | 'pending'> {
   const client = await requireClient();
   const itemId = job.itemId ?? '';
   const item = await repo.getItem(itemId);
@@ -228,10 +322,23 @@ async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'caption
     const { job: sj } = await client.job(job.serverJobId);
     if (sj.status === 'queued' || sj.status === 'running') return 'pending';
     if (sj.status !== 'succeeded') {
+      if (kind === 'transcribe_url') await applyServerPostMeta(repo, itemId, client);
       if (kind === 'transcribe') await moveTo(repo, (await repo.getItem(itemId))!, 'NEEDS_INPUT', { code: sj.error_code ?? 'SERVER_FAILED', message: sj.error_message ?? 'Server processing failed.' });
       throw new JobError(sj.error_code ?? 'SERVER_FAILED', sj.error_message ?? 'Server processing failed.', sj.status === 'failed_retryable');
     }
-    if (kind === 'captions' || kind === 'transcribe') {
+    if (kind === 'transcribe_url') {
+      const meta = (sj.result?.meta ?? {}) as { title?: string; uploader?: string; description?: string; thumbnail?: string };
+      const cur = await repo.getItem(itemId);
+      if (cur) {
+        await repo.updateItem(itemId, {
+          title: cur.title || meta.title || cur.title,
+          author: cur.author || meta.uploader || '',
+          thumbnailUrl: cur.thumbnailUrl || (meta.thumbnail?.startsWith('https://') ? meta.thumbnail : ''),
+          metadata: { ...(cur.metadata ?? {}), description: cur.metadata?.description || meta.description || '', fetchedAt: new Date().toISOString(), provider: cur.metadata?.provider ?? 'server:yt-dlp' },
+        });
+      }
+    }
+    if (kind === 'captions' || kind === 'transcribe' || kind === 'transcribe_url') {
       const { transcripts } = await client.transcripts(itemId);
       for (const t of transcripts) {
         await repo.upsertTranscript({
@@ -248,8 +355,29 @@ async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'caption
     return { serverJob: sj.id };
   } catch (e) {
     if (e instanceof JobError) throw e;
+    if (e instanceof ApiError && e.code === 'VALIDATION_ERROR') {
+      throw new JobError('SERVER_OUTDATED', 'Your Qivra server is older than this app. Restart it from the latest code (python -m qivra serve --lan).', false);
+    }
     if (e instanceof ApiError) throw new JobError(e.code ?? e.kind.toUpperCase(), e.message, e.retryable);
     throw e;
+  }
+}
+
+/** Copy post details (title, author, thumbnail, caption) found by the server onto the local item. */
+async function applyServerPostMeta(repo: Repo, itemId: string, client: NonNullable<Awaited<ReturnType<typeof getClient>>>): Promise<void> {
+  try {
+    const { item: remote } = await client.item(itemId);
+    const meta = (remote.data.metadata ?? {}) as { title?: string; uploader?: string; description?: string; thumbnail?: string };
+    const cur = await repo.getItem(itemId);
+    if (!cur || (!meta.title && !meta.description && !meta.thumbnail)) return;
+    await repo.updateItem(itemId, {
+      title: cur.title || meta.title || '',
+      author: cur.author || meta.uploader || '',
+      thumbnailUrl: cur.thumbnailUrl || (meta.thumbnail?.startsWith('https://') ? meta.thumbnail : ''),
+      metadata: { ...(cur.metadata ?? {}), description: cur.metadata?.description || meta.description || '' },
+    });
+  } catch {
+    /* best effort */
   }
 }
 
@@ -309,6 +437,9 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
             case 'server_transcribe':
               result = await handleServerJob(repo, job, 'transcribe');
               break;
+            case 'server_transcribe_url':
+              result = await handleServerJob(repo, job, 'transcribe_url');
+              break;
             case 'server_enrich':
               result = await handleServerJob(repo, job, 'enrich');
               break;
@@ -328,6 +459,8 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
         } catch (e) {
           const err = e instanceof JobError ? e : new JobError('INTERNAL', (e as Error)?.message ?? 'Unexpected error', true);
           const updated = await repo.failJob(job.id, { code: err.code, message: err.message, retryable: err.retryable });
+          // A finally-failed server transcription hands the item back to the local pipeline to decide its end state.
+          if (job.kind === 'server_transcribe_url' && job.itemId && updated?.status === 'failed_permanent') await schedulePipeline(job.itemId);
           if (job.itemId && (job.kind === 'local_enrich' || job.kind === 'index')) {
             const item = await repo.getItem(job.itemId);
             if (item && !item.deleted) {
@@ -342,12 +475,33 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
     }
   } finally {
     running = false;
+    await scheduleNextRun();
   }
   return done;
 }
 
+let wakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** While work is waiting (server polling, backoff), wake the runner when the next job becomes due. */
+async function scheduleNextRun(): Promise<void> {
+  try {
+    const repo = await getRepo();
+    const next = await repo.db.get<{ t: string }>(`SELECT MIN(run_after) AS t FROM jobs WHERE status IN ('queued','failed_retryable')`);
+    if (wakeTimer) clearTimeout(wakeTimer);
+    wakeTimer = null;
+    if (!next?.t) return;
+    const delay = Math.min(60_000, Math.max(1_000, Date.parse(next.t) - Date.now()));
+    wakeTimer = setTimeout(() => {
+      wakeTimer = null;
+      void runDueJobs();
+    }, delay);
+  } catch {
+    /* the next app resume or background task will pick the work up */
+  }
+}
+
 /** Ask for server-side processing — always a deliberate user action (it uploads data). */
-export async function requestServerProcessing(itemId: string, kind: 'metadata' | 'captions' | 'transcribe' | 'enrich'): Promise<void> {
+export async function requestServerProcessing(itemId: string, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich'): Promise<void> {
   if (!(await getConnection())) throw new Error('Connect to your server first (Settings → Connect to My Server).');
   const repo = await getRepo();
   await repo.enqueueJob({ id: `job_server_${kind}_${itemId}`, kind: `server_${kind}` as Job['kind'], itemId, retry: true, maxAttempts: 4 });

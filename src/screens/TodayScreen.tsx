@@ -2,15 +2,18 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React from 'react';
-import { RefreshControl, ScrollView, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatLocal, rangeFor } from '../core/dates';
+import { STATUS_LABELS, isPending } from '../core/status';
+import { VIDEO_SOURCES } from '../core/url';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { requestSync, runDueJobs } from '../services/processing';
 import { generateReport } from '../services/reports';
 import { Banner, Button, Card, Chip, EmptyState, Fab, IconButton, Loading, Section, T, Wordmark } from '../ui/components';
 import { useAction, useQuery } from '../ui/hooks';
 import { ItemCard } from '../ui/ItemCard';
+import { PlatformBadge } from '../ui/media';
 import { space, useTheme } from '../ui/theme';
 import { useConnection, useSettings } from '../ui/useSettings';
 
@@ -44,6 +47,7 @@ export default function TodayScreen({ navigation }: Props) {
         transcripts: Number((await repo.db.get<{ n: number }>(`SELECT COUNT(DISTINCT item_id) AS n FROM transcripts t JOIN items i ON i.id = t.item_id WHERE i.deleted = 0 AND t.updated_at >= ?`, [r.startIso]))?.n ?? 0),
         clusters: await repo.tagCountsInRange(r.startIso, r.endIso),
         recent: await repo.recentlyViewed(4),
+        videos: await repo.listItems({ sourceTypes: VIDEO_SOURCES }, 'newest', 8),
         conflicts: (await repo.openConflicts()).length,
         highlights: items.flatMap((i) => (i.enrichment?.keyPoints ?? []).slice(0, 1).map((p) => ({ id: i.id, text: p, origin: i.enrichment?.origin ?? 'local' }))).slice(0, 4),
       };
@@ -87,6 +91,23 @@ export default function TodayScreen({ navigation }: Props) {
               <Stat label="transcripts ready" value={d.transcripts} />
             </View>
             {d.failed ? <Banner tone="danger" title={`${d.failed} item(s) failed processing`} action={<Button kind="outline" title="Open queue" onPress={() => navigation.navigate('Jobs')} />} /> : null}
+
+            {d.videos.length ? (
+              <Section title="Recent videos" action={<T v="small" color="accent" onPress={() => navigation.navigate('Main', { screen: 'Library' })}>See all</T>}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.md }}>
+                  {d.videos.map((v) => (
+                    <Pressable key={v.id} onPress={() => navigation.navigate('ItemDetail', { id: v.id })} accessibilityRole="button" accessibilityLabel={`${v.title || 'Video'}. ${STATUS_LABELS[v.status]}`} style={{ width: 220 }}>
+                      <View style={{ aspectRatio: 16 / 9, borderRadius: 14, overflow: 'hidden', backgroundColor: c.surfaceAlt }}>
+                        {v.thumbnailUrl ? <Image source={{ uri: v.thumbnailUrl }} style={{ width: '100%', height: '100%' }} accessibilityIgnoresInvertColors /> : null}
+                        <View style={{ position: 'absolute', top: 6, left: 6 }}><PlatformBadge source={v.sourceType} onMedia /></View>
+                      </View>
+                      <T v="small" numberOfLines={2} style={{ marginTop: 6, fontWeight: '600' }}>{v.title || v.url}</T>
+                      <T v="caption" color={isPending(v.status) ? 'info' : 'textFaint'}>{STATUS_LABELS[v.status]}</T>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </Section>
+            ) : null}
 
             <Card style={{ marginTop: space.lg }}>
               <T v="subtitle">Today's report</T>

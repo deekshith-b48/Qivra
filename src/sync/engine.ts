@@ -68,6 +68,11 @@ export async function runSync(repo: Repo, client: QivraClient, opts: { maxRounds
     for (const c of resp.conflicts) {
       if (!c.server) continue;
       const sent = changes.find((x) => x.kind === c.kind && x.id === c.id);
+      if (sent && !c.server.deleted && c.server.updated_by === 'server') {
+        // The newer server revision came from server-side processing, not another device: rebase and push again.
+        await repo.db.run(`UPDATE ${c.kind === 'item' ? 'items' : 'collections'} SET server_revision = ? WHERE id = ?`, [c.server.revision, c.id]);
+        continue;
+      }
       if (sent && !c.server.deleted && sameContent(sent.data, c.server.data)) {
         // Both sides already hold the same content (e.g. a migrated SuperBrain item): adopt the server revision.
         await markAcknowledged(repo, c.kind, c.id, c.server.revision, sentRevs.get(`${c.kind}:${c.id}`) ?? 0);
@@ -140,6 +145,11 @@ export async function applyRemote(repo: Repo, ent: ServerEntity): Promise<'pulle
     if (serverRev !== null && ent.revision <= serverRev) return 'skipped';
     const dirty = Number(local.local_rev) > Number(local.synced_local_rev) || ['pending', 'conflicted'].includes(String(local.sync_status));
     if (dirty) {
+      if (ent.updated_by === 'server' && !ent.deleted) {
+        // Server processing results never compete with your edits: rebase; the next push keeps your changes.
+        await repo.db.run(`UPDATE ${table} SET server_revision = ? WHERE id = ?`, [ent.revision, ent.id]);
+        return 'skipped';
+      }
       await repo.addConflict(ent.kind, ent.id, ent.data, ent.revision);
       return 'conflict';
     }

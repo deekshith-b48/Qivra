@@ -27,6 +27,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
       </Section>
       <Section title="AI & processing">
         <Row icon="sparkles-outline" title="AI models" subtitle={s.ai.enabled ? `${s.ai.model} · ${s.ai.baseUrl}` : 'None — Qivra works without AI'} onPress={() => navigation.navigate('AiProviders')} />
+        <ToggleRow title="Auto-transcribe shared videos" subtitle="YouTube captions are fetched on this phone. Instagram and X videos (and YouTube videos without captions) are transcribed by your paired server with local Whisper." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
         <Row icon="list-outline" title="Processing queue" subtitle={j ? `${j.queued + j.running} pending · ${j.failed_retryable + j.failed_permanent} failed` : undefined} onPress={() => navigation.navigate('Jobs')} />
       </Section>
       <Section title="Appearance">
