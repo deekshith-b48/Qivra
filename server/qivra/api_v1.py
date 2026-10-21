@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from . import API_VERSION, PRODUCT, SERVER_VERSION, ai, transcribers
+from . import API_VERSION, PRODUCT, SERVER_VERSION, ai, ai_gateway, transcribers
 from .jobs import JOB_KINDS
 from .knowledge import agent_answer, build_report, terms_of
 from .pairing import PairingError
@@ -74,7 +74,7 @@ def health(request: Request) -> dict:
         "server_id": svc.store.server_id,
         "time": now_iso(),
         "lan_enabled": svc.config.lan_enabled,
-        "capabilities": ["pairing", "sync", "items", "transcripts", "jobs", "search", "agent", "reports", "media"],
+        "capabilities": ["pairing", "sync", "items", "transcripts", "jobs", "search", "agent", "reports", "media", "ai_gateway"],
     }
 
 
@@ -125,7 +125,26 @@ def pairing_status(request: Request, device: Device = Depends(require_device)) -
         "server_time": now_iso(),
         "ai": ai.provider_status(),
         "transcription": transcribers.describe(),
+        "ai_gateway": ai_gateway.describe(),
     }
+
+
+# ── AI gateway (owner's provider key stays on the server) ────────────────────
+def _gateway(call, request_body: dict) -> dict:
+    try:
+        return call(request_body)
+    except ai_gateway.GatewayError as exc:
+        raise ApiError(exc.status, exc.code, exc.message) from exc
+
+
+@router.post("/api/v1/ai/chat/completions")
+def ai_chat(body: dict[str, Any], _: Device = Depends(require_device)) -> dict:
+    return _gateway(ai_gateway.chat, body)
+
+
+@router.post("/api/v1/ai/embeddings")
+def ai_embeddings(body: dict[str, Any], _: Device = Depends(require_device)) -> dict:
+    return _gateway(ai_gateway.embeddings, body)
 
 
 @router.get("/api/v1/devices")

@@ -138,6 +138,15 @@ export interface ServerTranscript {
 
 const sleepDefault = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** The paired server's AI gateway (the provider key itself stays on the server). */
+export interface AiGatewayInfo {
+  enabled: boolean;
+  upstream?: string;
+  model?: string;
+  embedding_model?: string | null;
+  external?: boolean;
+}
+
 export class QivraClient {
   readonly baseUrl: string;
   private token: string | null;
@@ -217,7 +226,7 @@ export class QivraClient {
   }
 
   pairingStatus() {
-    return this.request<{ paired: boolean; device: DeviceInfo; server: { id: string; version: string; lan_enabled: boolean }; server_time: string; ai: { available: boolean; providers: Record<string, boolean> } }>('GET', '/api/v1/pairing/status');
+    return this.request<{ paired: boolean; device: DeviceInfo; server: { id: string; version: string; lan_enabled: boolean }; server_time: string; ai: { available: boolean; providers: Record<string, boolean> }; ai_gateway?: AiGatewayInfo }>('GET', '/api/v1/pairing/status');
   }
 
   devices() {

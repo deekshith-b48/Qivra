@@ -1,7 +1,7 @@
 """Pluggable speech-to-text engines for the server.
 
 Order for QIVRA_TRANSCRIBER=auto (default):
-  1. transcribe-anything (https://github.com/zackees/transcribe-anything, BSD-3-Clause)
+  1. transcribe-anything (https://github.com/zackees/transcribe-anything, BSD-3-Clause for pinned 4.1.2)
      — preferred on Apple Silicon, where it uses the MLX backend; also cpu/cuda.
   2. faster-whisper (in-process, CPU int8).
   3. SuperBrain's analyzers.audio_transcribe (Groq Whisper API / openai-whisper).
@@ -12,14 +12,18 @@ Every engine returns real segments with millisecond timestamps when it has them.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import platform
 import shutil
+import sysconfig
 import tempfile
 import threading
 from pathlib import Path
 
 from .transcripts import TranscriptParseError, parse_srt
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriberError(Exception):
@@ -77,6 +81,13 @@ def describe() -> dict:
 # ── engines ───────────────────────────────────────────────────────────────────
 def _ta_transcribe(path: Path) -> tuple[list[dict], str, str]:
     from transcribe_anything import transcribe  # type: ignore
+
+    # The Python API shells out to its static_ffmpeg console script. Launching
+    # with .venv/bin/python does not activate that environment's bin directory.
+    scripts = sysconfig.get_path("scripts")
+    paths = os.environ.get("PATH", "").split(os.pathsep)
+    if scripts not in paths:
+        os.environ["PATH"] = os.pathsep.join([scripts, *paths])
 
     device = os.getenv("QIVRA_TA_DEVICE") or ("mlx" if apple_silicon() else "cpu")
     out = Path(tempfile.mkdtemp(prefix="ta_"))
@@ -143,4 +154,14 @@ ENGINES = {"transcribe-anything": _ta_transcribe, "faster-whisper": _fw_transcri
 
 def transcribe_file(path: Path) -> tuple[list[dict], str, str]:
     """Return (segments, language, provider) using the selected engine."""
-    return ENGINES[selected_engine()](Path(path))
+    engine = selected_engine()
+    try:
+        return ENGINES[engine](Path(path))
+    except TranscriberError as exc:
+        # Auto mode must remain usable if TA's isolated runtime cannot provision
+        # itself. Fall back only to another local engine; never opt into cloud.
+        if (os.getenv("QIVRA_TRANSCRIBER", "auto").strip().lower() == "auto"
+                and engine == "transcribe-anything" and "faster-whisper" in available_engines()):
+            logger.warning("transcribe-anything failed (%s); using local faster-whisper.", exc.code)
+            return ENGINES["faster-whisper"](Path(path))
+        raise

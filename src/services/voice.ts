@@ -27,8 +27,8 @@ import { getSettings } from './settings';
 const AudioRecord: PcmAudioRecord = require('@fugood/react-native-audio-pcm-stream').default;
 
 const MODEL_DIR = () => `${FS.documentDirectory}models/`;
-const VOICE_DIR = () => `${FS.documentDirectory}voice/`;
-export const MAX_RECORDING_MS = 30 * 60_000;
+const VOICE_DIR = () => `${FS.documentDirectory}media/`;
+export const MAX_RECORDING_MS = 5 * 60_000;
 
 async function ensureDir(dir: string) {
   if (!(await FS.getInfoAsync(dir)).exists) await FS.makeDirectoryAsync(dir, { intermediates: true });
@@ -41,7 +41,7 @@ export async function ensureMicPermission(): Promise<'granted' | 'denied' | 'blo
   if (await PermissionsAndroid.check(perm)) return 'granted';
   const r = await PermissionsAndroid.request(perm, {
     title: 'Microphone for voice notes',
-    message: 'Qivra records only while you hold the mic. With on-device transcription, audio never leaves your phone.',
+    message: 'Qivra records only after you tap the mic, until you stop or close the recorder. With on-device transcription, audio never leaves your phone.',
     buttonPositive: 'Allow',
     buttonNegative: 'Not now',
   });
@@ -54,32 +54,66 @@ export interface Recording {
   cancel(): Promise<void>;
 }
 
-export function startRecording(onLevel?: (level: number, elapsedMs: number) => void): Recording {
+let recordingActive = false;
+
+export async function startRecording(onLevel?: (level: number, elapsedMs: number) => void, onLimit?: () => void): Promise<Recording> {
+  if (recordingActive) throw new Error('Another recording is already in progress.');
+  recordingActive = true;
   const chunks: string[] = [];
+  try {
+    // Android init is a native Promise; starting before it resolves can silently capture nothing.
+    await AudioRecord.init({ sampleRate: 16000, channels: 1, bitsPerSample: 16, audioSource: 6, bufferSize: 4096, wavFile: 'unused.wav' });
+  } catch (e) {
+    recordingActive = false;
+    throw e;
+  }
   const started = Date.now();
-  AudioRecord.init({ sampleRate: 16000, channels: 1, bitsPerSample: 16, audioSource: 6, bufferSize: 4096, wavFile: 'unused.wav' });
+  let finishing: Promise<void> | null = null;
+  let consumed = false;
   const sub = AudioRecord.on('data', (data) => {
+    if (finishing) return;
     chunks.push(data);
     onLevel?.(chunkLevel(data), Date.now() - started);
-    if (Date.now() - started > MAX_RECORDING_MS) void AudioRecord.stop();
   });
-  AudioRecord.start();
-  const finish = async () => {
-    await AudioRecord.stop();
-    sub?.remove();
+  const finish = () => {
+    if (!finishing) finishing = (async () => {
+      clearTimeout(timer);
+      sub.remove();
+      try {
+        AudioRecord.stop();
+        // This recorder's stop has no native completion Promise. Allow its final
+        // blocking read (4096 bytes at 16 kHz) to release before another init.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } finally {
+        recordingActive = false;
+      }
+    })();
+    return finishing;
   };
+  const timer = setTimeout(() => { void finish(); onLimit?.(); }, MAX_RECORDING_MS);
+  try {
+    AudioRecord.start();
+  } catch (e) {
+    await finish();
+    throw e;
+  }
   return {
     async stop() {
+      if (consumed) throw new Error('This recording has already ended.');
+      consumed = true;
       await finish();
       if (!chunks.length) throw new Error('No audio was captured. Check the microphone and try again.');
       const wav = pcmChunksToWavBase64(chunks);
+      chunks.length = 0;
       await ensureDir(VOICE_DIR());
       const uri = `${VOICE_DIR()}${newId('vn')}.wav`;
       await FS.writeAsStringAsync(uri, wav.base64, { encoding: FS.EncodingType.Base64 });
       return { uri, durationMs: wav.durationMs, bytes: wav.bytes };
     },
     async cancel() {
+      consumed = true;
       await finish();
+      chunks.length = 0;
     },
   };
 }
@@ -119,12 +153,14 @@ export async function downloadModel(m: VoiceModel, onProgress?: (fraction: numbe
 }
 
 export async function deleteModel(m: VoiceModel): Promise<void> {
+  if (transcribing) throw new Error('Wait for transcription to finish before deleting a model.');
   if (m.id === loadedId) await releaseContext();
   await FS.deleteAsync(`${MODEL_DIR()}${m.file}`, { idempotent: true });
 }
 
 let ctx: WhisperContext | ParakeetContext | null = null;
 let loadedId: string | null = null;
+let transcribing = false;
 
 async function releaseContext() {
   try {
@@ -160,20 +196,31 @@ export interface VoiceTranscript {
 }
 
 /** Transcribe a 16 kHz WAV on the phone. */
-export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number) => void): Promise<VoiceTranscript> {
-  const s = await getSettings();
-  const m = voiceModel(s.voice.modelId);
-  const c = await contextFor(m);
-  const lang = s.voice.language === 'auto' ? undefined : s.voice.language;
-  const job = m.engine === 'parakeet'
-    ? (c as ParakeetContext).transcribe(wavUri.replace('file://', ''), {})
-    : (c as WhisperContext).transcribe(wavUri.replace('file://', ''), { language: lang ?? 'auto', maxLen: 0, onProgress: (p: number) => onProgress?.(p / 100) });
-  const r = await job.promise;
-  if (r.isAborted) throw new Error('Transcription was cancelled.');
-  const segments = whisperSegmentsToMs(r.segments ?? []);
-  const text = segments.map((x) => x.text).join(' ').trim() || (r.result ?? '').trim();
-  const language = r.language && r.language !== 'auto' ? r.language : detectLanguage(text).code;
-  return { text, segments, language, provider: `${m.engine === 'parakeet' ? 'parakeet' : 'whisper.cpp'} ${m.file} (on device)` };
+export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<VoiceTranscript> {
+  if (transcribing) throw new Error('Another transcription is still finishing. Try again in a moment.');
+  transcribing = true;
+  let detach = () => {};
+  try {
+    if (signal?.aborted) throw new Error('Transcription was cancelled.');
+    const s = await getSettings();
+    const m = voiceModel(s.voice.modelId);
+    const c = await contextFor(m);
+    if (signal?.aborted) throw new Error('Transcription was cancelled.');
+    const lang = s.voice.language === 'auto' ? undefined : s.voice.language;
+    const job = m.engine === 'parakeet'
+      ? (c as ParakeetContext).transcribe(wavUri.replace('file://', ''), {})
+      : (c as WhisperContext).transcribe(wavUri.replace('file://', ''), { language: lang ?? 'auto', maxLen: 0, onProgress: (p: number) => onProgress?.(p / 100) });
+    const abort = () => { void job.stop().catch(() => undefined); };
+    signal?.addEventListener('abort', abort);
+    detach = () => signal?.removeEventListener('abort', abort);
+    if (signal?.aborted) abort();
+    const r = await job.promise;
+    if (signal?.aborted || r.isAborted) throw new Error('Transcription was cancelled.');
+    const segments = whisperSegmentsToMs(r.segments ?? []);
+    const text = r.segments?.length ? segments.map((x) => x.text).join(' ').trim() : (r.result ?? '').trim();
+    const language = r.language && r.language !== 'auto' ? r.language : detectLanguage(text).code;
+    return { text, segments, language, provider: `${m.engine === 'parakeet' ? 'parakeet' : 'whisper.cpp'} ${m.file} (on device)` };
+  } finally { detach(); transcribing = false; }
 }
 
 // ── voice notes ────────────────────────────────────────────────────────────
@@ -184,7 +231,7 @@ export async function voiceModeAvailable(): Promise<{ device: boolean; server: b
   const m = voiceModel(s.voice.modelId);
   const device = !!(await modelPath(m));
   const server = !!(await getConnection());
-  const preferred: VoiceMode | null = s.voice.preferServer && server ? 'server' : device ? 'device' : server ? 'server' : null;
+  const preferred: VoiceMode | null = s.voice.preferServer && server ? 'server' : device ? 'device' : null;
   return { device, server, preferred, model: m };
 }
 
@@ -196,21 +243,26 @@ export async function saveVoiceNote(rec: { uri: string; durationMs: number; byte
   const repo = await getRepo();
   const title = transcript?.text ? voiceTitle(transcript.text) : `Voice note (${Math.round(rec.durationMs / 1000)}s)`;
   const { item } = await repo.createItem({ sourceType: 'note', title, origin: 'local' });
-  await repo.addMedia(item.id, { uri: rec.uri, name: rec.uri.split('/').pop() ?? 'voice.wav', mime: 'audio/wav', size: rec.bytes });
-  if (transcript?.segments.length) {
-    await repo.upsertTranscript({
-      itemId: item.id, language: transcript.language, languageMethod: 'provider', kind: 'original', source: 'voice_on_device',
-      provider: transcript.provider, format: 'wav', segments: transcript.segments,
-    });
-    await schedulePipeline(item.id);
-  } else if (mode === 'server') {
-    await schedulePipeline(item.id);
-    await requestServerProcessing(item.id, 'transcribe');
-  } else {
-    await schedulePipeline(item.id);
+  try {
+    await repo.addMedia(item.id, { uri: rec.uri, name: rec.uri.split('/').pop() ?? 'voice.wav', mime: 'audio/wav', size: rec.bytes });
+    if (transcript?.text.trim()) {
+      await repo.upsertTranscript({
+        itemId: item.id, language: transcript.language, languageMethod: 'provider', kind: 'original', source: 'voice_on_device',
+        provider: transcript.provider, format: 'wav', segments: transcript.segments.length ? transcript.segments : [{ startMs: null, endMs: null, text: transcript.text }],
+      });
+      await schedulePipeline(item.id);
+    } else if (mode === 'server') {
+      await schedulePipeline(item.id);
+      await requestServerProcessing(item.id, 'transcribe');
+    } else {
+      await schedulePipeline(item.id);
+    }
+    emit('items');
+    return item.id;
+  } catch (e) {
+    await repo.deleteItems([item.id]);
+    throw e;
   }
-  emit('items');
-  return item.id;
 }
 
 export async function deleteRecording(uri: string): Promise<void> {

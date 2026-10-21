@@ -22,6 +22,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
   const [results, setResults] = useState<CaptureResult[] | null>(null);
   const { busy, run } = useAction();
   const [voice, setVoice] = useState(false);
+  const [dictate, setDictate] = useState(false);
 
   const done = (res: CaptureResult[]) => {
     if (res.length === 1 && res[0].itemId && !res[0].error) navigation.replace('ItemDetail', { id: res[0].itemId });
@@ -94,7 +95,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
       ) : mode === 'media' ? (
         <>
           <T color="textMuted">Import an audio or video file you are allowed to process. It is copied into Qivra's private storage (max 200 MB).</T>
-          <Banner tone="info" title="Transcription" body="Qivra does not transcribe on the phone. Import a transcript for the file, or send it to your paired server (Whisper) from the item page." />
+          <Banner tone="info" title="Transcription" body="Imported audio/video files can be transcribed by your paired server from the item page. For on-device recording and transcription, choose Voice." />
           <Field label="Title (optional)" value={title} onChangeText={setTitle} />
           <Button title="Choose file" icon="folder-open-outline" onPress={() => void media()} loading={busy} />
         </>
@@ -108,6 +109,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
             <Field label="Transcript (SRT, WebVTT or plain text)" value={text} onChangeText={setText} multiline placeholder={'[00:01] Welcome…\nor paste an .srt/.vtt'} style={{ minHeight: 0 }} />
           )}
           {mode === 'link' ? <Button kind="text" title="Paste from clipboard" icon="clipboard-outline" onPress={() => void Clipboard.getStringAsync().then(setText)} style={{ alignSelf: 'flex-start' }} /> : null}
+          {mode === 'note' ? <Button kind="text" title="Dictate note" icon="mic-outline" onPress={() => setDictate(true)} /> : null}
           <Field label="Title (optional)" value={title} onChangeText={setTitle} />
           {mode !== 'note' ? <Field label="Your note (optional)" value={note} onChangeText={setNote} multiline /> : null}
           {error ? <Banner tone="danger" title={error} /> : null}
@@ -118,6 +120,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
           </T>
         </>
       )}
+      <VoiceSheet visible={dictate} onClose={() => setDictate(false)} purpose="dictate" onText={(t) => setText((previous) => [previous.trim(), t].filter(Boolean).join(' '))} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
     </Screen>
   );
 }

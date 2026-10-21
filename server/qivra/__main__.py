@@ -76,6 +76,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .config import QivraConfig
     from .netinfo import choose_port, detect_lan_ips
 
+    from . import ai_gateway
+    from .config import SERVER_DIR
+
+    ai_gateway.load_env_file(SERVER_DIR / ai_gateway.ENV_FILE_NAME)
     cfg = QivraConfig()
     cfg.lan_enabled = bool(args.lan)
     bind_host = "0.0.0.0" if args.lan else "127.0.0.1"
@@ -150,6 +154,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
     print("  Public exposure: disabled (no tunnels are started)")
     print(f"  Transport: {'HTTPS' if scheme == 'https' else 'HTTP — not encrypted in transit; use only on a trusted network'}")
     print(f"  Server ID: {services.store.server_id}")
+    gw = ai_gateway.describe()
+    if gw["enabled"]:
+        print(f"  AI for paired phones: {gw['model']} via {gw['upstream']} "
+              f"{DIM}(key stays on this machine, not shown){RESET}")
+    else:
+        print(f"  AI for paired phones: off {DIM}(set QIVRA_AI_* in server/{ai_gateway.ENV_FILE_NAME}){RESET}")
     paired = services.store.list_devices()
     print(f"  Paired devices: {sum(1 for d in paired if not d.revoked_at)} active, "
           f"{sum(1 for d in paired if d.revoked_at)} revoked")

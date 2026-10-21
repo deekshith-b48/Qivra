@@ -19,7 +19,7 @@ import { CaptionsUnavailable, fetchYouTubeCaptions } from '../core/youtubeCaptio
 import type { Repo } from '../db/repo';
 import type { Item, Job } from '../db/types';
 import { runSync } from '../sync/engine';
-import { loadProvider } from './ai';
+import { aiInfo, loadProvider } from './ai';
 import { getRepo } from './db';
 import { emit } from './events';
 import { getClient, getConnection } from './server';
@@ -240,9 +240,9 @@ async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { sta
     ]);
   }
   if (await repo.syncEnabled()) await repo.enqueueJob({ id: 'job_sync', kind: 'sync', retry: true, maxAttempts: 6 });
-  const s = await getSettings();
-  if (s.ai.enabled && s.ai.autoEnrich) await repo.enqueueJob({ id: `job_model_enrich_${item.id}`, kind: 'model_enrich', itemId: item.id, retry: true, maxAttempts: 3 });
-  if (s.ai.enabled && s.ai.embeddingModel) await repo.enqueueJob({ id: 'job_embed', kind: 'embed', retry: true, maxAttempts: 3 });
+  const ai = await aiInfo();
+  if (ai.enabled && ai.autoEnrich) await repo.enqueueJob({ id: `job_model_enrich_${item.id}`, kind: 'model_enrich', itemId: item.id, retry: true, maxAttempts: 3 });
+  if (ai.enabled && ai.embeddingModel) await repo.enqueueJob({ id: 'job_embed', kind: 'embed', retry: true, maxAttempts: 3 });
 }
 
 async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, unknown>> {
@@ -270,16 +270,15 @@ async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, u
 }
 
 async function handleEmbed(repo: Repo): Promise<Record<string, unknown>> {
-  const s = await getSettings();
-  const { provider, reason } = await loadProvider();
-  if (!provider?.embed || !s.ai.embeddingModel) throw new JobError('NO_PROVIDER', reason ?? 'No embedding model configured.', false);
+  const { provider, reason, embeddingModel } = await loadProvider();
+  if (!provider?.embed || !embeddingModel) throw new JobError('NO_PROVIDER', reason ?? 'No embedding model configured.', false);
   let total = 0;
   for (let i = 0; i < 20; i++) {
-    const batch = await repo.chunksMissingEmbeddings(s.ai.embeddingModel, 16);
+    const batch = await repo.chunksMissingEmbeddings(embeddingModel, 16);
     if (!batch.length) break;
     try {
       const vectors = await provider.embed(batch.map((b) => b.text));
-      await repo.saveEmbeddings(s.ai.embeddingModel, batch.map((b, j) => ({ chunkId: b.id, vector: vectors[j] })));
+      await repo.saveEmbeddings(embeddingModel, batch.map((b, j) => ({ chunkId: b.id, vector: vectors[j] })));
       total += batch.length;
     } catch (e) {
       if (e instanceof ProviderError) throw new JobError(e.code, e.message, e.retryable);

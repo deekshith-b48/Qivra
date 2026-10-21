@@ -19,18 +19,17 @@ export function toEvidence(i: Item): EvidenceItem {
 const toChunk = (c: ChunkHit): EvidenceChunk => ({ chunkId: c.chunkId, itemId: c.itemId, transcriptId: c.transcriptId, kind: c.kind, text: c.text, startMs: c.startMs, language: c.language });
 
 export async function agentData(repo: Repo): Promise<AgentData> {
-  const s = await getSettings();
-  const { provider } = await loadProvider();
+  const { provider, embeddingModel } = await loadProvider();
   const data: AgentData = {
     searchChunks: async (q, opts) => (await repo.searchChunks(q, { itemIds: opts?.itemIds, limit: opts?.limit })).map(toChunk),
     itemsInRange: async (a, b) => (await repo.itemsInRange(a, b, 200)).map(toEvidence),
     getItems: async (ids) => (await repo.itemsByIds(ids)).map(toEvidence),
     chunksForItems: async (ids, per) => (await repo.chunksForItems(ids, per)).map(toChunk),
   };
-  if (provider?.embed && s.ai.embeddingModel) {
+  if (provider?.embed && embeddingModel) {
     data.semanticSearch = async (q, limit) => {
       const [qv] = await provider.embed!([q]);
-      const all = await repo.allEmbeddings(s.ai.embeddingModel);
+      const all = await repo.allEmbeddings(embeddingModel);
       const top = all.map((e) => ({ e, score: cosine(qv, e.vector) })).sort((a, b) => b.score - a.score).slice(0, limit);
       const out: EvidenceChunk[] = [];
       for (const t of top) {

@@ -9,8 +9,8 @@ export interface PcmRecordOptions {
   bufferSize?: number;
 }
 export interface PcmAudioRecord {
-  init(options: PcmRecordOptions): void;
+  init(options: PcmRecordOptions): Promise<void>;
   start(): void;
-  stop(): Promise<string | null>;
+  stop(): void;
   on(event: 'data', callback: (base64Pcm: string) => void): { remove(): void };
 }

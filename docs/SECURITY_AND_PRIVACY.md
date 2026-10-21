@@ -29,7 +29,8 @@
   - Exported components: `MainActivity` (launcher + `qivra://` links) and `ShareActivity` (share target) only. Deep links only navigate; they carry no data or commands.
   - Notifications contain no item content. Credentials never go to the clipboard, exports or logs.
 - **Cleartext HTTP:** Android's network-security-config cannot permit cleartext by IP range, and LAN pairing over plain HTTP is required. So the platform setting permits cleartext, and the app's only HTTP paths (`QivraClient`, the AI provider adapter) refuse `http://` to anything that is not loopback, RFC1918, link-local, CGNAT/Tailscale (100.64/10), IPv6 ULA/link-local or `*.local`. Metadata lookups (YouTube oEmbed, GitHub API) use https. Risk: on an untrusted Wi-Fi, LAN traffic to your server can be observed or altered; the app warns before pairing over HTTP. Mitigation: use HTTPS (`--tls-cert/--tls-key`) or a VPN.
-- **External AI:** consent required before content goes to a non-local endpoint; keys in Keystore; https enforced for public hosts.
+- **External AI:** consent required before content goes to a non-local endpoint configured on the phone; keys in Keystore; https enforced for public hosts.
+- **Server AI gateway:** the provider key lives only in the git-ignored `server/qivra.env` (created with mode 0600) or the environment; phones reach it only through device-authenticated `/api/v1/ai/*` routes and receive just the model and host name. Anyone holding a paired-device credential can spend the owner's provider quota — revoke lost phones (`python -m qivra revoke`). Content sent through the gateway goes to the configured provider under its privacy policy.
 
 ## Data on the device
 

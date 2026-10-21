@@ -16,7 +16,7 @@ import { ItemCard } from '../ui/ItemCard';
 import { VoiceSheet } from '../ui/VoiceSheet';
 import { PlatformBadge } from '../ui/media';
 import { space, useTheme } from '../ui/theme';
-import { useConnection, useSettings } from '../ui/useSettings';
+import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Today'>, NativeStackScreenProps<RootStackParamList>>;
 
@@ -32,6 +32,7 @@ function Stat({ label, value, onPress }: { label: string; value: number; onPress
 export default function TodayScreen({ navigation }: Props) {
   const { c } = useTheme();
   const settings = useSettings();
+  const ai = useAiInfo();
   const tz = settings?.timezone ?? 'UTC';
   const { connection } = useConnection();
   const { busy, run } = useAction();
@@ -119,7 +120,7 @@ export default function TodayScreen({ navigation }: Props) {
                 icon="document-text-outline"
                 loading={busy}
                 onPress={() => run(async () => {
-                  const r = await generateReport({ kind: 'daily', useAi: settings?.ai.enabled });
+                  const r = await generateReport({ kind: 'daily', useAi: ai?.enabled });
                   navigation.navigate('ReportDetail', { id: r.id });
                 }, 'Report failed')}
                 style={{ alignSelf: 'flex-start', marginTop: space.sm }}

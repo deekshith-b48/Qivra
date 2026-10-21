@@ -21,7 +21,7 @@ import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard, VideoCard } from '../ui/ItemCard';
 import { Segmented } from '../ui/media';
 import { radius, space, type, useTheme } from '../ui/theme';
-import { useSettings } from '../ui/useSettings';
+import { useSettings, useAiInfo } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Library'>, NativeStackScreenProps<RootStackParamList>>;
 const PAGE = 30;
@@ -33,6 +33,7 @@ const DATES: [string, string][] = [['any', 'Any time'], ['today', 'Today'], ['we
 export default function LibraryScreen({ navigation, route }: Props) {
   const { c } = useTheme();
   const settings = useSettings();
+  const ai = useAiInfo();
   const tz = settings?.timezone ?? 'UTC';
   const grid = settings?.libraryView === 'grid';
   const [text, setText] = useState('');
@@ -149,7 +150,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
             <IconButton icon="close" label="Clear selection" onPress={() => setSelected(new Set())} />
             <T v="title" style={{ flex: 1 }}>{selected.size} selected</T>
             <IconButton icon="document-text-outline" label="Report on selected items" onPress={() => void run(async () => {
-              const r = await generateReport({ kind: 'selection', itemIds: ids, useAi: settings?.ai.enabled });
+              const r = await generateReport({ kind: 'selection', itemIds: ids, useAi: ai?.enabled });
               setSelected(new Set());
               navigation.navigate('ReportDetail', { id: r.id });
             }, 'Report failed')} />

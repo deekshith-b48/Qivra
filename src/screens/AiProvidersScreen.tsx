@@ -8,17 +8,21 @@ import { updateSettings } from '../services/settings';
 import { Banner, Button, Card, Chip, Field, Header, Screen, Section, T, ToggleRow } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { space } from '../ui/theme';
-import { useSettings } from '../ui/useSettings';
+import { useAiInfo, useSettings } from '../ui/useSettings';
 
-const PRESETS: { label: string; baseUrl: string; model: string; note: string }[] = [
-  { label: 'Ollama on my laptop', baseUrl: 'http://192.168.1.10:11434/v1', model: 'llama3.2', note: 'Free and local. Replace the IP with your laptop’s; run `OLLAMA_HOST=0.0.0.0 ollama serve`.' },
-  { label: 'LM Studio', baseUrl: 'http://192.168.1.10:1234/v1', model: 'local-model', note: 'Free and local. Enable “Serve on local network”.' },
-  { label: 'Groq (your key)', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', note: 'Hosted. Content leaves your network; free tier available.' },
-  { label: 'OpenRouter (your key)', baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct:free', note: 'Hosted. Content leaves your network.' },
+// Model ids checked October 2026 (Groq against its live /models list). Hosted presets need the user's own key.
+const PRESETS: { label: string; baseUrl: string; model: string; embeddingModel: string; note: string }[] = [
+  { label: 'Groq · gpt-oss (your key)', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', embeddingModel: '', note: 'Hosted open-weight model, very fast, free tier. Groq has no embedding models, so keyword search is used. Content leaves your network.' },
+  { label: 'Mistral (your key)', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', embeddingModel: 'mistral-embed', note: 'Hosted open-weight model with embeddings (semantic search). Free “Experiment” plan. Content leaves your network.' },
+  { label: 'Gemini (your key)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', embeddingModel: 'gemini-embedding-001', note: 'Hosted (not open source), generous free tier, includes embeddings. Content leaves your network.' },
+  { label: 'OpenRouter (your key)', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-oss-120b:free', embeddingModel: '', note: 'One key for many open models; “:free” models are rate-limited. Content leaves your network.' },
+  { label: 'Ollama on my laptop', baseUrl: 'http://192.168.1.10:11434/v1', model: 'qwen2.5:3b', embeddingModel: 'nomic-embed-text', note: 'Free and local. Replace the IP with your laptop’s; run `OLLAMA_HOST=0.0.0.0 ollama serve`.' },
+  { label: 'LM Studio', baseUrl: 'http://192.168.1.10:1234/v1', model: 'local-model', embeddingModel: '', note: 'Free and local. Enable “Serve on local network”.' },
 ];
 
 export default function AiProvidersScreen({ navigation }: RootProps<'AiProviders'>) {
   const s = useSettings();
+  const ai = useAiInfo();
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
   const [embeddingModel, setEmbeddingModel] = useState('');
@@ -70,12 +74,16 @@ export default function AiProvidersScreen({ navigation }: RootProps<'AiProviders
       <Header title="AI models" subtitle="Optional. Without a model Qivra still extracts, searches and reports." onBack={() => navigation.goBack()} />
       <Card>
         <T v="subtitle">Status</T>
-        <T color="textMuted">{s?.ai.enabled ? `Using ${s.ai.model} at ${s.ai.baseUrl}${s.ai.externalConsent ? ' (external, consent given)' : ''}` : 'No model configured. Answers quote your saved items; summaries are extractive.'}</T>
+        <T color="textMuted">{s?.ai.enabled
+          ? `Using ${s.ai.model} at ${s.ai.baseUrl}${s.ai.externalConsent ? ' (external, consent given)' : ''}`
+          : ai?.source === 'server'
+            ? `Using ${ai.model} via your Qivra server (${ai.where}). The server holds the API key — nothing to fill in here. New items get AI summaries automatically.`
+            : 'No model configured. Answers quote your saved items; summaries are extractive.'}</T>
         {usage.data ? <T v="small" color="textMuted" style={{ marginTop: 4 }}>Last 30 days: {usage.data.calls} model call(s), {usage.data.promptTokens + usage.data.completionTokens} tokens reported by the provider. Cost depends on your provider’s pricing.</T> : null}
       </Card>
       <Section title="Presets">
         <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-          {PRESETS.map((p) => <Chip key={p.label} label={p.label} onPress={() => { setBaseUrl(p.baseUrl); setModel(p.model); Alert.alert(p.label, p.note); }} />)}
+          {PRESETS.map((p) => <Chip key={p.label} label={p.label} onPress={() => { setBaseUrl(p.baseUrl); setModel(p.model); setEmbeddingModel(p.embeddingModel); Alert.alert(p.label, p.note); }} />)}
         </View>
       </Section>
       <Section title="OpenAI-compatible endpoint">

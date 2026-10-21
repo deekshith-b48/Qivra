@@ -19,7 +19,7 @@ import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard, SyncChip } from '../ui/ItemCard';
 import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, Segmented, TimestampPill, type StepState } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
-import { useConnection, useSettings } from '../ui/useSettings';
+import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
 
 type Tab = 'summary' | 'transcript' | 'highlights';
 
@@ -41,6 +41,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const { id } = route.params;
   const { c } = useTheme();
   const settings = useSettings();
+  const ai = useAiInfo();
   const { connection } = useConnection();
   const tz = settings?.timezone ?? 'UTC';
   const { busy, run } = useAction();
@@ -236,7 +237,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
               ) : null}
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
                 <Button kind="tonal" title="Rewrite with AI" icon="sparkles-outline" onPress={() => void run(async () => {
-                  if (!settings?.ai.enabled) return Alert.alert('No AI model configured', 'Add a model in Settings → AI models. The current summary was extracted from the source on this phone.');
+                  if (!ai?.enabled) return Alert.alert('No AI model configured', 'Add a model in Settings → AI models. The current summary was extracted from the source on this phone.');
                   await requestModelEnrichment(id);
                 })} loading={busy} />
                 {connection ? <Button kind="outline" title="Enrich on server" icon="server-outline" onPress={() => void serverAction('enrich')} /> : null}

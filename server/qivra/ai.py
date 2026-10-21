@@ -10,6 +10,8 @@ import os
 import threading
 import time
 
+from . import ai_gateway
+
 _ollama_cache: tuple[float, bool] = (0.0, False)
 _lock = threading.Lock()
 
@@ -32,6 +34,8 @@ def _ollama_reachable() -> bool:
 
 
 def provider_status() -> dict:
+    if ai_gateway.config() is not None:
+        return {"available": True, "providers": {"gateway": True}, "gateway": ai_gateway.describe()}
     try:
         from core.model_router import get_router
         providers = dict(get_router().get_available_providers())
@@ -43,6 +47,12 @@ def provider_status() -> dict:
 
 def generate(prompt: str) -> tuple[str, str]:
     """Return (text, provider_label). Raises RuntimeError when nothing is configured."""
+    cfg = ai_gateway.config()
+    if cfg is not None:
+        try:
+            return ai_gateway.generate(prompt), f"server:{cfg['host']}:{cfg['model']}"
+        except ai_gateway.GatewayError as exc:
+            raise RuntimeError(exc.code) from exc
     status = provider_status()
     if not status["available"]:
         raise RuntimeError("NO_PROVIDER")

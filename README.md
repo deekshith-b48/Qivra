@@ -12,7 +12,7 @@ Save the useful things you find, keep them searchable on your device, and ask qu
 
 **[Download the latest Android APK](https://github.com/deekshith-b48/Qivra/releases/latest)** · [Browse all releases](https://github.com/deekshith-b48/Qivra/releases)
 
-The current release is **1.1.0** (`com.qivra.app`, version code `4`). Download `Qivra-1.1.0-release.apk`, open it on your Android phone, and allow your file manager to install unknown apps when Android prompts you.
+The latest local build is **1.3.0** (`com.qivra.app`, version code `6`), including voice notes, dictation and AI through your paired server. Open [Qivra-1.3.0-release.apk](dist/Qivra-1.3.0-release.apk) on your Android phone and allow your file manager to install unknown apps when Android prompts you. The GitHub links above point to published releases.
 
 > **Sideloading note:** The APK is signed with the Android debug key, not a private production release key. It is suitable for personal testing and sideloading, but is not a Play Store release. Android treats Qivra as a separate app from SuperBrain; existing SuperBrain data can sync through your paired server.
 
@@ -28,6 +28,7 @@ The current release is **1.1.0** (`com.qivra.app`, version code `4`). Download `
 - **Local-first storage:** Your library lives in a SQLite database on your device. Full-text search uses SQLite FTS5 and remains available without a server.
 - **Useful without an AI model:** Qivra can extract summaries and key points locally and provide retrieval-based answers with citations. Optional OpenAI-compatible models add generated answers, enrichment, or semantic search.
 - **Video pages, not just bookmarks:** Shared videos get their own detail page with summary, transcript, and highlights. YouTube captions are fetched on the phone when available; supported public video links can use your paired server for transcription.
+- **Voice notes and dictation:** Record and transcribe on Android with downloadable Whisper or Parakeet models. Dictate notes, search queries, and Agent messages; optionally send voice notes to your paired server. See [Voice and transcription](docs/VOICE_AND_TRANSCRIPTION.md).
 - **Keep your context:** Search and organize saved articles, transcripts, notes, and other captured items together.
 - **Sync on your terms:** Pair with your own laptop server to sync devices and run heavier processing. The server is optional for core capture, local search, and library use.
 - **Grounded answers:** Agent responses cite saved items and transcript passages. When no model is configured, Qivra uses retrieval instead of pretending a model answered.
@@ -71,6 +72,8 @@ python3 -m venv .venv
 
 The server prints its working local and LAN addresses, a one-time pairing code, and a QR code. In Qivra, open **Settings → Connect to My Server → Scan QR code**. Use `--lan` only when you want another device on your network to connect; without it, the server listens on loopback only.
 
+To give paired phones AI answers and summaries without entering anything on the phone, copy `server/qivra.env.example` to `server/qivra.env` and add your provider key (for example a Groq key). The key stays on your machine; phones use it through the server.
+
 `requirements-media.txt` enables local Whisper transcription for supported public video links. The selected Whisper model downloads on first use. See [Local server and QR pairing](docs/LOCAL_SERVER_AND_QR_PAIRING.md) for network setup, pairing, TLS, and troubleshooting.
 
 ## Privacy by design
@@ -79,7 +82,7 @@ The server prints its working local and LAN addresses, a one-time pairing code, 
 - Qivra has no ads, analytics, or crash-reporting service.
 - An external AI endpoint is optional. Qivra asks for consent before sending saved content outside your network; API keys are stored in Android Keystore-backed secure storage.
 - Server pairing uses a short-lived, one-time code and per-device credentials. The server listens on loopback by default; LAN access is opt-in.
-- Camera access is used for pairing QR scans, and notifications are optional. Files are selected through Android's document picker or shared into Qivra.
+- Microphone access is requested when you start a recording. Camera access is used for pairing QR scans, and notifications are optional. Files are selected through Android's document picker or shared into Qivra.
 
 Read the full [security and privacy notes](docs/SECURITY_AND_PRIVACY.md) before exposing a server to a network.
 

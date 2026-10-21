@@ -4,7 +4,7 @@
  * non-secret connection details (URL, server id, device id) live in the DB.
  */
 
-import { ApiError, QivraClient, type Health } from '../core/api';
+import { type AiGatewayInfo, ApiError, QivraClient, type Health } from '../core/api';
 import type { PairingPayload } from '../core/qr';
 import { CLOCK_SKEW_MS } from '../core/qr';
 import { disableSync, enableSync } from '../sync/engine';
@@ -24,6 +24,21 @@ export interface Connection {
   serverVersion: string | null;
   lanEnabled: boolean | null;
   aiAvailable: boolean | null;
+  /** Undefined on connections saved before the server offered an AI gateway. */
+  aiGateway?: AiGateway | null;
+}
+
+export interface AiGateway {
+  enabled: boolean;
+  upstream: string | null;
+  model: string | null;
+  embeddingModel: string | null;
+  external: boolean;
+}
+
+function gatewayOf(g: AiGatewayInfo | undefined): AiGateway | null {
+  if (!g?.enabled || !g.model) return null;
+  return { enabled: true, upstream: g.upstream ?? null, model: g.model, embeddingModel: g.embedding_model ?? null, external: g.external ?? true };
 }
 
 const KEY = 'server.connection';
@@ -78,7 +93,7 @@ export async function completePairing(payload: PairingPayload, deviceName: strin
     const conn: Connection = {
       serverUrl: payload.serverUrl, serverId: res.server_id, deviceId: res.device.id, deviceName: res.device.name, pairedAt: new Date().toISOString(),
       cleartext: payload.cleartext, lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version,
-      lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null,
+      lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway),
     };
     await saveConnection(conn);
     const repo = await getRepo();
@@ -106,7 +121,7 @@ export async function checkConnection(): Promise<Connection | null> {
   try {
     const status = await client.pairingStatus();
     if (status.server.id !== c.serverId) throw new ApiError('wrong_server', 'A different Qivra server is now answering at this address.');
-    await saveConnection({ ...c, lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version, lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null });
+    await saveConnection({ ...c, lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version, lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway) });
   } catch (e) {
     const err = e instanceof ApiError ? e : new ApiError('offline', String(e));
     await saveConnection({ ...c, lastError: { kind: err.kind, message: err.message, at: new Date().toISOString() } });

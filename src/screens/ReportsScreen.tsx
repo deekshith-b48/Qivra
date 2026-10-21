@@ -10,7 +10,7 @@ import { generateReport } from '../services/reports';
 import { Banner, Button, Card, Chip, EmptyState, Field, Header, Screen, Section, T, ToggleRow } from '../ui/components';
 import { useAction, useQuery } from '../ui/hooks';
 import { space } from '../ui/theme';
-import { useSettings } from '../ui/useSettings';
+import { useSettings, useAiInfo } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Reports'>, NativeStackScreenProps<RootStackParamList>>;
 
@@ -24,6 +24,7 @@ const KINDS: [ReportKind, string, string][] = [
 
 export default function ReportsScreen({ navigation }: Props) {
   const settings = useSettings();
+  const ai = useAiInfo();
   const [kind, setKind] = useState<ReportKind>('daily');
   const [topic, setTopic] = useState('');
   const [useAi, setUseAi] = useState(false);
@@ -40,14 +41,14 @@ export default function ReportsScreen({ navigation }: Props) {
         </View>
         <T v="small" color="textMuted">{KINDS.find((k) => k[0] === kind)?.[2]}</T>
         {needsTopic ? <Field label="Topic" value={topic} onChangeText={setTopic} placeholder="e.g. Claude Code, AI agents, React" style={{ marginTop: space.sm }} /> : null}
-        <ToggleRow title="Add an AI executive summary" subtitle={settings?.ai.enabled ? `Uses ${settings.ai.model}; labelled as AI-generated.` : 'Configure a model in Settings → AI models.'} value={useAi && !!settings?.ai.enabled} onChange={setUseAi} />
+        <ToggleRow title="Add an AI executive summary" subtitle={ai?.enabled ? `Uses ${ai.model}; labelled as AI-generated.` : 'Configure a model in Settings → AI models.'} value={useAi && !!ai?.enabled} onChange={setUseAi} />
         <Button
           title="Generate"
           icon="document-text-outline"
           loading={busy}
           disabled={needsTopic && !topic.trim()}
           onPress={() => void run(async () => {
-            const r = await generateReport({ kind, topic: needsTopic ? topic.trim() : undefined, useAi: useAi && settings?.ai.enabled });
+            const r = await generateReport({ kind, topic: needsTopic ? topic.trim() : undefined, useAi: useAi && ai?.enabled });
             navigation.navigate('ReportDetail', { id: r.id });
           }, 'Report failed')}
         />

@@ -6,7 +6,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
-import { Linking, Pressable, View } from 'react-native';
+import { AppState, Linking, Pressable, View } from 'react-native';
 import { formatTimestamp } from '../core/transcripts';
 import {
   deleteRecording, ensureMicPermission, ModelMissingError, saveVoiceNote, startRecording, transcribeOnDevice, voiceModeAvailable,
@@ -17,6 +17,7 @@ import { radius, space, useTheme } from './theme';
 
 type Stage =
   | { k: 'setup' }
+  | { k: 'starting' }
   | { k: 'idle'; mode: VoiceMode }
   | { k: 'recording'; mode: VoiceMode; ms: number; levels: number[] }
   | { k: 'transcribing'; mode: VoiceMode; progress: number }
@@ -36,92 +37,121 @@ export function VoiceSheet({
   const [stage, setStage] = useState<Stage>({ k: 'setup' });
   const [hint, setHint] = useState('');
   const rec = useRef<Recording | null>(null);
+  const session = useRef(0);
+  const abort = useRef<AbortController | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  const cancelWork = () => {
+    session.current++;
+    abort.current?.abort();
+    abort.current = null;
+    void rec.current?.cancel().catch(() => undefined);
+    rec.current = null;
+  };
 
   useEffect(() => {
     if (!visible) return;
-    let alive = true;
+    const key = ++session.current;
+    setStage({ k: 'setup' });
     void (async () => {
-      const a = await voiceModeAvailable();
-      if (!alive) return;
-      if (!a.preferred) {
-        setStage({ k: 'error', action: 'settings', message: `Download the ${a.model.label} speech model (${a.model.sizeMb} MB) to transcribe privately on this phone, or connect your server.` });
-        return;
+      try {
+        const a = await voiceModeAvailable();
+        if (key !== session.current) return;
+        const mode = purpose === 'dictate' ? (a.device ? 'device' : null) : a.preferred;
+        if (!mode) {
+          setStage({ k: 'error', action: 'settings', message: purpose === 'dictate'
+            ? `Download ${a.model.label} (${a.model.sizeMb} MB) in Voice & dictation to dictate on this phone.`
+            : `Download ${a.model.label} (${a.model.sizeMb} MB) for private transcription, or enable voice notes on your paired server in Voice & dictation.` });
+          return;
+        }
+        setHint(mode === 'device' ? `${a.model.label} on this phone. Audio stays here during transcription. Up to 5 minutes.` : 'Recording will be sent to your Qivra server for transcription. Up to 5 minutes.');
+        setStage({ k: 'idle', mode });
+      } catch (e) {
+        if (key === session.current) setStage({ k: 'error', message: (e as Error).message });
       }
-      if (purpose === 'dictate' && a.preferred === 'server' && !a.device) {
-        setStage({ k: 'error', action: 'settings', message: 'Dictation needs the on-device speech model so text appears instantly. Download it in Voice & dictation.' });
-        return;
-      }
-      const mode: VoiceMode = purpose === 'dictate' ? 'device' : a.preferred;
-      setHint(mode === 'device' ? `${a.model.label} on this phone — audio never leaves your device.` : 'Recording will be sent to your Qivra server for transcription.');
-      setStage({ k: 'idle', mode });
     })();
-    return () => {
-      alive = false;
-      void rec.current?.cancel();
-      rec.current = null;
-    };
-  }, [visible, purpose]);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        cancelWork();
+        onClose();
+      }
+    });
+    return () => { sub.remove(); cancelWork(); };
+  }, [visible, purpose, attempt]);
 
   const start = async (mode: VoiceMode) => {
-    const p = await ensureMicPermission();
-    if (p !== 'granted') {
-      setStage({ k: 'error', action: p === 'blocked' ? 'permission' : undefined, message: p === 'blocked' ? 'Microphone access is turned off for Qivra. Enable it in Android settings.' : 'Qivra needs the microphone to record.' });
-      return;
+    const key = session.current;
+    setStage({ k: 'starting' });
+    try {
+      const p = await ensureMicPermission();
+      if (key !== session.current) return;
+      if (p !== 'granted') {
+        setStage({ k: 'error', action: p === 'blocked' ? 'permission' : undefined, message: p === 'blocked' ? 'Microphone access is turned off for Qivra. Enable it in Android settings.' : 'Qivra needs the microphone to record.' });
+        return;
+      }
+      const levels: number[] = [];
+      const recording = await startRecording((level, ms) => {
+        if (key !== session.current) return;
+        levels.push(level);
+        if (levels.length > 40) levels.shift();
+        setStage((s) => (s.k === 'recording' ? { ...s, ms, levels: [...levels] } : s));
+      }, () => { if (key === session.current) void stop(mode); });
+      if (key !== session.current) { await recording.cancel(); return; }
+      rec.current = recording;
+      setStage({ k: 'recording', mode, ms: 0, levels: [] });
+    } catch (e) {
+      if (key === session.current) setStage({ k: 'error', message: (e as Error).message });
     }
-    const levels: number[] = [];
-    setStage({ k: 'recording', mode, ms: 0, levels: [] });
-    rec.current = startRecording((level, ms) => {
-      levels.push(level);
-      if (levels.length > 40) levels.shift();
-      setStage((s) => (s.k === 'recording' ? { ...s, ms, levels: [...levels] } : s));
-    });
   };
 
   const stop = async (mode: VoiceMode) => {
     const r = rec.current;
     rec.current = null;
     if (!r) return;
+    const key = session.current;
+    const controller = new AbortController();
+    abort.current = controller;
+    let temporary: string | null = null;
+    setStage({ k: 'transcribing', mode, progress: 0 });
     try {
       const file = await r.stop();
-      if (file.durationMs < 400) {
-        await deleteRecording(file.uri);
-        setStage({ k: 'error', message: 'That was too short. Tap the mic and speak, then tap stop.' });
-        return;
-      }
+      temporary = file.uri;
+      if (key !== session.current) return;
+      if (file.durationMs < 400) throw new Error('That was too short. Tap the mic and speak, then tap stop.');
       if (mode === 'server') {
-        setStage({ k: 'transcribing', mode, progress: 0 });
         const id = await saveVoiceNote(file, 'server');
+        temporary = null; // the saved item owns the audio now
+        if (key !== session.current) return;
         onSaved?.(id);
         onClose();
         return;
       }
-      setStage({ k: 'transcribing', mode, progress: 0 });
-      const t = await transcribeOnDevice(file.uri, (progress) => setStage({ k: 'transcribing', mode, progress }));
-      if (!t.text) {
-        setStage({ k: 'error', message: 'No speech was recognised. Try again closer to the microphone.' });
-        await deleteRecording(file.uri);
-        return;
-      }
+      const t = await transcribeOnDevice(file.uri, (progress) => {
+        if (key === session.current) setStage({ k: 'transcribing', mode, progress });
+      }, controller.signal);
+      if (key !== session.current) return;
+      if (!t.text) throw new Error('No speech was recognised. Try again closer to the microphone.');
       if (purpose === 'dictate') {
-        await deleteRecording(file.uri);
         onText?.(t.text);
         onClose();
         return;
       }
       const id = await saveVoiceNote(file, 'device', t);
+      temporary = null;
+      if (key !== session.current) return;
       onSaved?.(id);
       onClose();
     } catch (e) {
+      if (key !== session.current) return;
       if (e instanceof ModelMissingError) setStage({ k: 'error', action: 'settings', message: e.message });
       else setStage({ k: 'error', message: (e as Error).message });
+    } finally {
+      if (temporary) await deleteRecording(temporary).catch(() => undefined);
+      if (abort.current === controller) abort.current = null;
     }
   };
 
-  const close = () => {
-    void rec.current?.cancel();
-    rec.current = null;
-    onClose();
-  };
+  const close = () => { cancelWork(); onClose(); };
 
   return (
     <Sheet visible={visible} onClose={close} title={purpose === 'note' ? 'Voice note' : 'Dictate'}>
@@ -129,14 +159,14 @@ export function VoiceSheet({
         <Banner tone="warning" title="Can't record yet" body={stage.message} action={<>
           {stage.action === 'settings' && onOpenSettings ? <Button kind="outline" title="Voice & dictation" icon="mic-outline" onPress={() => { close(); onOpenSettings(); }} /> : null}
           {stage.action === 'permission' ? <Button kind="outline" title="Open settings" onPress={() => void Linking.openSettings()} /> : null}
-          <Button kind="text" title="Try again" onPress={() => setStage({ k: 'setup' })} />
+          <Button kind="text" title="Try again" onPress={() => setAttempt((n) => n + 1)} />
         </>} />
       ) : null}
 
       {stage.k === 'idle' || stage.k === 'recording' ? (
         <View style={{ alignItems: 'center', paddingVertical: space.lg }}>
           <T v="small" color="textMuted" style={{ textAlign: 'center', marginBottom: space.lg }}>{hint}</T>
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 48, gap: 3, marginBottom: space.lg }} accessibilityElementsHidden>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 48, gap: 3, marginBottom: space.lg }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
             {(stage.k === 'recording' ? stage.levels : []).concat(Array(Math.max(0, 40 - (stage.k === 'recording' ? stage.levels.length : 0))).fill(0)).map((l, i) => (
               <View key={i} style={{ width: 4, borderRadius: 2, height: 4 + Math.round(l * 44), backgroundColor: stage.k === 'recording' ? c.accent : c.border }} />
             ))}
@@ -147,23 +177,23 @@ export function VoiceSheet({
             accessibilityLabel={stage.k === 'idle' ? 'Start recording' : 'Stop recording'}
             style={({ pressed }) => ({ width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: stage.k === 'recording' ? c.danger : c.primary, opacity: pressed ? 0.85 : 1 })}
           >
-            <Ionicons name={stage.k === 'recording' ? 'stop' : 'mic'} size={38} color={stage.k === 'recording' ? '#fff' : c.onPrimary} />
+            <Ionicons name={stage.k === 'recording' ? 'stop' : 'mic'} size={38} color={stage.k === 'recording' ? c.bg : c.onPrimary} />
           </Pressable>
           <T v="title" style={{ marginTop: space.md }}>{stage.k === 'recording' ? formatTimestamp(stage.ms) : 'Tap to speak'}</T>
-          {stage.k === 'recording' ? <Button kind="text" title="Cancel" onPress={() => { void rec.current?.cancel(); rec.current = null; setStage({ k: 'idle', mode: stage.mode }); }} /> : null}
+          {stage.k === 'recording' ? <Button kind="text" title="Cancel" onPress={() => { const r = rec.current; rec.current = null; setStage({ k: 'starting' }); void r?.cancel().then(() => setStage({ k: 'idle', mode: stage.mode })).catch((e: Error) => setStage({ k: 'error', message: e.message })); }} /> : null}
         </View>
       ) : null}
 
       {stage.k === 'transcribing' ? (
         <View style={{ paddingVertical: space.xl, alignItems: 'center' }}>
           <Ionicons name="sparkles-outline" size={28} color={c.accent} />
-          <T v="subtitle" style={{ marginTop: space.sm }}>{stage.mode === 'device' ? 'Transcribing on your phone…' : 'Uploading to your server…'}</T>
+          <T accessibilityLiveRegion="polite" v="subtitle" style={{ marginTop: space.sm }}>{stage.mode === 'device' ? 'Transcribing on your phone…' : 'Uploading to your server…'}</T>
           <View style={{ width: '100%', height: 6, backgroundColor: c.surfaceAlt, borderRadius: radius.pill, marginTop: space.md, overflow: 'hidden' }}>
             <View style={{ width: `${Math.round((stage.progress || 0.05) * 100)}%`, height: 6, backgroundColor: c.accent }} />
           </View>
         </View>
       ) : null}
-      {stage.k === 'setup' ? <T color="textMuted">Preparing…</T> : null}
+      {stage.k === 'setup' || stage.k === 'starting' ? <T color="textMuted">Preparing…</T> : null}
     </Sheet>
   );
 }

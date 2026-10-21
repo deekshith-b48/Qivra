@@ -1,6 +1,7 @@
 """Transcription engine registry (transcribe-anything / faster-whisper / SuperBrain)."""
 
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -82,3 +83,35 @@ def test_pairing_status_reports_engine(env, monkeypatch, fake_ta):
     token, _ = env.pair()
     t = env.phone.get("/api/v1/pairing/status", headers=auth(token)).json()["transcription"]
     assert t["engine"] == "transcribe-anything" and "available" in t
+
+
+def test_python_api_finds_tools_without_activating_venv(monkeypatch, tmp_path, fake_ta):
+    monkeypatch.setenv("QIVRA_TRANSCRIBER", "transcribe-anything")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr(transcribers.sysconfig, "get_path", lambda name: "/app/.venv/bin")
+    transcribe_file(tmp_path / "note.wav")
+    assert os.environ["PATH"].split(os.pathsep)[0] == "/app/.venv/bin"
+    assert "/usr/bin" in os.environ["PATH"].split(os.pathsep)
+
+
+@pytest.mark.parametrize("wanted", ["auto", "transcribe-anything"])
+def test_runtime_fallback_is_local_and_only_in_auto_mode(monkeypatch, tmp_path, wanted):
+    monkeypatch.setenv("QIVRA_TRANSCRIBER", wanted)
+    monkeypatch.setattr(transcribers, "available_engines", lambda: ["transcribe-anything", "faster-whisper", "superbrain"])
+    monkeypatch.setattr(transcribers, "apple_silicon", lambda: True)
+    calls = []
+    def broken_ta(path):
+        raise TranscriberError("TRANSCRIPTION_FAILED", "Isolated runtime setup failed", True)
+    def local_fw(path):
+        calls.append("local")
+        return [{"text": "A real transcript", "start_ms": 0, "end_ms": 1000}], "en", "faster-whisper-base"
+    def cloud(path):
+        pytest.fail("Local fallback must never switch to a possibly cloud-backed engine")
+    monkeypatch.setattr(transcribers, "ENGINES", {"transcribe-anything": broken_ta, "faster-whisper": local_fw, "superbrain": cloud})
+    if wanted == "auto":
+        assert transcribe_file(tmp_path / "note.wav")[2] == "faster-whisper-base"
+        assert calls == ["local"]
+    else:
+        with pytest.raises(TranscriberError):
+            transcribe_file(tmp_path / "note.wav")
+        assert calls == []

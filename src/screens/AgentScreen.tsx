@@ -14,7 +14,7 @@ import { generateReport } from '../services/reports';
 import { Banner, Button, Chip, IconButton, Loading, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { radius, space, type, useTheme } from '../ui/theme';
-import { useSettings } from '../ui/useSettings';
+import { useAiInfo } from '../ui/useSettings';
 import { Markdown } from '../ui/Markdown';
 import { VoiceSheet } from '../ui/VoiceSheet';
 
@@ -30,7 +30,7 @@ const SUGGESTIONS = [
 
 export default function AgentScreen({ navigation, route }: Props) {
   const { c } = useTheme();
-  const settings = useSettings();
+  const ai = useAiInfo();
   const [convId, setConvId] = useState<string | null>(route.params?.conversationId ?? null);
   const [input, setInput] = useState(route.params?.prompt ?? '');
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -61,11 +61,11 @@ export default function AgentScreen({ navigation, route }: Props) {
     if (p.tool !== 'create_report') return;
     const args = p.args as { kind?: string; topic?: string };
     if (!(await confirm('Create report?', `Generate a ${args.kind ?? 'topic'} report${args.topic ? ` about “${args.topic}”` : ''} from your saved items?`, 'Create'))) return;
-    const r = await generateReport({ kind: (args.kind === 'weekly' ? 'weekly' : args.kind === 'daily' ? 'daily' : 'topic') as 'daily', topic: args.topic, useAi: settings?.ai.enabled });
+    const r = await generateReport({ kind: (args.kind === 'weekly' ? 'weekly' : args.kind === 'daily' ? 'daily' : 'topic') as 'daily', topic: args.topic, useAi: ai?.enabled });
     navigation.navigate('ReportDetail', { id: r.id });
   });
 
-  const aiLabel = settings?.ai.enabled ? `Model: ${settings.ai.model}` : 'No AI model — answers quote your saved items';
+  const aiLabel = ai?.enabled ? `Model: ${ai.model}` : 'No AI model — answers quote your saved items';
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
@@ -86,7 +86,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           ListEmptyComponent={
             <View>
               <T color="textMuted" style={{ marginBottom: space.md }}>Answers are grounded in what you saved, with citations. Qivra tells you when your library has no evidence.</T>
-              {!settings?.ai.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra assembles answers from matching items and transcript passages. Add a local Ollama or your own key in Settings → AI models for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
+              {!ai?.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra assembles answers from matching items and transcript passages. Add a local Ollama or your own key in Settings → AI models for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
               {SUGGESTIONS.map((s) => <Chip key={s} label={s} onPress={() => void send(s)} />)}
             </View>
           }
@@ -128,7 +128,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           <IconButton icon="arrow-up-circle" size={34} label="Send" onPress={() => void send(input)} color={input.trim() ? c.text : c.textFaint} />
         </View>
       </KeyboardAvoidingView>
-      <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={(t) => void send(t)} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
+      <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={setInput} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
       <Sheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Conversations">
         {(convs.data ?? []).map((cv) => (
           <View key={cv.id} style={{ flexDirection: 'row', alignItems: 'center' }}>

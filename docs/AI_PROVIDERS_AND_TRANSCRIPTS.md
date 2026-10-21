@@ -12,7 +12,7 @@ Qivra is fully usable with no model:
 
 ### On the phone — any OpenAI-compatible endpoint (`src/core/ai/provider.ts`)
 
-Settings → AI models: base URL, chat model, optional embedding model, optional API key (Keystore). Presets: Ollama or LM Studio on your laptop (free, local), Groq/OpenRouter with your own key (hosted). Rules:
+Settings → AI models: base URL, chat model, optional embedding model, optional API key (Keystore). Presets: Groq gpt-oss, Mistral, Gemini, OpenRouter (your own key, hosted) and Ollama or LM Studio on your laptop (free, local). Presets also fill the embedding model where the provider has one. Rules:
 
 - `http://` is allowed only to private/LAN/VPN addresses; public endpoints must be `https://`.
 - Endpoints outside your network require explicit consent ("content leaves your network") before anything is sent; the test button sends no saved content.
@@ -20,7 +20,17 @@ Settings → AI models: base URL, chat model, optional embedding model, optional
 - Model output never replaces evidence: commands, repos, URLs and timestamps stay from local extraction (`mergeModelEnrichment`). Summaries are labelled "AI-generated".
 - Embedding model → semantic search in the agent (cosine similarity fused with keyword ranking via RRF); embeddings are computed by the `embed` job.
 
-### On the paired server — SuperBrain's ModelRouter
+### Through the paired server — AI gateway (1.3.0, recommended for hosted keys)
+
+Put the provider in `server/qivra.env` (git-ignored; template `server/qivra.env.example`): `QIVRA_AI_BASE_URL`, `QIVRA_AI_API_KEY`, `QIVRA_AI_MODEL`, optional `QIVRA_AI_EMBEDDING_MODEL`. `python -m qivra serve` loads it and prints "AI for paired phones: <model> via <host>" (never the key).
+
+- The phone needs no setup: when it has no model of its own, `src/services/ai.ts` uses `<server>/api/v1/ai/chat/completions` (and `/embeddings`) with its device credential. The key never reaches the phone, the APK, the QR code, sync or logs (tested).
+- The server forces the configured model, forwards only allow-listed fields, caps `max_tokens` at 4096, and maps upstream errors to its own codes without relaying the upstream body.
+- With the gateway, new items get AI summaries automatically (`model_enrich`), and server jobs (enrichment, agent, reports) use it too.
+- A model configured on the phone still takes precedence. Configuring the key on the server is the owner's consent to send AI requests to that provider; the AI models screen shows which provider is in use.
+- Hosted providers must use `https://`. Recommended: Groq `openai/gpt-oss-120b` (verified against Groq's model list 2026-10-21; Groq has no embeddings) or Mistral `mistral-small-latest` + `mistral-embed`.
+
+### On the paired server — SuperBrain's ModelRouter (fallback when no gateway is configured)
 
 Server enrichment (`process kind=enrich`) and server agent answers use `core/model_router.py` (Groq, Gemini, OpenRouter keys in `server/config/.api_keys`, or Ollama). `server/qivra/ai.py` reports Ollama as available only if it actually answers on `OLLAMA_HOST`. No provider → job fails with `NO_PROVIDER` (not a fake success).
 

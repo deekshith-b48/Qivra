@@ -6,11 +6,12 @@ import { deviceTimeZone, updateSettings } from '../services/settings';
 import { Chip, Divider, Field, Header, Row, Screen, Section, T, ToggleRow } from '../ui/components';
 import { useQuery } from '../ui/hooks';
 import { space } from '../ui/theme';
-import { useConnection, useSettings } from '../ui/useSettings';
+import { useAiInfo, useConnection, useSettings } from '../ui/useSettings';
 import { isValidTimeZone } from '../core/dates';
 
 export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
   const s = useSettings();
+  const ai = useAiInfo();
   const { connection } = useConnection();
   const counts = useQuery(async (repo) => ({ jobs: await repo.jobCounts(), conflicts: (await repo.openConflicts()).length }), ['jobs', 'conflicts']);
   const [tz, setTz] = React.useState('');
@@ -27,7 +28,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
       </Section>
       <Section title="AI & processing">
         <Row icon="mic-outline" title="Voice & dictation" subtitle={`On-device ${s.voice.modelId.startsWith('parakeet') ? 'Parakeet' : 'Whisper'} · ${s.voice.language === 'auto' ? 'auto language' : s.voice.language}${s.voice.preferServer ? ' · notes via server' : ''}`} onPress={() => navigation.navigate('VoiceSettings')} />
-        <Row icon="sparkles-outline" title="AI models" subtitle={s.ai.enabled ? `${s.ai.model} · ${s.ai.baseUrl}` : 'None — Qivra works without AI'} onPress={() => navigation.navigate('AiProviders')} />
+        <Row icon="sparkles-outline" title="AI models" subtitle={ai?.enabled ? `${ai.model} · ${ai.source === 'server' ? `via your Qivra server (${ai.where})` : ai.where}` : 'None — Qivra works without AI'} onPress={() => navigation.navigate('AiProviders')} />
         <ToggleRow title="Auto-transcribe shared videos" subtitle="YouTube captions are fetched on this phone. Instagram and X videos (and YouTube videos without captions) are transcribed by your paired server with local Whisper." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
         <Row icon="list-outline" title="Processing queue" subtitle={j ? `${j.queued + j.running} pending · ${j.failed_retryable + j.failed_permanent} failed` : undefined} onPress={() => navigation.navigate('Jobs')} />
       </Section>

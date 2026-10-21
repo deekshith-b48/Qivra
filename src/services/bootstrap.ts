@@ -37,6 +37,10 @@ export async function boot(): Promise<BootResult> {
 /** Called when the app returns to the foreground or receives a new share. */
 export async function onResume(): Promise<BootResult['shared']> {
   const shared = await drainShareInbox().catch(() => ({ results: [], rejected: [] }));
-  void runDueJobs();
+  void (async () => {
+    // Picks up a server that was (re)started meanwhile, including its AI gateway.
+    if (await getConnection()) await checkConnection().catch(() => undefined);
+    await runDueJobs();
+  })();
   return shared;
 }

@@ -1,5 +1,21 @@
 # Test results
 
+## 1.3.0 (2026-10-21) — AI through the paired server
+
+- Release APK: `dist/Qivra-1.3.0-release.apk` (68 MiB), package `com.qivra.app`, version code 6, debug-signed. Verified: no provider key in the APK or JS bundle.
+- TypeScript and Biome lint passed; Jest 172 passed, 4 live tests skipped; server pytest 76 passed, 4 live skipped (new: gateway auth, key never returned or logged, model forcing, field allow-list, error mapping, embeddings, env-file loading, https enforcement).
+- Live check (in-process server, real Groq key from `server/qivra.env`): paired device → `/api/v1/ai/chat/completions` → `openai/gpt-oss-120b` answered with a correct `[S1]` citation; the key did not appear in any response.
+- Groq preset model verified against Groq's live `/models` list; the Mistral, Gemini and OpenRouter preset model ids were not verified live (no keys).
+- Not verified on the phone yet: requires restarting the server so it loads `qivra.env`, then installing 1.3.0.
+
+## 1.2.0 (2026-10-21) — voice notes and dictation
+
+- Release APK: `dist/Qivra-1.2.0-release.apk` (67.8 MiB), package `com.qivra.app`, version code 5.
+- Android release build passed for arm64-v8a and x86_64. Signature, version, microphone permission, and bundled Whisper native libraries verified.
+- TypeScript and Biome lint passed; 169 app tests passed, with 4 existing live tests skipped.
+- Includes on-device Whisper/Parakeet voice notes, dictation in Notes/Search/Agent, and the accompanying server transcription integration. Server setup is documented in `docs/VOICE_AND_TRANSCRIPTION.md`.
+- Uses the existing development signing configuration. Phone microphone capture and on-device inference still require hardware validation.
+
 ## 1.1.0 (2026-10-21) — `com.qivra.app`, automatic transcripts, video pages
 
 | Check | Result |
