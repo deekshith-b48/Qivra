@@ -18,6 +18,10 @@ export interface LibraryFilter {
   toIso?: string;
   archived?: boolean; // default false
   hasTranscript?: boolean;
+  /** Every concept must appear (case-insensitively) in `enrichment.concepts`. */
+  concepts?: string[];
+  /** Only items never opened. */
+  unread?: boolean;
 }
 
 export type SortKey = 'newest' | 'oldest' | 'title' | 'updated';
@@ -66,6 +70,13 @@ export function buildFilterSql(f: LibraryFilter, alias = 'i'): { where: string; 
     clauses.push(`EXISTS (SELECT 1 FROM collection_items ci WHERE ci.item_id = ${alias}.id AND ci.collection_id = ?)`);
     params.push(f.collectionId);
   }
+  for (const concept of f.concepts ?? []) {
+    clauses.push(
+      `CASE WHEN json_valid(${alias}.enrichment_json) THEN EXISTS (SELECT 1 FROM json_each(${alias}.enrichment_json, '$.concepts') jc WHERE LOWER(jc.value) = ?) ELSE 0 END`,
+    );
+    params.push(concept.toLowerCase());
+  }
+  if (f.unread) clauses.push(`${alias}.last_viewed_at IS NULL`);
   if (f.hasTranscript !== undefined) {
     clauses.push(`${f.hasTranscript ? '' : 'NOT '}EXISTS (SELECT 1 FROM transcripts tr WHERE tr.item_id = ${alias}.id)`);
   }

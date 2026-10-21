@@ -10,7 +10,7 @@ Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra s
 
 ## Get Qivra
 
-**[Download the latest APK (1.6.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
+**[Download the latest APK (1.7.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
 
 > The APK is signed with the Android debug key. It is meant for personal use and sideloading, not the Play Store.
 
@@ -47,8 +47,15 @@ Qivra never makes up a transcript. A music-only reel finishes as "No speech to t
 
 ### Search, ask and report
 - **Search from the Library bar:** full-text search on the device with SQLite FTS5, works offline. Results are grouped by item, and transcript matches show their timestamps. Semantic search is added when an embedding model is configured.
+- **Ask, like a modern chat assistant:**
+  - Answers stream in as they are written, and you can **Stop** at any time.
+  - Each answer has **Copy**, **Regenerate** and **Sources**.
+  - Tables, code blocks and lists render properly, and citations appear as numbered pills.
+  - Timestamps in "Ask about this" answers play the video from that second.
+- **Smart collections:** collections that fill themselves from rules (source, status, tags, concepts, unread, saved recently). Topics shared by 3 or more items are suggested automatically.
+- **Flashcards:** "Make flashcards" on any item turns its summary and key moments into question-and-answer cards. They are written by AI when available, or as fill-in-the-blank cards made on the phone. Review them with Again/Hard/Good/Easy spaced repetition; Home shows how many are due.
 - **Ask:** questions across the whole library, or about one item. Answers come only from your saved items and cite numbered sources [S1]. Saved content is treated as untrusted data, which guards against prompt injection. Without a model, Qivra returns the matching passages instead.
-- **Reports:** daily, weekly, topic or a selection of items, with sources and gaps.
+- **Reports:** daily, weekly, topic, collection or a selection of items, with sources and gaps. Export as Markdown or plain text, or share as a PDF. An opt-in weekly report is prepared after 6 am each Monday (your timezone) and announced with a notification hidden on the lock screen.
 - **Collections, tags, notes and transcript corrections**, plus export and delete-everything under Privacy & storage.
 
 ### Your own server (optional)

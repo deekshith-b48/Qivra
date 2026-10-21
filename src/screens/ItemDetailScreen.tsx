@@ -14,6 +14,7 @@ import type { RootProps } from '../navigation/types';
 import { deleteItemFiles, pickMediaFile } from '../services/capture';
 import { getRepo } from '../services/db';
 import { emit } from '../services/events';
+import { makeCards } from '../services/flashcards';
 import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
 import { Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
@@ -57,6 +58,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const scrollRef = useRef<ScrollView>(null);
   const [nowMs, setNowMs] = useState<number | null>(null);
   const onTime = useCallback((ms: number) => setNowMs(ms), []);
+  const cardAction = useAction();
+  const [cardsMsg, setCardsMsg] = useState<string | null>(null);
+  const cardCount = useQuery(async (repo) => (await repo.listCards(id)).length, ['cards'], [id]);
 
   const q = useQuery(async (repo) => {
     const item = await repo.getItem(id);
@@ -217,6 +221,18 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         <Button kind="tonal" title="Ask about this" icon="sparkles-outline" style={{ alignSelf: 'flex-start', marginTop: space.sm }}
           accessibilityHint="Opens Ask with questions scoped to this item"
           onPress={() => navigation.navigate('Main', { screen: 'Agent', params: { itemId: id } })} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, marginTop: space.sm }}>
+          <Button kind="outline" title="Make flashcards" icon="layers-outline" loading={cardAction.busy}
+            accessibilityHint="Turns the summary and key moments into question-and-answer cards"
+            onPress={() => void cardAction.run(async () => {
+              const r = await makeCards(id);
+              setCardsMsg(r.added
+                ? `${r.added} card${r.added === 1 ? '' : 's'} made${r.origin === 'local' ? ' on this phone' : ''} · ${r.total} in total`
+                : r.total ? `No new cards · ${r.total} already made` : (r.note ?? 'No cards could be made.'));
+            }, 'Could not make flashcards')} />
+          {cardCount.data ? <Button kind="text" title="Review" icon="school-outline" onPress={() => navigation.navigate('Review')} /> : null}
+        </View>
+        {cardsMsg ? <T v="caption" color="textMuted" accessibilityLiveRegion="polite" style={{ marginTop: space.xs }}>{cardsMsg}</T> : null}
 
         {item.status !== 'READY' ? <ProgressSteps steps={stepsFor(item, speech.length > 0, articles.length > 0, isVideo)} /> : null}
 

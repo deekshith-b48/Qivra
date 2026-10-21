@@ -6,7 +6,7 @@ import { markdownToPlainText } from '../core/reports';
 import type { RootProps } from '../navigation/types';
 import { getRepo } from '../services/db';
 import { emit } from '../services/events';
-import { exportReport, regenerateReport, shareReport } from '../services/reports';
+import { exportReport, regenerateReport, shareReport, shareReportPdf } from '../services/reports';
 import { Banner, Button, Card, Header, IconButton, Loading, Screen, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { Markdown } from '../ui/Markdown';
@@ -42,11 +42,11 @@ export default function ReportDetailScreen({ navigation, route }: RootProps<'Rep
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.md }}>
         <Button title="Export .md" icon="download-outline" onPress={() => void doExport('md')} loading={busy} />
         <Button kind="outline" title="Export .txt" onPress={() => void doExport('txt')} />
+        <Button kind="outline" title="PDF" icon="document-outline" onPress={() => void run(() => shareReportPdf(r), 'PDF export failed')} />
         <Button kind="outline" title="Share" icon="share-outline" onPress={() => void run(() => shareReport(r))} />
         <Button kind="outline" title="Copy" icon="copy-outline" onPress={() => void Clipboard.setStringAsync(markdownToPlainText(r.markdown)).then(() => Alert.alert('Copied', 'The report text is on your clipboard.'))} />
         <Button kind="text" title="Regenerate" icon="refresh" onPress={() => void run(async () => { const n = await regenerateReport(r); navigation.replace('ReportDetail', { id: n.id }); })} />
       </View>
-      <T v="caption" color="textFaint" style={{ marginBottom: space.sm }}>PDF export is not offered: Markdown and plain text are exported through Android's folder picker and verified after writing.</T>
       <Card><Markdown source={r.markdown} /></Card>
     </Screen>
   );

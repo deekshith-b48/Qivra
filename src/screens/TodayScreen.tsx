@@ -88,6 +88,7 @@ export default function TodayScreen({ navigation }: Props) {
     [tz],
   );
   const d = q.data;
+  const due = useQuery((repo) => repo.countDueCards(new Date().toISOString()), ['cards', 'items']);
   const open = (id: string) => navigation.navigate('ItemDetail', { id });
 
   const refresh = () =>
@@ -122,6 +123,16 @@ export default function TodayScreen({ navigation }: Props) {
           <>
             {d.conflicts ? <Banner tone="warning" title={`${d.conflicts} sync conflict(s)`} body="An item was edited on two devices. Choose which version to keep." action={<Button kind="outline" title="Review" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
             {connection?.lastError ? <Banner tone="warning" title="Server unreachable" body={connection.lastError.message} action={<Button kind="outline" title="Connection" onPress={() => navigation.navigate('ConnectServer')} />} /> : null}
+
+            {due.data ? (
+              <Card onPress={() => navigation.navigate('Review')} label={`${due.data} flashcard${due.data === 1 ? '' : 's'} due. Review`} style={{ marginTop: space.lg }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+                  <Ionicons name="school-outline" size={22} color={c.accent} />
+                  <T v="subtitle" style={{ flex: 1 }}>{due.data} card{due.data === 1 ? '' : 's'} due · Review</T>
+                  <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
+                </View>
+              </Card>
+            ) : null}
 
             {d.feed.ready.length ? (
               <Section title="Ready to review" action={<T v="small" color="accent" onPress={() => navigation.navigate('Main', { screen: 'Library' })}>Library</T>}>

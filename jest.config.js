@@ -5,6 +5,7 @@ module.exports = {
       displayName: 'logic',
       preset: 'jest-expo/node',
       testMatch: ['<rootDir>/__tests__/core/**/*.test.ts', '<rootDir>/__tests__/db/**/*.test.ts'],
+      moduleNameMapper: { '^expo/fetch$': '<rootDir>/__tests__/helpers/expoFetchMock.ts' },
     },
     {
       displayName: 'ui',
@@ -15,6 +16,7 @@ module.exports = {
         '^whisper\\.rn/index$': '<rootDir>/__tests__/helpers/whisperMock.ts',
         '^@fugood/react-native-audio-pcm-stream$': '<rootDir>/__tests__/helpers/pcmMock.ts',
         '^react-native-youtube-iframe$': '<rootDir>/__tests__/helpers/youtubeMock.tsx',
+        '^expo/fetch$': '<rootDir>/__tests__/helpers/expoFetchMock.ts',
       },
     },
   ],

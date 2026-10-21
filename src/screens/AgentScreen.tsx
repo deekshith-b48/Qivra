@@ -1,40 +1,47 @@
+import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { FlatList, KeyboardAvoidingView, type NativeScrollEvent, type NativeSyntheticEvent, Pressable, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ActionProposal } from '../core/agent/agent';
-import { formatTimestamp } from '../core/transcripts';
+import { ITEM_SUGGESTIONS } from '../core/agent/itemQa';
+import { formatLocal } from '../core/dates';
 import type { Message } from '../db/types';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
-import { ITEM_SUGGESTIONS } from '../core/agent/itemQa';
-import { ask, askAboutItem } from '../services/agentService';
+import { ask, askAboutItem, dropLastExchange } from '../services/agentService';
 import { getRepo } from '../services/db';
 import { generateReport } from '../services/reports';
-import { Banner, Button, Chip, IconButton, Loading, Sheet, T } from '../ui/components';
-import { confirm, useAction, useQuery } from '../ui/hooks';
-import { radius, space, type, useTheme } from '../ui/theme';
-import { useAiInfo } from '../ui/useSettings';
-import { Markdown } from '../ui/Markdown';
+import { AssistantMessage, Composer, SourcesSheet, StreamingMessage, UserBubble } from '../ui/chat/ChatParts';
+import { Banner, Button, IconButton, Sheet, T } from '../ui/components';
+import { confirm, useQuery } from '../ui/hooks';
+import { radius, space, useTheme } from '../ui/theme';
+import { useAiInfo, useSettings } from '../ui/useSettings';
 import { VoiceSheet } from '../ui/VoiceSheet';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Agent'>, NativeStackScreenProps<RootStackParamList>>;
 
-const SUGGESTIONS = [
-  'What did I save today about Claude Code?',
-  "Summarize this week's AI agent tutorials.",
-  'Compare the GitHub projects I saved.',
-  'Create a learning plan from my React and system-design videos.',
-  'List every repository and development tool mentioned in my transcripts.',
+const SUGGESTIONS: { icon: keyof typeof Ionicons.glyphMap; title: string; prompt: string }[] = [
+  { icon: 'today-outline', title: 'What did I save today?', prompt: 'What did I save today? Summarise it briefly.' },
+  { icon: 'git-compare-outline', title: 'Compare my GitHub projects', prompt: 'Compare the GitHub projects I saved.' },
+  { icon: 'school-outline', title: 'Make a learning plan', prompt: 'Create a learning plan from the tutorials I saved.' },
+  { icon: 'construct-outline', title: 'Tools and repos mentioned', prompt: 'List every repository and development tool mentioned in my transcripts.' },
 ];
+
+interface Live {
+  question: string;
+  text: string;
+  status: 'searching' | 'writing';
+}
 
 export default function AgentScreen({ navigation, route }: Props) {
   const { c } = useTheme();
   const ai = useAiInfo();
+  const settings = useSettings();
   const [convId, setConvId] = useState<string | null>(route.params?.conversationId ?? null);
   const [scopeId, setScopeId] = useState<string | null>(route.params?.itemId ?? null);
-  // Opening "Ask this item" again (or for another item) starts a fresh scoped conversation.
+  // Opening "Ask about this" again (or for another item) starts a fresh scoped conversation.
   useEffect(() => {
     if (route.params?.itemId) {
       setScopeId(route.params.itemId);
@@ -45,130 +52,203 @@ export default function AgentScreen({ navigation, route }: Props) {
   const [input, setInput] = useState(route.params?.prompt ?? '');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voice, setVoice] = useState(false);
-  const { busy, run } = useAction();
+  const [sourcesFor, setSourcesFor] = useState<Message | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
+  const atBottom = useRef(true);
+  // Streamed text arrives token by token; render it at most ~20 times a second.
+  const pending = useRef('');
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const msgs = useQuery(async (repo) => (convId ? repo.listMessages(convId) : []), ['conversations'], [convId]);
   const convs = useQuery((repo) => repo.listConversations(), ['conversations']);
   const titles = useQuery(async (repo) => {
     const ids = [...new Set((msgs.data ?? []).flatMap((m) => m.citations.map((ci) => ci.itemId)))];
-    return Object.fromEntries((await repo.itemsByIds(ids)).map((i) => [i.id, i.title || i.url || 'Untitled']));
+    return Object.fromEntries((await repo.itemsByIds(ids)).map((i) => [i.id, i.title || i.url || 'Untitled'])) as Record<string, string>;
   }, ['items', 'conversations'], [msgs.data]);
 
-  useEffect(() => {
-    if (msgs.data?.length) setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
-  }, [msgs.data?.length]);
+  const scrollToEnd = useCallback((force = false) => {
+    if (force || atBottom.current) setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 30);
+  }, []);
+  useEffect(() => { scrollToEnd(true); }, [msgs.data?.length, scrollToEnd]);
 
-  const send = (text: string) => run(async () => {
+  const flush = () => {
+    flushTimer.current = null;
+    const add = pending.current;
+    pending.current = '';
+    if (add) setLive((l) => (l ? { ...l, text: l.text + add, status: 'writing' } : l));
+    scrollToEnd();
+  };
+
+  const send = async (text: string) => {
     const q = text.trim();
-    if (!q) return;
+    if (!q || live) return;
     setInput('');
-    const r = scopeId ? await askAboutItem(convId, scopeId, q) : await ask(convId, q);
-    setConvId(r.conversationId);
-  }, 'The assistant failed');
+    setError(null);
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+    atBottom.current = true;
+    setLive({ question: q, text: '', status: 'searching' });
+    const stream = {
+      onDelta: (t: string) => {
+        pending.current += t;
+        if (!flushTimer.current) flushTimer.current = setTimeout(flush, 50);
+      },
+      onRoundReset: () => { pending.current = ''; setLive((l) => (l ? { ...l, text: '' } : l)); },
+      onStatus: (status: Live['status']) => setLive((l) => (l ? { ...l, status } : l)),
+      onConversation: (id: string) => setConvId(id),
+      signal: ctl.signal,
+    };
+    try {
+      const r = scopeId ? await askAboutItem(convId, scopeId, q, stream) : await ask(convId, q, stream);
+      setConvId(r.conversationId);
+    } catch (e) {
+      setError((e as Error).message || 'The assistant failed.');
+    } finally {
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+      pending.current = '';
+      abortRef.current = null;
+      setLive(null);
+    }
+  };
 
-  const runProposal = (p: ActionProposal) => run(async () => {
+  const regenerate = async () => {
+    if (!convId || live) return;
+    const q = await dropLastExchange(convId);
+    if (q) await send(q);
+  };
+
+  const runProposal = async (p: ActionProposal) => {
     if (p.tool !== 'create_report') return;
     const args = p.args as { kind?: string; topic?: string };
     if (!(await confirm('Create report?', `Generate a ${args.kind ?? 'topic'} report${args.topic ? ` about “${args.topic}”` : ''} from your saved items?`, 'Create'))) return;
     const r = await generateReport({ kind: (args.kind === 'weekly' ? 'weekly' : args.kind === 'daily' ? 'daily' : 'topic') as 'daily', topic: args.topic, useAi: ai?.enabled });
     navigation.navigate('ReportDetail', { id: r.id });
-  });
+  };
 
-  const makeReport = (kind: 'daily' | 'weekly') => run(async () => {
-    const r = await generateReport({ kind, useAi: ai?.enabled });
-    navigation.navigate('ReportDetail', { id: r.id });
-  }, 'Report failed');
+  const openSource = (itemId: string, startMs: number | null) => navigation.navigate('ItemDetail', { id: itemId, at: startMs ?? undefined });
+  const citeIn = (m: Message) => (sid: string) => {
+    const ci = m.citations.find((x) => x.sid === sid);
+    if (ci) openSource(ci.itemId, ci.startMs);
+  };
 
-  const aiLabel = ai?.enabled ? `Model: ${ai.model}` : 'No AI model — answers quote your saved items';
+  const newChat = () => {
+    abortRef.current?.abort();
+    setConvId(null);
+    setScopeId(null);
+    setError(null);
+  };
+
+  const data = msgs.data ?? [];
+  const lastAssistant = [...data].reverse().find((m) => m.role === 'assistant');
+  // While streaming, the stored question already shows; the live answer goes below it.
+  const showLive = !!live && (data.length === 0 || data[data.length - 1].role === 'user');
+  const empty = !data.length && !live;
+  const subtitle = ai?.enabled ? `${ai.model}${ai.source === 'server' ? ' · via your server' : ''}` : 'No AI model · answers quote your saved items';
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.lg, paddingTop: space.sm }}>
-        <View style={{ flex: 1 }}>
-          <T v="title" accessibilityRole="header">Ask your library</T>
-          <T v="caption" color="textMuted">{aiLabel}</T>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xs, borderBottomWidth: empty ? 0 : 1, borderColor: c.border }}>
+        <IconButton icon="menu-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} />
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <T v="subtitle" accessibilityRole="header" numberOfLines={1}>{scopeId ? 'Ask about this' : 'Ask'}</T>
+          <T v="caption" color="textMuted" numberOfLines={1}>{subtitle}</T>
         </View>
-        <IconButton icon="document-text-outline" label="Reports" onPress={() => navigation.navigate('Reports')} />
-        <IconButton icon="time-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} />
-        <IconButton icon="create-outline" label="New conversation" onPress={() => { setConvId(null); setScopeId(null); }} />
+        <IconButton icon="create-outline" label="New chat" onPress={newChat} />
       </View>
       {scopeId ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: space.lg, marginTop: space.sm, padding: space.sm, paddingLeft: space.md, borderRadius: radius.lg, backgroundColor: c.accentSoft }}>
-          <T v="small" style={{ flex: 1 }} numberOfLines={2} accessibilityLiveRegion="polite">Asking about: <T v="small" style={{ fontWeight: '700' }}>{scopeItem.data?.title || scopeItem.data?.url || 'this item'}</T></T>
+          <Ionicons name="play-circle-outline" size={18} color={c.accent} />
+          <T v="small" style={{ flex: 1, marginLeft: space.sm }} numberOfLines={2} accessibilityLiveRegion="polite">Asking about: <T v="small" style={{ fontWeight: '700' }}>{scopeItem.data?.title || scopeItem.data?.url || 'this item'}</T></T>
           <IconButton icon="close" label="Ask the whole library instead" onPress={() => { setScopeId(null); setConvId(null); }} />
         </View>
       ) : null}
       <KeyboardAvoidingView behavior="height" style={{ flex: 1 }}>
         <FlatList
           ref={listRef}
-          data={msgs.data ?? []}
+          data={data}
           keyExtractor={(m) => m.id}
-          contentContainerStyle={{ padding: space.lg }}
-          ListEmptyComponent={
-            <View>
-              <T color="textMuted" style={{ marginBottom: space.md }}>Answers are grounded in what you saved, with citations. Qivra tells you when your library has no evidence.</T>
-              {!ai?.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra assembles answers from matching items and transcript passages. Add a local Ollama or your own key in Settings → AI models for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
-              {(scopeId ? ITEM_SUGGESTIONS : SUGGESTIONS).map((s) => <Chip key={s} label={s} onPress={() => void send(s)} />)}
-              {!scopeId ? (
-                <View style={{ marginTop: space.md }}>
-                  <T v="caption" color="textMuted">Reports</T>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.xs }}>
-                    <Chip icon="today-outline" label="Today's report" onPress={() => void makeReport('daily')} />
-                    <Chip icon="calendar-outline" label="This week's report" onPress={() => void makeReport('weekly')} />
-                    <Chip icon="folder-open-outline" label="All reports" onPress={() => navigation.navigate('Reports')} />
-                  </View>
+          contentContainerStyle={{ padding: space.lg, paddingBottom: space.md, flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+          onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            atBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+          }}
+          scrollEventThrottle={100}
+          ListEmptyComponent={empty ? (
+            <View style={{ flex: 1, justifyContent: 'center', paddingVertical: space.xl }}>
+              <View style={{ alignItems: 'center', marginBottom: space.xl }}>
+                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: c.accentSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="sparkles" size={28} color={c.accent} />
                 </View>
-              ) : null}
-            </View>
-          }
-          renderItem={({ item: m }) => (
-            <View style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'stretch', maxWidth: m.role === 'user' ? '85%' : '100%', marginBottom: space.md }}>
-              <View style={{ backgroundColor: m.role === 'user' ? c.primary : c.surface, borderRadius: radius.lg, padding: space.md }}>
-                {m.role === 'user' ? <T color={c.onPrimary} selectable>{m.content}</T> : <Markdown source={m.content} />}
+                <T v="title" style={{ marginTop: space.md, textAlign: 'center' }}>{scopeId ? 'What do you want to know about it?' : 'What do you want to know?'}</T>
+                <T color="textMuted" style={{ textAlign: 'center', marginTop: 4 }}>Answers come from what you saved, with sources you can open.</T>
               </View>
-              {m.role === 'assistant' ? (
-                <View style={{ marginTop: 6 }}>
-                  <T v="caption" color="textFaint">{m.mode === 'model' ? `AI answer · ${m.provider}` : m.mode === 'retrieval_only' ? 'Assembled from your items (no AI model)' : 'No evidence found'}</T>
-                  {m.warnings.map((w, i) => <T key={i} v="caption" color="warning">⚠ {w}</T>)}
-                  {m.citations.map((ci) => (
-                    <Pressable key={ci.sid} onPress={() => navigation.navigate('ItemDetail', { id: ci.itemId, at: ci.startMs ?? undefined })} accessibilityRole="link" accessibilityLabel={`Source ${ci.sid}: ${titles.data?.[ci.itemId] ?? ''}`} style={{ paddingVertical: 6, borderTopWidth: 1, borderColor: c.border }}>
-                      <T v="small"><T v="small" color="accent">[{ci.sid}]</T> {titles.data?.[ci.itemId] ?? 'Saved item'}{ci.startMs !== null ? ` @ ${formatTimestamp(ci.startMs)}` : ''}</T>
-                      {ci.quote ? <T v="caption" color="textMuted" numberOfLines={2}>{ci.quote}</T> : null}
-                    </Pressable>
-                  ))}
-                  {(m.proposals as ActionProposal[]).map((p, i) => (
-                    <Banner key={i} tone="accent" title={`Suggested action: ${p.tool.replace(/_/g, ' ')}`} body={`${p.reason} Nothing happens until you confirm.`} action={p.tool === 'create_report' ? <Button kind="outline" title="Review & create" onPress={() => void runProposal(p)} /> : undefined} />
-                  ))}
+              {!ai?.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra answers with the matching passages from your library. Connect your server or add a model for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+                {(scopeId ? ITEM_SUGGESTIONS.map((p) => ({ icon: 'chatbubble-ellipses-outline' as const, title: p, prompt: p })) : SUGGESTIONS).map((s) => (
+                  <Pressable key={s.title} onPress={() => void send(s.prompt)} accessibilityRole="button" accessibilityLabel={s.title}
+                    style={({ pressed }) => ({ width: '48.5%', minHeight: 84, padding: space.md, borderRadius: radius.lg, borderWidth: 1, borderColor: c.border, backgroundColor: pressed ? c.surfaceAlt : c.surface })}>
+                    <Ionicons name={s.icon} size={20} color={c.accent} />
+                    <T v="small" style={{ marginTop: space.xs, fontWeight: '600' }} numberOfLines={3}>{s.title}</T>
+                  </Pressable>
+                ))}
+              </View>
+              {!scopeId ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+                  <Button kind="text" title="Today's report" icon="document-text-outline" onPress={() => void generateReport({ kind: 'daily', useAi: ai?.enabled }).then((r) => navigation.navigate('ReportDetail', { id: r.id }))} />
+                  <Button kind="text" title="All reports" icon="folder-open-outline" onPress={() => navigation.navigate('Reports')} />
                 </View>
               ) : null}
             </View>
+          ) : null}
+          renderItem={({ item: m }) => m.role === 'user' ? <UserBubble text={m.content} /> : (
+            <AssistantMessage
+              message={m}
+              isLast={m.id === lastAssistant?.id && !live}
+              onCite={citeIn(m)}
+              onTime={m.citations[0] ? (ms) => openSource(m.citations[0].itemId, ms) : undefined}
+              onSources={() => setSourcesFor(m)}
+              onRegenerate={() => void regenerate()}
+              footer={(m.proposals as ActionProposal[]).map((p, i) => (
+                <Banner key={i} tone="accent" title={`Suggested: ${p.tool.replace(/_/g, ' ')}`} body={`${p.reason} Nothing happens until you confirm.`} action={p.tool === 'create_report' ? <Button kind="outline" title="Review & create" onPress={() => void runProposal(p)} /> : undefined} />
+              ))}
+            />
           )}
-          ListFooterComponent={busy ? <Loading label="Thinking" /> : null}
+          ListFooterComponent={
+            <>
+              {showLive && live ? <StreamingMessage text={live.text} status={live.status} /> : null}
+              {error ? <Banner tone="danger" title="Couldn't answer" body={error} action={<Button kind="outline" title="Try again" onPress={() => void regenerate()} />} /> : null}
+            </>
+          }
         />
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', padding: space.sm, borderTopWidth: 1, borderColor: c.border, backgroundColor: c.bg }}>
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder={scopeId ? 'Ask about this item…' : 'Ask about what you saved…'}
-            placeholderTextColor={c.textFaint}
-            accessibilityLabel="Message"
-            multiline
-            style={[type.body, { flex: 1, color: c.text, backgroundColor: c.surface, borderRadius: radius.lg, paddingHorizontal: space.md, paddingVertical: 10, maxHeight: 140, minHeight: 48 }]}
-          />
-          {input.trim() ? null : <IconButton icon="mic-outline" size={28} label="Ask by voice" onPress={() => setVoice(true)} />}
-          <IconButton icon="arrow-up-circle" size={34} label="Send" onPress={() => void send(input)} color={input.trim() ? c.text : c.textFaint} />
-        </View>
+        <Composer
+          value={input}
+          onChange={setInput}
+          onSend={() => void send(input)}
+          onStop={() => abortRef.current?.abort()}
+          onVoice={() => setVoice(true)}
+          streaming={!!live}
+          placeholder={scopeId ? 'Ask about this item…' : 'Ask anything about your library…'}
+        />
       </KeyboardAvoidingView>
       <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={setInput} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
-      <Sheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Conversations">
+      <SourcesSheet message={sourcesFor} titles={titles.data ?? {}} onClose={() => setSourcesFor(null)} onOpen={openSource} />
+      <Sheet visible={historyOpen} onClose={() => setHistoryOpen(false)} title="Chats">
+        <Button kind="outline" title="New chat" icon="create-outline" onPress={() => { newChat(); setHistoryOpen(false); }} style={{ marginBottom: space.sm }} />
         {(convs.data ?? []).map((cv) => (
-          <View key={cv.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Button kind="text" title={cv.title} onPress={() => { setConvId(cv.id); setHistoryOpen(false); }} style={{ flex: 1, justifyContent: 'flex-start' }} />
-            <IconButton icon="trash-outline" label={`Delete ${cv.title}`} onPress={() => void run(async () => { await (await getRepo()).deleteConversation(cv.id); if (convId === cv.id) setConvId(null); await convs.reload(); })} />
+          <View key={cv.id} style={{ flexDirection: 'row', alignItems: 'center', borderRadius: radius.md, backgroundColor: cv.id === convId ? c.surfaceAlt : 'transparent' }}>
+            <Pressable onPress={() => { setScopeId(null); setConvId(cv.id); setHistoryOpen(false); }} accessibilityRole="button" accessibilityLabel={cv.title} style={{ flex: 1, paddingVertical: space.sm, paddingHorizontal: space.sm }}>
+              <T v="small" numberOfLines={1} style={{ fontWeight: '600' }}>{cv.title}</T>
+              <T v="caption" color="textFaint">{formatLocal(cv.updatedAt, settings?.timezone ?? 'UTC', { dateStyle: 'medium', timeStyle: 'short' })}</T>
+            </Pressable>
+            <IconButton icon="trash-outline" label={`Delete ${cv.title}`} onPress={() => void (async () => { await (await getRepo()).deleteConversation(cv.id); if (convId === cv.id) setConvId(null); await convs.reload(); })()} />
           </View>
         ))}
-        {!convs.data?.length ? <T color="textMuted">No conversations yet.</T> : null}
+        {!convs.data?.length ? <T color="textMuted">No chats yet.</T> : null}
       </Sheet>
     </SafeAreaView>
   );

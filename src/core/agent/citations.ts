@@ -2,6 +2,17 @@
 
 const CITE_RE = /\[S(\d+)\]/g;
 
+/**
+ * Models write citations in many shapes: 【S1】, [S1, S3], [S1; S2], (S2), [ S4 ].
+ * Normalise them all to separate `[S1]` markers before validation and rendering.
+ */
+export function normalizeCitations(text: string): string {
+  return text
+    .replace(/【\s*([^】]*?)\s*】/g, (_m, inner: string) => `[${inner}]`)
+    .replace(/[\[(]\s*(S\d+(?:\s*[,;&]\s*(?:and\s+)?S\d+)*)\s*[\])]/g, (_m, list: string) =>
+      list.split(/\s*[,;&]\s*(?:and\s+)?/).map((sid) => `[${sid.trim()}]`).join(''));
+}
+
 export interface CitationCheck {
   text: string;
   cited: string[]; // ordered, unique source ids actually cited
@@ -12,7 +23,7 @@ export function validateCitations(answer: string, validIds: string[]): CitationC
   const valid = new Set(validIds);
   const cited: string[] = [];
   const warnings: string[] = [];
-  const text = answer
+  const text = normalizeCitations(answer)
     .replace(CITE_RE, (m, n: string) => {
       const sid = `S${n}`;
       if (valid.has(sid)) {

@@ -49,7 +49,8 @@ export const ITEM_SUGGESTIONS = [
 ];
 
 const ITEM_RULES = `${SYSTEM_RULES}
-7. You are answering about ONE saved item. When the source has [mm:ss] markers, cite moments by copying the marker exactly, e.g. [01:23]. Otherwise cite [S1].`;
+7. You are answering about ONE saved item. When the source has [mm:ss] markers, cite moments by copying the marker exactly, e.g. [01:23]. Otherwise cite [S1].
+8. Answer like a helpful modern assistant: a direct answer first, then short bullets or ## headings only where they help. Markdown, no padding.`;
 
 function segmentsOf(src: ItemQaSource): { startMs: number; text: string }[] {
   return src.timed.filter((t): t is { startMs: number; text: string } => t.startMs !== null && !!t.text.trim());
@@ -119,9 +120,13 @@ export function retrievalItemAnswer(question: string, src: ItemQaSource, max = 4
 
 export async function askItem(
   src: ItemQaSource, question: string, provider: ChatProvider | null, history: { role: 'user' | 'assistant'; content: string }[] = [],
+  stream: { onDelta?: (text: string) => void; signal?: AbortSignal } = {},
 ): Promise<ItemQaResult> {
   if (!provider) return retrievalItemAnswer(question, src);
-  const res = await provider.chat(itemQaMessages(src, question, history), { maxTokens: 1200 });
+  const messages = itemQaMessages(src, question, history);
+  const res = provider.chatStream && stream.onDelta
+    ? await provider.chatStream(messages, { maxTokens: 2500, signal: stream.signal }, stream.onDelta)
+    : await provider.chat(messages, { maxTokens: 2500, signal: stream.signal });
   const { answer, moments } = citeMoments(res.content.trim() || 'The model returned no answer.', src);
   return { mode: 'model', answer, moments, provider: provider.label, usage: res.usage };
 }

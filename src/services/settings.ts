@@ -23,6 +23,8 @@ export interface Settings {
   ai: AiSettings;
   dailyReminder: boolean;
   scheduledDailyReport: boolean;
+  /** Build last week's report every Monday morning and notify. */
+  weeklyReport: boolean;
   serverProcessing: boolean;
   /** Automatically transcribe shared Instagram/X/YouTube videos on the paired server. */
   autoTranscribe: boolean;
@@ -68,6 +70,7 @@ export async function getSettings(): Promise<Settings> {
     ai: { ...DEFAULT_AI, ...(s.ai ?? {}) },
     dailyReminder: s.dailyReminder ?? false,
     scheduledDailyReport: s.scheduledDailyReport ?? false,
+    weeklyReport: s.weeklyReport ?? false,
     serverProcessing: s.serverProcessing ?? false,
     autoTranscribe: s.autoTranscribe ?? true,
     voice: { ...DEFAULT_VOICE, ...(s.voice ?? {}) },

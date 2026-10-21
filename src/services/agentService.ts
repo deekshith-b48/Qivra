@@ -44,16 +44,43 @@ export async function agentData(repo: Repo): Promise<AgentData> {
   return data;
 }
 
-export async function ask(conversationId: string | null, question: string): Promise<{ conversationId: string; result: AgentResult }> {
+/** Live progress for a streamed answer (Ask screen). */
+export interface AskStream {
+  onDelta?: (text: string) => void;
+  onRoundReset?: () => void;
+  onStatus?: (status: 'searching' | 'writing') => void;
+  /** Aborting stops generation; the partial answer is kept and marked as stopped. */
+  signal?: AbortSignal;
+  /** Called once the user message is stored, so the conversation shows it immediately. */
+  onConversation?: (conversationId: string) => void;
+}
+
+const STOPPED_NOTE = '\n\n_(stopped)_';
+
+export async function ask(conversationId: string | null, question: string, stream: AskStream = {}): Promise<{ conversationId: string; result: AgentResult }> {
   const repo = await getRepo();
   const s = await getSettings();
   const convId = conversationId ?? (await repo.createConversation(question.slice(0, 80)));
   const history = (await repo.listMessages(convId)).slice(-6).map((m) => ({ role: m.role, content: m.content }));
   await repo.addMessage({ conversationId: convId, role: 'user', content: question, mode: null, provider: null, warnings: [], proposals: [], citations: [] });
+  emit('conversations');
+  stream.onConversation?.(convId);
   const { provider, reason } = await loadProvider();
-  const result = await runAgent(question, await agentData(repo), {
-    now: Date.now(), timezone: s.timezone, provider, providerUnavailableReason: reason ?? undefined, history,
-  });
+  let partial = '';
+  let result: AgentResult;
+  try {
+    stream.onStatus?.('searching');
+    result = await runAgent(question, await agentData(repo), {
+      now: Date.now(), timezone: s.timezone, provider, providerUnavailableReason: reason ?? undefined, history,
+      onDelta: stream.onDelta ? (t) => { partial += t; stream.onDelta!(t); } : undefined,
+      onRoundReset: () => { partial = ''; stream.onRoundReset?.(); },
+      onStatus: stream.onStatus, signal: stream.signal,
+    });
+  } catch (e) {
+    if (!stream.signal?.aborted) throw e;
+    // Stopped by the user: keep what was written so far.
+    result = { mode: 'model', answer: (partial.trim() || 'Stopped before an answer was written.') + STOPPED_NOTE, sources: [], citedIds: [], warnings: [], proposals: [], provider: provider?.label ?? null, toolTrace: [], usage: null };
+  }
   if (result.usage && result.provider) await repo.addUsage({ provider: result.provider, model: provider?.model ?? null, kind: 'agent', ...result.usage });
   await repo.addMessage({
     conversationId: convId, role: 'assistant', content: result.answer, mode: result.mode, provider: result.provider, warnings: result.warnings, proposals: result.proposals,
@@ -85,15 +112,27 @@ async function itemSource(repo: Repo, itemId: string): Promise<{ src: ItemQaSour
 }
 
 /** "Ask this item": a conversation scoped to one saved video, post or page, citing its moments. */
-export async function askAboutItem(conversationId: string | null, itemId: string, question: string): Promise<{ conversationId: string; result: ItemQaResult }> {
+export async function askAboutItem(conversationId: string | null, itemId: string, question: string, stream: AskStream = {}): Promise<{ conversationId: string; result: ItemQaResult }> {
   const repo = await getRepo();
   const found = await itemSource(repo, itemId);
   if (!found) throw new Error('This item no longer exists.');
   const convId = conversationId ?? (await repo.createConversation(`About: ${found.src.title}`.slice(0, 80)));
   const history = (await repo.listMessages(convId)).slice(-6).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
   await repo.addMessage({ conversationId: convId, role: 'user', content: question, mode: null, provider: null, warnings: [], proposals: [], citations: [] });
+  emit('conversations');
+  stream.onConversation?.(convId);
   const { provider } = await loadProvider();
-  const result = await askItem(found.src, question, provider, history);
+  let partial = '';
+  let result: ItemQaResult;
+  try {
+    stream.onStatus?.('writing');
+    result = await askItem(found.src, question, provider, history, {
+      onDelta: stream.onDelta ? (t) => { partial += t; stream.onDelta!(t); } : undefined, signal: stream.signal,
+    });
+  } catch (e) {
+    if (!stream.signal?.aborted) throw e;
+    result = { mode: 'model', answer: (partial.trim() || 'Stopped before an answer was written.') + STOPPED_NOTE, moments: [], provider: provider?.label ?? null, usage: null };
+  }
   if (result.usage && result.provider) await repo.addUsage({ provider: result.provider, model: provider?.model ?? null, kind: 'agent', ...result.usage });
   await repo.addMessage({
     conversationId: convId, role: 'assistant', content: result.answer, mode: result.mode, provider: result.provider, warnings: [], proposals: [],
@@ -101,4 +140,22 @@ export async function askAboutItem(conversationId: string | null, itemId: string
   });
   emit('conversations');
   return { conversationId: convId, result };
+}
+
+/** Regenerate: remove the last exchange (its question and answer) so it can be asked again. Returns the question. */
+export async function dropLastExchange(conversationId: string): Promise<string | null> {
+  const repo = await getRepo();
+  const msgs = await repo.listMessages(conversationId);
+  const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
+  if (!lastUser) return null;
+  const from = msgs.indexOf(lastUser);
+  const ids = msgs.slice(from).map((m) => m.id);
+  await repo.db.transaction(async (tx) => {
+    for (const id of ids) {
+      await tx.run('DELETE FROM message_citations WHERE message_id = ?', [id]);
+      await tx.run('DELETE FROM messages WHERE id = ?', [id]);
+    }
+  });
+  emit('conversations');
+  return lastUser.content;
 }

@@ -16,6 +16,7 @@
 
 import type { QivraClient, ServerEntity, SyncChange } from '../core/api';
 import { newId } from '../core/ids';
+import { sanitizeRules } from '../core/smart';
 import type { Repo } from '../db/repo';
 import type { Item } from '../db/types';
 
@@ -107,7 +108,8 @@ async function collectOutgoing(repo: Repo): Promise<{ changes: SyncChange[]; sen
   for (const c of cols) {
     changes.push({
       kind: 'collection', id: String(c.id), base_revision: c.server_revision === null ? null : Number(c.server_revision), deleted: Number(c.deleted) === 1,
-      data: { name: c.name, icon: c.icon, createdAt: c.created_at, updatedAt: c.updated_at },
+      // `rules` is sent only for smart collections, so manual ones keep the original payload.
+      data: { name: c.name, icon: c.icon, createdAt: c.created_at, updatedAt: c.updated_at, ...(c.rules_json ? { rules: sanitizeRules(c.rules_json) } : {}) },
     });
     sentRevs.set(`collection:${c.id}`, Number(c.local_rev));
   }
@@ -162,13 +164,14 @@ export async function applyRemote(repo: Repo, ent: ServerEntity): Promise<'pulle
     return 'skipped';
   }
   if (ent.kind === 'collection') {
-    const d = ent.data as { name?: string; icon?: string; createdAt?: string; updatedAt?: string };
+    const d = ent.data as { name?: string; icon?: string; createdAt?: string; updatedAt?: string; rules?: unknown };
+    const rules = sanitizeRules(d.rules ?? null);
     await repo.db.run(
-      `INSERT INTO collections (id, name, icon, created_at, updated_at, local_rev, synced_local_rev, server_revision, sync_status)
-       VALUES (?,?,?,?,?,1,1,?, 'synced')
-       ON CONFLICT(id) DO UPDATE SET name = excluded.name, icon = excluded.icon, updated_at = excluded.updated_at,
+      `INSERT INTO collections (id, name, icon, created_at, updated_at, local_rev, synced_local_rev, server_revision, sync_status, rules_json)
+       VALUES (?,?,?,?,?,1,1,?, 'synced', ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, icon = excluded.icon, updated_at = excluded.updated_at, rules_json = excluded.rules_json,
          server_revision = excluded.server_revision, synced_local_rev = collections.local_rev, sync_status = 'synced', deleted = 0`,
-      [ent.id, String(d.name ?? 'Untitled'), String(d.icon ?? 'folder'), d.createdAt ?? ent.created_at, d.updatedAt ?? ent.updated_at, ent.revision],
+      [ent.id, String(d.name ?? 'Untitled'), String(d.icon ?? 'folder'), d.createdAt ?? ent.created_at, d.updatedAt ?? ent.updated_at, ent.revision, rules ? JSON.stringify(rules) : null],
     );
     return 'pulled';
   }

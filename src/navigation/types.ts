@@ -20,6 +20,8 @@ export type RootStackParamList = {
   TranscriptImport: { itemId: string; kind?: 'original' | 'translation' };
   ShareReceipt: { results: CaptureResult[]; rejected: { name: string; reason: string }[] };
   Collections: undefined;
+  /** Flashcard review: every due card, or only a collection's. */
+  Review: { collectionId?: string } | undefined;
   Reports: undefined;
   ReportDetail: { id: string };
   Settings: undefined;

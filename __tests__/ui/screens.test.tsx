@@ -134,17 +134,20 @@ test('error banner offers one primary and one secondary action', async () => {
   for (const extra of ['Retry', 'Try server again']) expect(screen.queryByRole('button', { name: extra })).toBeNull();
 });
 
-test('agent answers from saved items with a tappable citation when no model is configured', async () => {
+test('ask answers from saved items without a model; sources open from the Sources sheet', async () => {
   const repo = await getRepo();
   const { item } = await repo.createItem({ sourceType: 'note', title: 'Kubernetes operators notes', note: 'Operators reconcile desired state.' });
   const n = nav() as { navigate: jest.Mock };
   wrap(<AgentScreen navigation={n as never} route={{ key: 'a', name: 'Agent' } as never} />);
   fireEvent.changeText(await screen.findByLabelText('Message'), 'kubernetes operators');
   fireEvent.press(screen.getByRole('button', { name: 'Send' }));
-  expect(await screen.findByText(/Assembled from your items/, {}, { timeout: 4000 })).toBeTruthy();
-  const cite = await screen.findByLabelText(/Source S1/);
-  fireEvent.press(cite);
-  expect(n.navigate).toHaveBeenCalledWith('ItemDetail', { id: item.id });
+  expect(await screen.findByText(/From your saved items \(no AI model\)/, {}, { timeout: 4000 })).toBeTruthy();
+  expect(screen.getByText('kubernetes operators')).toBeTruthy(); // the question as a chat bubble
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Regenerate' })).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Sources (1)' }));
+  fireEvent.press(await screen.findByLabelText(/Source S1: Kubernetes operators notes/));
+  expect(n.navigate).toHaveBeenCalledWith('ItemDetail', { id: item.id, at: undefined });
 });
 
 test('report detail previews markdown and offers export', async () => {
@@ -214,8 +217,8 @@ test('ask can be scoped to one item and answers from it with timestamps', async 
   expect(screen.getByText(/Asking about:/)).toBeTruthy();
   fireEvent.changeText(screen.getByLabelText('Message'), 'Which index for JSONB?');
   fireEvent.press(screen.getByRole('button', { name: 'Send' }));
-  expect((await screen.findAllByText(/1:02/, {}, { timeout: 3000 })).length).toBeGreaterThanOrEqual(2); // in the answer and its citation
-  fireEvent.press(screen.getAllByRole('link')[0]);
+  // The answer's [01:02] marker is a tappable "play from" pill that opens the video at that moment.
+  fireEvent.press(await screen.findByLabelText('Play from 01:02', {}, { timeout: 3000 }));
   expect(n.navigate).toHaveBeenCalledWith('ItemDetail', { id: item.id, at: 62000 });
   const convs = await repo.listConversations();
   expect(convs[0].title).toBe('About: Postgres indexing');

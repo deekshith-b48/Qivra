@@ -17,6 +17,7 @@ import ipaddress
 import logging
 import os
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,7 +26,9 @@ logger = logging.getLogger(__name__)
 ENV_FILE_NAME = "qivra.env"
 _ENV_KEYS = ("QIVRA_AI_BASE_URL", "QIVRA_AI_API_KEY", "QIVRA_AI_MODEL", "QIVRA_AI_EMBEDDING_MODEL",
              "QIVRA_TRANSCRIBER", "QIVRA_GROQ_WHISPER_MODEL")
-CHAT_FIELDS = {"messages", "temperature", "max_tokens", "top_p", "stop", "tools", "tool_choice", "response_format"}
+CHAT_FIELDS = {"messages", "temperature", "max_tokens", "top_p", "stop", "tools", "tool_choice", "response_format", "stream_options",
+               "reasoning_effort"}
+REASONING_EFFORTS = {"low", "medium", "high"}
 MAX_TOKENS_CAP = 4096
 MAX_EMBED_INPUTS = 256
 
@@ -94,34 +97,43 @@ def describe() -> dict:
             "embedding_model": cfg["embedding_model"], "external": not _private_host(cfg["host"])}
 
 
-def _post(cfg: dict, path: str, payload: dict, timeout: float) -> dict:
-    import httpx
-
+def _headers(cfg: dict) -> dict:
     headers = {"Content-Type": "application/json"}
     if cfg["api_key"]:
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    return headers
+
+
+def _status_error(status: int, model: str | None) -> GatewayError:
+    """Map an upstream HTTP error to our own error (the upstream body is never relayed)."""
+    if status in (401, 403):
+        return GatewayError(status, "AI_KEY_REJECTED", "The AI provider rejected the server's API key.")
+    if status == 429:
+        return GatewayError(429, "AI_RATE_LIMITED", "The AI provider rate limit was reached. Try again shortly.")
+    if status == 404:
+        return GatewayError(502, "AI_MODEL_NOT_FOUND", f"The AI provider does not offer model '{model}'.")
+    logger.warning("AI provider returned HTTP %s", status)
+    return GatewayError(502, "AI_PROVIDER_ERROR", f"The AI provider returned HTTP {status}.")
+
+
+def _post(cfg: dict, path: str, payload: dict, timeout: float) -> dict:
+    import httpx
+
     try:
-        res = httpx.post(cfg["base_url"] + path, json=payload, headers=headers, timeout=timeout)
+        res = httpx.post(cfg["base_url"] + path, json=payload, headers=_headers(cfg), timeout=timeout)
     except httpx.TimeoutException as exc:
         raise GatewayError(504, "AI_TIMEOUT", "The AI provider timed out.") from exc
     except httpx.HTTPError as exc:
         raise GatewayError(502, "AI_UNREACHABLE", "The server could not reach the AI provider.") from exc
-    if res.status_code in (401, 403):
-        raise GatewayError(res.status_code, "AI_KEY_REJECTED", "The AI provider rejected the server's API key.")
-    if res.status_code == 429:
-        raise GatewayError(429, "AI_RATE_LIMITED", "The AI provider rate limit was reached. Try again shortly.")
-    if res.status_code == 404:
-        raise GatewayError(502, "AI_MODEL_NOT_FOUND", f"The AI provider does not offer model '{payload.get('model')}'.")
     if res.status_code >= 400:
-        logger.warning("AI provider returned HTTP %s", res.status_code)
-        raise GatewayError(502, "AI_PROVIDER_ERROR", f"The AI provider returned HTTP {res.status_code}.")
+        raise _status_error(res.status_code, payload.get("model"))
     try:
         return res.json()
     except ValueError as exc:
         raise GatewayError(502, "AI_BAD_RESPONSE", "The AI provider returned invalid JSON.") from exc
 
 
-def chat(body: dict[str, Any]) -> dict:
+def _chat_payload(body: dict[str, Any]) -> tuple[dict, dict]:
     cfg = config()
     if cfg is None:
         raise GatewayError(503, "AI_NOT_CONFIGURED", "No AI provider is configured on the server.")
@@ -134,7 +146,67 @@ def chat(body: dict[str, Any]) -> dict:
         payload["max_tokens"] = max(1, min(int(payload.get("max_tokens") or 1200), MAX_TOKENS_CAP))
     except (TypeError, ValueError):
         payload["max_tokens"] = 1200
+    # Reasoning models (gpt-oss) spend output tokens "thinking" before they answer; at the
+    # default effort a 900-token budget can end before any answer is written. Low effort keeps
+    # answers complete and starts streamed text sooner. QIVRA_AI_REASONING_EFFORT overrides.
+    if payload.get("reasoning_effort") not in REASONING_EFFORTS:
+        payload.pop("reasoning_effort", None)
+        effort = os.getenv("QIVRA_AI_REASONING_EFFORT", "").strip().lower()
+        if effort in REASONING_EFFORTS:
+            payload["reasoning_effort"] = effort
+        elif not effort and "gpt-oss" in cfg["model"]:
+            payload["reasoning_effort"] = "low"
+    return cfg, payload
+
+
+def chat(body: dict[str, Any]) -> dict:
+    cfg, payload = _chat_payload(body)
     return _post(cfg, "/chat/completions", payload, timeout=120.0)
+
+
+def _client():
+    import httpx
+
+    return httpx.Client(timeout=httpx.Timeout(120.0, connect=15.0))
+
+
+def open_chat_stream(body: dict[str, Any]) -> Iterator[bytes]:
+    """Start a streamed chat completion and return an iterator over the upstream SSE bytes.
+
+    Errors before the first byte (unreachable, key rejected, rate limit…) are raised
+    as GatewayError so the phone gets a normal JSON error; once streaming has begun,
+    an interruption is reported as a final SSE `data:` event.
+    """
+    import httpx
+
+    cfg, payload = _chat_payload(body)
+    payload["stream"] = True
+    client = _client()
+    try:
+        req = client.build_request("POST", cfg["base_url"] + "/chat/completions", json=payload, headers=_headers(cfg))
+        res = client.send(req, stream=True)
+    except httpx.TimeoutException as exc:
+        client.close()
+        raise GatewayError(504, "AI_TIMEOUT", "The AI provider timed out.") from exc
+    except httpx.HTTPError as exc:
+        client.close()
+        raise GatewayError(502, "AI_UNREACHABLE", "The server could not reach the AI provider.") from exc
+    if res.status_code >= 400:
+        res.close()
+        client.close()
+        raise _status_error(res.status_code, payload.get("model"))
+
+    def relay() -> Iterator[bytes]:
+        try:
+            yield from res.iter_bytes()
+        except httpx.HTTPError:
+            logger.warning("AI stream interrupted")
+            yield b'data: {"error": {"code": "AI_STREAM_INTERRUPTED", "message": "The AI provider stopped responding."}}\n\n'
+        finally:
+            res.close()
+            client.close()
+
+    return relay()
 
 
 def embeddings(body: dict[str, Any]) -> dict:

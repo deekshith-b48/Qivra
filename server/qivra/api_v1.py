@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import API_VERSION, PRODUCT, SERVER_VERSION, ai, ai_gateway, transcribers
@@ -130,15 +131,19 @@ def pairing_status(request: Request, device: Device = Depends(require_device)) -
 
 
 # ── AI gateway (owner's provider key stays on the server) ────────────────────
-def _gateway(call, request_body: dict) -> dict:
+def _gateway(call, request_body: dict):
     try:
         return call(request_body)
     except ai_gateway.GatewayError as exc:
         raise ApiError(exc.status, exc.code, exc.message) from exc
 
 
-@router.post("/api/v1/ai/chat/completions")
-def ai_chat(body: dict[str, Any], _: Device = Depends(require_device)) -> dict:
+@router.post("/api/v1/ai/chat/completions", response_model=None)
+def ai_chat(body: dict[str, Any], _: Device = Depends(require_device)) -> dict | StreamingResponse:
+    if body.get("stream") is True:
+        # Token streaming (SSE) straight from the provider; errors before the first byte stay JSON.
+        stream = _gateway(ai_gateway.open_chat_stream, body)
+        return StreamingResponse(stream, media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     return _gateway(ai_gateway.chat, body)
 
 
@@ -476,12 +481,18 @@ def sync(request: Request, body: SyncRequest, device: Device = Depends(require_d
 
 
 def _validate_collection(data: dict) -> dict:
-    allowed = {"id", "name", "icon", "createdAt", "updatedAt", "description"}
+    allowed = {"id", "name", "icon", "createdAt", "updatedAt", "description", "rules"}
     unknown = set(data) - allowed
     if unknown:
         raise ApiError(400, "UNKNOWN_FIELDS", f"Unknown collection fields: {', '.join(sorted(unknown))}")
     if not isinstance(data.get("name", ""), str) or len(data.get("name", "")) > 120:
         raise ApiError(400, "INVALID_FIELD", "Collection name must be a string up to 120 characters.")
+    # Smart-collection rules: an opaque JSON object (null for a manual collection), size-limited.
+    rules = data.get("rules")
+    if rules is not None:
+        import json
+        if not isinstance(rules, dict) or len(json.dumps(rules)) > 4000:
+            raise ApiError(400, "INVALID_FIELD", "Collection rules must be an object up to 4000 characters.")
     return data
 
 

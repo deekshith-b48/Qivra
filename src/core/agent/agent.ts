@@ -90,6 +90,13 @@ export interface AgentOptions {
   providerUnavailableReason?: string;
   maxSources?: number;
   history?: { role: 'user' | 'assistant'; content: string }[];
+  /** Streaming: called with each piece of answer text as the model writes it. */
+  onDelta?: (text: string) => void;
+  /** Streaming: the text streamed so far was a tool-calling round, not the answer; clear it. */
+  onRoundReset?: () => void;
+  /** Progress for the UI ("Searching your library…", "Writing…"). */
+  onStatus?: (status: 'searching' | 'writing') => void;
+  signal?: AbortSignal;
 }
 
 const STOP = new Set(
@@ -188,11 +195,17 @@ export async function runAgent(question: string, data: AgentData, opts: AgentOpt
     };
   }
   items = items.slice(0, maxSources);
-  const extra = await data.chunksForItems(items.map((i) => i.id).filter((id) => !chunks.some((c) => c.itemId === id)), 2);
+  const extra = intent.compare
+    ? (await data.chunksForItems(items.map((i) => i.id), 3)).filter((x) => !chunks.some((c) => c.chunkId === x.chunkId))
+    : await data.chunksForItems(items.map((i) => i.id).filter((id) => !chunks.some((c) => c.itemId === id)), 2);
   chunks = [...chunks, ...extra];
   const sources: AgentSource[] = items.map((it, i) => {
-    const best = chunks.filter((c) => c.itemId === it.id).sort((a, b) => (a.kind === 'transcript' ? -1 : 0) - (b.kind === 'transcript' ? -1 : 0))[0];
-    const quote = best ? snippet(best.text, intent.topic || question, 220) : it.summary || it.note || it.title;
+    const own = chunks.filter((c) => c.itemId === it.id).sort((a, b) => (a.kind === 'transcript' ? -1 : 0) - (b.kind === 'transcript' ? -1 : 0));
+    const best = own[0];
+    // Comparisons need to know what each source is, not just one matching line.
+    const quote = intent.compare
+      ? [it.summary, ...own.slice(0, 3).map((c) => c.text)].filter(Boolean).join(' … ').slice(0, 900) || it.title
+      : best ? snippet(best.text, intent.topic || question, 220) : it.summary || it.note || it.title;
     return {
       sid: `S${i + 1}`, itemId: it.id, title: it.title || it.url || 'Untitled', url: it.url, quote,
       startMs: best?.startMs ?? null, transcriptId: best?.transcriptId ?? null, chunkId: best?.chunkId ?? null,
@@ -248,8 +261,12 @@ function sourceBlock(s: AgentSource, it: EvidenceItem | undefined): string {
 }
 
 function taskInstructions(intent: Intent): string {
-  const parts = ['Write a concise, well-structured answer in Markdown.'];
-  if (intent.compare) parts.push('Compare the sources side by side (a short table is fine), noting where they agree and differ.');
+  const parts = [
+    'Answer like a helpful modern assistant: start with a direct one- or two-sentence answer, then add detail only where it helps, using short ## headings or bullet points.',
+    'Write in Markdown. Cite every factual claim with ASCII markers like [S1] right after the claim (never 【S1】).',
+    'Do not restate the question, do not pad, and keep it under about 250 words unless the user asks for more.',
+  ];
+  if (intent.compare) parts.push('Compare the sources in a Markdown table with at most 4 short columns (one row per source, the first column naming it), then a few bullets on where they agree and differ.');
   if (intent.repos) parts.push('List every repository mentioned with what it is for, citing its source.');
   if (intent.tools) parts.push('List the tools/frameworks/commands mentioned, citing sources, and flag destructive commands.');
   if (intent.plan) parts.push('Propose an ordered learning plan using only these sources; each step cites its source.');
@@ -271,7 +288,14 @@ async function modelAnswer(
   let usage = { promptTokens: 0 as number | null, completionTokens: 0 as number | null };
   let final = '';
   for (let round = 0; round < 3; round++) {
-    const res = await provider.chat(messages, { tools: round < 2 ? [...READ_TOOLS, ...WRITE_TOOLS] : undefined });
+    const chatOpts = { tools: round < 2 ? [...READ_TOOLS, ...WRITE_TOOLS] : undefined, signal: opts.signal };
+    opts.onStatus?.('writing');
+    let streamed = false;
+    const res = provider.chatStream && opts.onDelta
+      ? await provider.chatStream(messages, chatOpts, (t) => { streamed = true; opts.onDelta!(t); })
+      : await provider.chat(messages, chatOpts);
+    if (res.toolCalls.length && streamed) opts.onRoundReset?.();
+    if (res.toolCalls.length) opts.onStatus?.('searching');
     usage = { promptTokens: (usage.promptTokens ?? 0) + (res.usage.promptTokens ?? 0), completionTokens: (usage.completionTokens ?? 0) + (res.usage.completionTokens ?? 0) };
     if (!res.toolCalls.length) {
       final = res.content;

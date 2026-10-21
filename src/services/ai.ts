@@ -6,7 +6,8 @@
  *     and the provider key never reaches the phone.
  */
 
-import { createOpenAICompatProvider, type ChatProvider } from '../core/ai/provider';
+import { fetch as expoFetch } from 'expo/fetch';
+import { createOpenAICompatProvider, type ChatProvider, type StreamFetchLike } from '../core/ai/provider';
 import { checkServerUrl, isPrivateHost } from '../core/net';
 import { getSecret, SECRET_KEYS } from './secure';
 import { checkConnection, getConnection } from './server';
@@ -32,6 +33,9 @@ export interface AiInfo {
   autoEnrich: boolean;
   embeddingModel: string | null;
 }
+
+// expo/fetch exposes the response body as a stream, which React Native's fetch does not.
+const streamFetch = expoFetch as unknown as StreamFetchLike;
 
 const NONE = 'No AI model is configured (Settings → AI models). Answers use your saved items only.';
 
@@ -67,7 +71,7 @@ async function phoneProvider(): Promise<ProviderState | null> {
       apiKey,
       embeddingModel: base.embeddingModel,
       label: `${check.url.hostname} · ${s.ai.model}`,
-    });
+    }, undefined, streamFetch);
     return { ...base, provider, reason: null, external };
   } catch (e) {
     return { ...base, provider: null, reason: (e as Error).message, external };
@@ -92,7 +96,7 @@ async function serverProvider(): Promise<ProviderState | null> {
       embeddingModel,
       timeoutMs: 120_000,
       label: `Qivra server · ${gw.upstream ?? 'AI'} · ${gw.model}`,
-    });
+    }, undefined, streamFetch);
     return { provider, reason: null, external: gw.external ?? true, source: 'server', embeddingModel };
   } catch (e) {
     return { provider: null, reason: (e as Error).message, external: gw.external ?? true, source: 'server', embeddingModel };

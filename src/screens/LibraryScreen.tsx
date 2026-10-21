@@ -361,7 +361,8 @@ export default function LibraryScreen({ navigation, route }: Props) {
       </Sheet>
 
       <Sheet visible={collectOpen} onClose={() => { setCollectOpen(false); setCollectFor(null); }} title={collectFor ? 'Add this item to a collection' : 'Add to collection'}>
-        {facets.data?.collections.length ? facets.data.collections.map((col) => (
+        {/* Smart collections fill themselves from their rules, so items can't be added by hand. */}
+        {facets.data?.collections.some((col) => !col.rules) ? facets.data.collections.filter((col) => !col.rules).map((col) => (
           <Button key={col.id} kind="outline" title={`${col.name} (${col.itemCount})`} onPress={() => void bulk.collect(col.id)} style={{ marginBottom: space.sm }} />
         )) : <T color="textMuted">No collections yet. Create one from Collections.</T>}
         <Button kind="text" title="Manage collections" onPress={() => { setCollectOpen(false); navigation.navigate('Collections'); }} />

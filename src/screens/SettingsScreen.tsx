@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert, View } from 'react-native';
 import type { RootProps } from '../navigation/types';
 import { disableDailyReminder, enableDailyReminder } from '../services/reminders';
+import { enableWeeklyReport } from '../services/weeklyReport';
 import { deviceTimeZone, updateSettings } from '../services/settings';
 import { Chip, Divider, Field, Header, Row, Screen, Section, T, ToggleRow } from '../ui/components';
 import { useQuery } from '../ui/hooks';
@@ -56,6 +57,10 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
             if (r === 'denied') return Alert.alert('Notifications are off', 'Allow notifications for Qivra in Android settings to use reminders.');
           } else await disableDailyReminder();
           await updateSettings({ dailyReminder: v });
+        }} />
+        <ToggleRow title="Weekly report (Monday morning)" subtitle="After 6 am on Monday, last week's report is prepared once and a notification says it is ready (hidden on a locked screen). Asks for notification permission when turned on." value={s.weeklyReport} onChange={async (v) => {
+          if (v && (await enableWeeklyReport()) === 'denied') return Alert.alert('Notifications are off', 'Allow notifications for Qivra in Android settings to use reminders.');
+          await updateSettings({ weeklyReport: v });
         }} />
         <ToggleRow title="Prepare yesterday's report automatically" subtitle="Runs in the background when Android allows (WorkManager; may be delayed by battery saver)." value={s.scheduledDailyReport} onChange={(v) => void updateSettings({ scheduledDailyReport: v })} />
       </Section>

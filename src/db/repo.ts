@@ -6,11 +6,12 @@
 import type { Enrichment } from '../core/enrich';
 import { newId, stableHash } from '../core/ids';
 import { buildFilterSql, buildFtsOrQuery, buildFtsQuery, orderBySql, type LibraryFilter, type SortKey } from '../core/search';
+import { rulesToFilter, sanitizeRules, type SmartRules } from '../core/smart';
 import { backoffMs, transition, type ItemStatus } from '../core/status';
 import { chunkSegments, hasTimestamps, segmentsToText, type Segment } from '../core/transcripts';
 import type { SqlDriver, SqlExecutor, SqlValue } from './driver';
 import type {
-  ChunkHit, Citation, Collection, Conflict, Item, ItemMetadata, Job, JobKind, JobStatus, Message, NewItem, Origin, Report,
+  Card, ChunkHit, Citation, Collection, CollectionSuggestion, Conflict, Item, ItemMetadata, Job, JobKind, JobStatus, Message, NewItem, Origin, Report,
   SyncStatus, Transcript, TranscriptInput,
 } from './types';
 
@@ -244,15 +245,30 @@ export class Repo {
   }
 
   async countItems(filter: LibraryFilter): Promise<number> {
-    if (filter.text?.trim()) return (await this.queryItemIds(filter, 'newest', 10_000, 0)).length;
-    const { where, params } = buildFilterSql(filter);
+    const { where, params, text } = await this.filterSql(filter);
+    if (text) return (await this.queryItemIds(filter, 'newest', 10_000, 0)).length;
     const r = await this.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM items i WHERE ${where}`, params);
     return Number(r?.n ?? 0);
   }
 
+  /**
+   * WHERE clause for a filter. A smart collection's rules stand in for its
+   * membership table and are ANDed with the rest of the filter; rule text is
+   * added to the full-text query.
+   */
+  private async filterSql(filter: LibraryFilter): Promise<{ where: string; params: (string | number)[]; text: string }> {
+    let text = filter.text?.trim() ?? '';
+    const rules = filter.collectionId ? await this.collectionRules(filter.collectionId) : null;
+    if (!rules) return { ...buildFilterSql(filter), text };
+    const rf = rulesToFilter(rules, this.clock());
+    if (rf.text) text = [text, rf.text].filter(Boolean).join(' ');
+    const base = buildFilterSql({ ...filter, collectionId: undefined });
+    const extra = buildFilterSql({ ...rf, text: undefined, archived: filter.archived });
+    return { where: `${base.where} AND ${extra.where}`, params: [...base.params, ...extra.params], text };
+  }
+
   private async queryItemIds(filter: LibraryFilter, sort: SortKey, limit: number, offset: number): Promise<string[]> {
-    const { where, params } = buildFilterSql(filter);
-    const text = filter.text?.trim();
+    const { where, params, text } = await this.filterSql(filter);
     if (!text) {
       const rows = await this.db.all<{ id: string }>(
         `SELECT i.id FROM items i WHERE ${where} ORDER BY ${orderBySql(sort)} LIMIT ? OFFSET ?`,
@@ -320,13 +336,49 @@ export class Repo {
     return (await this.getCollection(cid)) as Collection;
   }
 
+  /** A collection defined by rules; its items are resolved live by listItems/countItems. */
+  async createSmartCollection(name: string, rules: SmartRules, icon = 'sparkles'): Promise<Collection> {
+    const clean = sanitizeRules(rules);
+    if (!clean) throw new Error('A smart collection needs at least one rule.');
+    const now = this.now();
+    const cid = newId('col');
+    const sync = await this.syncEnabled();
+    await this.db.run(
+      'INSERT INTO collections (id, name, icon, created_at, updated_at, sync_status, rules_json) VALUES (?,?,?,?,?,?,?)',
+      [cid, name.trim().slice(0, 120) || 'Untitled', icon, now, now, sync ? 'pending' : 'local_only', JSON.stringify(clean)],
+    );
+    return (await this.getCollection(cid)) as Collection;
+  }
+
+  async updateSmartRules(id: string, rules: SmartRules): Promise<void> {
+    const clean = sanitizeRules(rules);
+    if (!clean) throw new Error('A smart collection needs at least one rule.');
+    await this.db.run(
+      `UPDATE collections SET rules_json = ?, updated_at = ?, local_rev = local_rev + 1,
+         sync_status = CASE WHEN server_revision IS NOT NULL THEN 'pending' ELSE sync_status END WHERE id = ?`,
+      [JSON.stringify(clean), this.now(), id],
+    );
+  }
+
+  /** Rules of a live smart collection, or null for a manual (or missing) one. */
+  async collectionRules(id: string): Promise<SmartRules | null> {
+    const r = await this.db.get<{ rules_json: string | null }>('SELECT rules_json FROM collections WHERE id = ? AND deleted = 0', [id]);
+    return r?.rules_json ? sanitizeRules(r.rules_json) : null;
+  }
+
+  private async withCount(r: Row): Promise<Collection> {
+    const col = collectionFromRow(r);
+    if (col.rules) col.itemCount = await this.countItems({ collectionId: col.id });
+    return col;
+  }
+
   async getCollection(id: string): Promise<Collection | null> {
     const r = await this.db.get<Row>(
       `SELECT c.*, (SELECT COUNT(*) FROM collection_items ci JOIN items i ON i.id = ci.item_id
           WHERE ci.collection_id = c.id AND i.deleted = 0) AS n FROM collections c WHERE c.id = ? AND c.deleted = 0`,
       [id],
     );
-    return r ? collectionFromRow(r) : null;
+    return r ? this.withCount(r) : null;
   }
 
   async listCollections(): Promise<Collection[]> {
@@ -335,7 +387,51 @@ export class Repo {
           WHERE ci.collection_id = c.id AND i.deleted = 0) AS n
        FROM collections c WHERE c.deleted = 0 ORDER BY c.created_at ASC`,
     );
-    return rows.map(collectionFromRow);
+    const out: Collection[] = [];
+    for (const r of rows) out.push(await this.withCount(r));
+    return out;
+  }
+
+  /** Most common enrichment concepts across live items (lowercased). */
+  async topConcepts(limit = 12): Promise<{ concept: string; count: number }[]> {
+    return this.db.all(
+      `SELECT LOWER(jc.value) AS concept, COUNT(DISTINCT i.id) AS count
+       FROM items i, json_each(CASE WHEN json_valid(i.enrichment_json) THEN i.enrichment_json ELSE '{}' END, '$.concepts') jc
+       WHERE i.deleted = 0 AND i.archived = 0 AND jc.type = 'text' AND TRIM(jc.value) != ''
+       GROUP BY LOWER(jc.value) ORDER BY count DESC, concept ASC LIMIT ?`,
+      [limit],
+    );
+  }
+
+  /**
+   * Smart collections worth creating: the concepts and tags shared by at least
+   * `minItems` live items that are not already a collection name.
+   */
+  async suggestCollections(limit = 5, minItems = 3): Promise<CollectionSuggestion[]> {
+    const concepts = await this.db.all<{ name: string; n: number }>(
+      `SELECT LOWER(jc.value) AS name, COUNT(DISTINCT i.id) AS n
+       FROM items i, json_each(CASE WHEN json_valid(i.enrichment_json) THEN i.enrichment_json ELSE '{}' END, '$.concepts') jc
+       WHERE i.deleted = 0 AND i.archived = 0 AND jc.type = 'text' AND TRIM(jc.value) != ''
+       GROUP BY LOWER(jc.value) HAVING n >= ?`,
+      [minItems],
+    );
+    const tags = await this.db.all<{ name: string; n: number }>(
+      `SELECT t.tag AS name, COUNT(DISTINCT i.id) AS n FROM item_tags t JOIN items i ON i.id = t.item_id
+       WHERE i.deleted = 0 AND i.archived = 0 GROUP BY t.tag HAVING n >= ?`,
+      [minItems],
+    );
+    const taken = new Set((await this.db.all<{ name: string }>('SELECT name FROM collections WHERE deleted = 0')).map((r) => r.name.trim().toLowerCase()));
+    const best = new Map<string, CollectionSuggestion>();
+    const add = (name: string, count: number, kind: 'concept' | 'tag') => {
+      const key = name.trim().toLowerCase();
+      if (!key || taken.has(key) || taken.has(`#${key}`)) return;
+      const prev = best.get(key);
+      if (prev && prev.count >= count) return;
+      best.set(key, { name: key, kind, count, rules: kind === 'concept' ? { concepts: [key] } : { tags: [key] } });
+    };
+    for (const c of concepts) add(c.name, Number(c.n), 'concept');
+    for (const t of tags) add(t.name, Number(t.n), 'tag');
+    return [...best.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, limit);
   }
 
   async renameCollection(id: string, name: string): Promise<void> {
@@ -377,6 +473,76 @@ export class Repo {
   async itemCollectionIds(itemId: string): Promise<string[]> {
     const rows = await this.db.all<{ collection_id: string }>('SELECT collection_id FROM collection_items WHERE item_id = ?', [itemId]);
     return rows.map((r) => r.collection_id);
+  }
+
+  // ── flashcards (local only) ──────────────────────────────────────────────
+  /** Insert new cards for an item, skipping any whose question it already has. Returns the cards added. */
+  async addCards(itemId: string, cards: { front: string; back: string; startMs: number | null; origin: Card['origin'] }[]): Promise<Card[]> {
+    const now = this.now();
+    const ids: string[] = [];
+    await this.db.transaction(async (tx) => {
+      const existing = new Set((await tx.all<{ front: string }>('SELECT front FROM cards WHERE item_id = ?', [itemId])).map((r) => normFront(r.front)));
+      for (const c of cards) {
+        const key = normFront(c.front);
+        if (!key || existing.has(key)) continue;
+        existing.add(key);
+        const id = newId('card');
+        await tx.run(
+          'INSERT INTO cards (id, item_id, front, back, start_ms, due_at, interval_days, ease, reps, lapses, created_at, origin) VALUES (?,?,?,?,?,?,0,2.5,0,0,?,?)',
+          [id, itemId, c.front, c.back, c.startMs, now, now, c.origin],
+        );
+        ids.push(id);
+      }
+    });
+    const out: Card[] = [];
+    for (const id of ids) out.push((await this.getCard(id)) as Card);
+    return out;
+  }
+
+  async getCard(id: string): Promise<Card | null> {
+    const r = await this.db.get<Row>('SELECT * FROM cards WHERE id = ?', [id]);
+    return r ? cardFromRow(r) : null;
+  }
+
+  async listCards(itemId: string): Promise<Card[]> {
+    const rows = await this.db.all<Row>('SELECT * FROM cards WHERE item_id = ? ORDER BY created_at, rowid', [itemId]);
+    return rows.map(cardFromRow);
+  }
+
+  async saveCardSchedule(card: Pick<Card, 'id' | 'dueAt' | 'intervalDays' | 'ease' | 'reps' | 'lapses'>): Promise<void> {
+    await this.db.run('UPDATE cards SET due_at = ?, interval_days = ?, ease = ?, reps = ?, lapses = ? WHERE id = ?', [
+      card.dueAt, card.intervalDays, card.ease, card.reps, card.lapses, card.id,
+    ]);
+  }
+
+  /** Cards due at `nowIso` on live items, optionally limited to a collection (manual or smart). */
+  private async dueScope(nowIso: string, collectionId?: string): Promise<{ where: string; params: SqlValue[] }> {
+    if (!collectionId) return { where: 'c.due_at <= ? AND i.deleted = 0', params: [nowIso] };
+    const f = await this.filterSql({ collectionId });
+    let where = `c.due_at <= ? AND ${f.where}`;
+    const params: SqlValue[] = [nowIso, ...f.params];
+    if (f.text) {
+      const ids = await this.queryItemIds({ collectionId }, 'newest', 10_000, 0);
+      if (!ids.length) return { where: '0', params: [] };
+      where += ` AND i.id IN (${ids.map(() => '?').join(',')})`;
+      params.push(...ids);
+    }
+    return { where, params };
+  }
+
+  async dueCards(nowIso: string, limit = 20, collectionId?: string): Promise<Card[]> {
+    const { where, params } = await this.dueScope(nowIso, collectionId);
+    const rows = await this.db.all<Row>(
+      `SELECT c.* FROM cards c JOIN items i ON i.id = c.item_id WHERE ${where} ORDER BY c.due_at ASC, c.created_at ASC, c.rowid ASC LIMIT ?`,
+      [...params, limit],
+    );
+    return rows.map(cardFromRow);
+  }
+
+  async countDueCards(nowIso: string, collectionId?: string): Promise<number> {
+    const { where, params } = await this.dueScope(nowIso, collectionId);
+    const r = await this.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM cards c JOIN items i ON i.id = c.item_id WHERE ${where}`, params);
+    return Number(r?.n ?? 0);
   }
 
   // ── transcripts & index ─────────────────────────────────────────────────
@@ -486,16 +652,24 @@ export class Repo {
 
   async searchChunks(text: string, opts: { itemIds?: string[]; limit?: number; filter?: LibraryFilter } = {}): Promise<ChunkHit[]> {
     const limit = opts.limit ?? 30;
-    const { where, params } = buildFilterSql(opts.filter ?? {});
+    const resolved = await this.filterSql(opts.filter ?? {});
+    const { where, params } = resolved;
+    let itemIds = opts.itemIds;
+    // A text rule (smart collection) cannot share the chunk MATCH, so scope to the items it selects.
+    if (resolved.text) {
+      const allowed = new Set(await this.queryItemIds(opts.filter ?? {}, 'newest', 10_000, 0));
+      itemIds = (itemIds?.length ? itemIds : [...allowed]).filter((id) => allowed.has(id));
+      if (!itemIds.length) return [];
+    }
     for (const q of [buildFtsQuery(text), buildFtsOrQuery(text)]) {
       if (!q) continue;
-      const scope = opts.itemIds?.length ? `AND c.item_id IN (${opts.itemIds.map(() => '?').join(',')})` : '';
+      const scope = itemIds?.length ? `AND c.item_id IN (${itemIds.map(() => '?').join(',')})` : '';
       const rows = await this.db.all<Row>(
         `WITH hits AS MATERIALIZED (SELECT rowid AS cid, bm25(chunks_fts) AS score FROM chunks_fts WHERE chunks_fts MATCH ?)
          SELECT c.id, c.item_id, c.transcript_id, c.kind, c.text, c.start_ms, c.end_ms, c.language, h.score AS rank
          FROM hits h JOIN chunks c ON c.id = h.cid JOIN items i ON i.id = c.item_id
          WHERE ${where} ${scope} ORDER BY rank LIMIT ?`,
-        [q, ...params, ...(opts.itemIds ?? []), limit],
+        [q, ...params, ...(itemIds ?? []), limit],
       );
       if (rows.length) return rows.map(chunkFromRow);
     }
@@ -861,7 +1035,7 @@ export class Repo {
 
   // ── export / delete-all ─────────────────────────────────────────────────
   async exportAll(): Promise<Record<string, unknown>> {
-    const tables = ['items', 'item_tags', 'collections', 'collection_items', 'transcripts', 'transcript_segments', 'reports', 'conversations', 'messages', 'message_citations', 'media'];
+    const tables = ['items', 'item_tags', 'collections', 'collection_items', 'transcripts', 'transcript_segments', 'reports', 'conversations', 'messages', 'message_citations', 'media', 'cards'];
     const out: Record<string, unknown> = { format: 'qivra-export', version: 1, exportedAt: this.now() };
     for (const t of tables) out[t] = await this.db.all(`SELECT * FROM ${t}`);
     return out;
@@ -869,7 +1043,7 @@ export class Repo {
 
   async deleteEverything(): Promise<void> {
     await this.db.transaction(async (tx) => {
-      for (const t of ['message_citations', 'messages', 'conversations', 'reports', 'conflicts', 'embeddings', 'chunks', 'transcript_segments', 'transcripts', 'media', 'collection_items', 'collections', 'item_tags', 'jobs', 'usage_events', 'items']) {
+      for (const t of ['cards', 'message_citations', 'messages', 'conversations', 'reports', 'conflicts', 'embeddings', 'chunks', 'transcript_segments', 'transcripts', 'media', 'collection_items', 'collections', 'item_tags', 'jobs', 'usage_events', 'items']) {
         await tx.run(`DELETE FROM ${t}`);
       }
       await tx.run(`DELETE FROM meta WHERE key NOT LIKE 'app.%'`);
@@ -880,7 +1054,18 @@ export class Repo {
 function collectionFromRow(r: Row): Collection {
   return {
     id: str(r.id), name: str(r.name), icon: str(r.icon), createdAt: str(r.created_at), updatedAt: str(r.updated_at),
-    itemCount: Number(r.n ?? 0), syncStatus: str(r.sync_status) as SyncStatus,
+    itemCount: Number(r.n ?? 0), syncStatus: str(r.sync_status) as SyncStatus, rules: r.rules_json ? sanitizeRules(r.rules_json) : null,
+  };
+}
+
+const normFront = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+function cardFromRow(r: Row): Card {
+  return {
+    id: str(r.id), itemId: str(r.item_id), front: str(r.front), back: str(r.back),
+    startMs: r.start_ms === null || r.start_ms === undefined ? null : Number(r.start_ms), dueAt: str(r.due_at),
+    intervalDays: Number(r.interval_days), ease: Number(r.ease), reps: Number(r.reps), lapses: Number(r.lapses),
+    createdAt: str(r.created_at), origin: str(r.origin) === 'model' ? 'model' : 'local',
   };
 }
 

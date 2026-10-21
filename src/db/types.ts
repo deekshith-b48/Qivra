@@ -1,4 +1,5 @@
 import type { Enrichment } from '../core/enrich';
+import type { SmartRules } from '../core/smart';
 import type { ItemStatus } from '../core/status';
 import type { Segment } from '../core/transcripts';
 import type { SourceType } from '../core/url';
@@ -73,6 +74,33 @@ export interface Collection {
   updatedAt: string;
   itemCount: number;
   syncStatus: SyncStatus;
+  /** Set for a smart collection: its items are whatever matches these rules. */
+  rules: SmartRules | null;
+}
+
+export interface CollectionSuggestion {
+  /** Lowercase concept or tag, used as the collection name. */
+  name: string;
+  kind: 'concept' | 'tag';
+  count: number;
+  rules: SmartRules;
+}
+
+/** A local-only flashcard with its spaced-repetition state. */
+export interface Card {
+  id: string;
+  itemId: string;
+  front: string;
+  back: string;
+  /** Transcript moment the answer comes from, when known. */
+  startMs: number | null;
+  dueAt: string;
+  intervalDays: number;
+  ease: number;
+  reps: number;
+  lapses: number;
+  createdAt: string;
+  origin: 'model' | 'local';
 }
 
 export interface Transcript {

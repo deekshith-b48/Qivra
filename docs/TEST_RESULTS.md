@@ -1,5 +1,21 @@
 # Test results
 
+## 1.7.0 (2026-10-22): modern Ask, smart collections, report upgrades, flashcards
+
+- Release APK: `dist/Qivra-1.7.0-release.apk`, version code 10, debug-signed. New native module: `expo-print`.
+- `tsc` and Biome pass. Jest: 249 passed, 4 live tests skipped. Server pytest: 96 passed, 6 live skipped. The live Groq stream test passes with `QIVRA_LIVE=1`.
+- Emulator (API 35, release APK, throwaway server with the Groq gateway):
+  - "Compare the GitHub projects I saved" streamed in with the Stop button showing. The comparison table rendered as a grid while still streaming. The finished answer had citation pills, Copy, Regenerate and Sources (2).
+  - Two GitHub links were shared in the background and got "Ready" notifications.
+  - "Make flashcards" on a Wikipedia item made 3 AI cards. Reviewing them (show answer, then Good ×3) ended with "Done for today".
+  - A smart collection "Dev tools" (source = GitHub) showed "2 matching items" while being built and appeared with its ✨ badge.
+  - A collection report was generated, and PDF export produced the file and opened the Android share sheet.
+- Found and fixed while testing on the emulator:
+  - **Empty AI output:** gpt-oss is a reasoning model, and at the default effort a 900-token budget ran out before any output (`finish_reason=length`), so flashcard JSON was empty. The server now sends `reasoning_effort: low` for gpt-oss models (override with `QIVRA_AI_REASONING_EFFORT`), and the app allows 2,500 output tokens.
+  - **Stop ignored:** a Stop pressed before the request began didn't stop it. The signal is now checked up front.
+  - **Smart collections in "Add to collection":** they were offered as targets; they are now hidden there.
+- Not verified: the weekly report notification on a real Monday (scheduling logic is unit-tested), smart-collection suggestions (this small test library had no topic shared by 3 items; unit-tested), and the iQOO 13 itself.
+
 ## 1.6.0 (2026-10-22): Library grid and swipe actions
 
 - Release APK: `dist/Qivra-1.6.0-release.apk`, version code 9, debug-signed.

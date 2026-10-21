@@ -1,8 +1,8 @@
 /**
  * Periodic background work through expo-background-task, which schedules an
  * Android WorkManager job (minimum interval 15 min; the OS may delay it for
- * battery/Doze/network). The task drains the share inbox, runs due jobs and
- * syncs. Work is durable in SQLite, so a skipped run loses nothing.
+ * battery/Doze/network). The task drains the share inbox, runs due jobs,
+ * syncs and prepares the opt-in weekly report. Work is durable in SQLite, so a skipped run loses nothing.
  * `defineBackgroundTask()` must run at module load (index.ts).
  */
 
@@ -12,6 +12,7 @@ import * as TaskManager from 'expo-task-manager';
 import { drainShareInbox } from './capture';
 import { getRepo } from './db';
 import { requestSync, runDueJobs } from './processing';
+import { maybeGenerateWeeklyReport } from './weeklyReport';
 
 export const BACKGROUND_TASK = 'qivra-background-work';
 
@@ -25,6 +26,7 @@ export function defineBackgroundTask(): void {
       if (await repo.syncEnabled()) await requestSync();
       await runDueJobs(20_000);
       await refreshDailyDigest();
+      await maybeGenerateWeeklyReport();
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch {
       return BackgroundTask.BackgroundTaskResult.Failed;

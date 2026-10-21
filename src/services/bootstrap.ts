@@ -9,6 +9,7 @@ import { runLegacyImport } from './legacyImport';
 import { requestSync, runDueJobs, wakeServerJobs } from './processing';
 import { refreshDailyDigest } from './reminders';
 import { checkConnection, getConnection } from './server';
+import { maybeGenerateWeeklyReport } from './weeklyReport';
 
 setRandomSource((bytes) => Crypto.getRandomValues(bytes));
 
@@ -33,6 +34,7 @@ export async function boot(): Promise<BootResult> {
     }
     await runDueJobs();
     await refreshDailyDigest();
+    await maybeGenerateWeeklyReport();
   })();
   return { onboarded, legacyImported: legacy?.posts ?? 0, shared };
 }
@@ -48,6 +50,7 @@ export async function onResume(): Promise<BootResult['shared']> {
     }
     await runDueJobs();
     await refreshDailyDigest();
+    await maybeGenerateWeeklyReport();
   })();
   return shared;
 }

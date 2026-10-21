@@ -260,7 +260,7 @@ async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, u
   try {
     const description = item.metadata?.description ?? '';
     const prompt = enrichmentPrompt({ title: item.title, url: item.url, note: item.note, body, timed, description });
-    const res = await provider.chat([{ role: 'user', content: prompt }], { maxTokens: 900 });
+    const res = await provider.chat([{ role: 'user', content: prompt }], { maxTokens: 2500 }); // room for reasoning models to think, then answer
     await repo.addUsage({ provider: provider.label, model: res.model, kind: 'enrich', promptTokens: res.usage.promptTokens, completionTokens: res.usage.completionTokens });
     const evidence = {
       text: [item.title, item.note, body, description].join('\n'),

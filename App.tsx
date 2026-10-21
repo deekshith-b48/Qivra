@@ -25,6 +25,7 @@ import PrivacyStorageScreen from './src/screens/PrivacyStorageScreen';
 import QrScanScreen from './src/screens/QrScanScreen';
 import ReportDetailScreen from './src/screens/ReportDetailScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
+import ReviewScreen from './src/screens/ReviewScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ShareReceiptScreen from './src/screens/ShareReceiptScreen';
 import TodayScreen from './src/screens/TodayScreen';
@@ -150,6 +151,7 @@ function Root() {
         <Stack.Screen name="TranscriptImport" component={TranscriptImportScreen} />
         <Stack.Screen name="ShareReceipt" component={ShareReceiptScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Collections" component={CollectionsScreen} />
+        <Stack.Screen name="Review" component={ReviewScreen} />
         <Stack.Screen name="Reports" component={ReportsScreen} />
         <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />

@@ -1,6 +1,6 @@
 /** Tiny change bus so screens refresh from the database after writes. */
 
-export type Topic = 'items' | 'jobs' | 'reports' | 'collections' | 'connection' | 'settings' | 'conversations' | 'conflicts';
+export type Topic = 'items' | 'jobs' | 'reports' | 'collections' | 'connection' | 'settings' | 'conversations' | 'conflicts' | 'cards';
 
 type Listener = (topic: Topic) => void;
 const listeners = new Set<Listener>();

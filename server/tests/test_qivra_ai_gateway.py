@@ -118,3 +118,101 @@ def test_env_file_loading_keeps_real_env_and_ignores_other_keys(tmp_path, monkey
     assert ai_gateway.config()["model"] == "from-env" and ai_gateway.config()["base_url"].startswith("https://")
     assert "/evil" not in __import__("os").environ["PATH"]
     assert ai_gateway.load_env_file(tmp_path / "missing.env") == []
+
+
+# ── streaming ─────────────────────────────────────────────────────────────────
+class FakeStream:
+    def __init__(self, status, chunks=(), fail_after=None):
+        self.status_code = status
+        self._chunks = list(chunks)
+        self._fail_after = fail_after
+        self.closed = False
+
+    def iter_bytes(self):
+        for i, ch in enumerate(self._chunks):
+            if self._fail_after is not None and i == self._fail_after:
+                raise httpx.ReadError("boom")
+            yield ch
+
+    def close(self):
+        self.closed = True
+
+
+class FakeClient:
+    def __init__(self, stream):
+        self.stream = stream
+        self.sent = None
+        self.closed = False
+
+    def build_request(self, method, url, json=None, headers=None):
+        return {"method": method, "url": url, "json": json, "headers": headers}
+
+    def send(self, req, stream=False):
+        self.sent = req
+        assert stream is True
+        return self.stream
+
+    def close(self):
+        self.closed = True
+
+
+SSE = [b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n', b'data: {"choices":[{"delta":{"content":"lo [S1]"}}]}\n\n', b"data: [DONE]\n\n"]
+
+
+def test_stream_is_relayed_as_sse_with_model_forced_and_key_hidden(env, gateway, monkeypatch):
+    client = FakeClient(FakeStream(200, SSE))
+    monkeypatch.setattr(ai_gateway, "_client", lambda: client)
+    token, _ = env.pair()
+    r = env.phone.post("/api/v1/ai/chat/completions", headers=auth(token),
+                       json={"model": "x", "stream": True, "messages": [{"role": "user", "content": "hi"}], "user": "drop"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert r.text == b"".join(SSE).decode()
+    assert client.sent["json"]["stream"] is True and client.sent["json"]["model"] == "openai/gpt-oss-120b"
+    assert "user" not in client.sent["json"] and client.sent["headers"]["Authorization"] == f"Bearer {KEY}"
+    assert KEY not in r.text and client.closed and client.stream.closed
+
+
+def test_stream_errors_before_first_byte_are_json(env, gateway, monkeypatch):
+    monkeypatch.setattr(ai_gateway, "_client", lambda: FakeClient(FakeStream(429)))
+    token, _ = env.pair()
+    r = env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={"stream": True, "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 429 and r.json()["error"]["code"] == "AI_RATE_LIMITED"
+
+
+def test_stream_interruption_ends_with_an_error_event(env, gateway, monkeypatch):
+    client = FakeClient(FakeStream(200, SSE, fail_after=1))
+    monkeypatch.setattr(ai_gateway, "_client", lambda: client)
+    token, _ = env.pair()
+    r = env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={"stream": True, "messages": [{"role": "user", "content": "x"}]})
+    assert r.text.startswith(SSE[0].decode()) and "AI_STREAM_INTERRUPTED" in r.text
+    assert client.closed
+
+
+def test_stream_requires_a_paired_device(env, gateway, monkeypatch):
+    monkeypatch.setattr(ai_gateway, "_client", lambda: pytest.fail("must not reach the provider"))
+    r = env.phone.post("/api/v1/ai/chat/completions", json={"stream": True, "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 401
+
+
+@pytest.mark.skipif(__import__("os").getenv("QIVRA_LIVE") != "1", reason="set QIVRA_LIVE=1 to stream from the real provider")
+def test_live_stream_from_provider(monkeypatch):
+    from qivra.config import SERVER_DIR
+    for k in ("QIVRA_AI_BASE_URL", "QIVRA_AI_API_KEY", "QIVRA_AI_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    ai_gateway.load_env_file(SERVER_DIR / ai_gateway.ENV_FILE_NAME)
+    chunks = list(ai_gateway.open_chat_stream({"messages": [{"role": "user", "content": "Count from 1 to 5, comma separated."}], "max_tokens": 200}))
+    text = b"".join(chunks).decode()
+    assert text.count("data:") > 2 and "[DONE]" in text
+
+
+def test_reasoning_models_default_to_low_effort(env, gateway, monkeypatch):
+    token, _ = env.pair()
+    env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={"messages": [{"role": "user", "content": "x"}]})
+    assert gateway["calls"][-1]["json"]["reasoning_effort"] == "low"  # gpt-oss model in the fixture
+    env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={"messages": [{"role": "user", "content": "x"}], "reasoning_effort": "high"})
+    assert gateway["calls"][-1]["json"]["reasoning_effort"] == "high"
+    env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={"messages": [{"role": "user", "content": "x"}], "reasoning_effort": "max!!"})
+    assert gateway["calls"][-1]["json"]["reasoning_effort"] == "low"  # invalid values are replaced
+    monkeypatch.setenv("QIVRA_AI_MODEL", "mistral-small-latest")
+    env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={"messages": [{"role": "user", "content": "x"}]})
+    assert "reasoning_effort" not in gateway["calls"][-1]["json"]  # not sent to non-reasoning models

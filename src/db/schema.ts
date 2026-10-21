@@ -236,6 +236,30 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 `,
   },
+  {
+    version: 2,
+    name: 'smart collections and flashcards',
+    sql: `
+ALTER TABLE collections ADD COLUMN rules_json TEXT;
+
+CREATE TABLE IF NOT EXISTS cards (
+  id            TEXT PRIMARY KEY,
+  item_id       TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  front         TEXT NOT NULL,
+  back          TEXT NOT NULL,
+  start_ms      INTEGER,
+  due_at        TEXT NOT NULL,
+  interval_days REAL NOT NULL DEFAULT 0,
+  ease          REAL NOT NULL DEFAULT 2.5,
+  reps          INTEGER NOT NULL DEFAULT 0,
+  lapses        INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL,
+  origin        TEXT NOT NULL DEFAULT 'local'
+);
+CREATE INDEX IF NOT EXISTS idx_cards_due ON cards (due_at);
+CREATE INDEX IF NOT EXISTS idx_cards_item ON cards (item_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
