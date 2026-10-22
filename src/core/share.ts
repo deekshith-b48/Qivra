@@ -12,6 +12,7 @@ import { analyzeUrl, extractUrls, type SourceType } from './url';
 export const MAX_TEXT_CHARS = 200_000;
 export const MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
 export const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
 export interface SharedFile {
   path: string; // app-private copy written by ShareActivity (file:// URI or absolute path)
@@ -35,7 +36,9 @@ export type CaptureRequest =
   | { kind: 'url'; url: string; sourceType: SourceType; dedupeKey: string; title?: string; note?: string }
   | { kind: 'text'; text: string; title?: string }
   | { kind: 'transcript_file'; file: SharedFile; format: 'srt' | 'vtt' | 'txt' }
-  | { kind: 'media_file'; file: SharedFile; mediaKind: 'audio' | 'video' };
+  | { kind: 'media_file'; file: SharedFile; mediaKind: 'audio' | 'video' }
+  /** Screenshots/photos shared together become one note item (a carousel when there are several). */
+  | { kind: 'images'; files: SharedFile[]; text?: string; title?: string };
 
 export interface NormalizedShare {
   requests: CaptureRequest[];
@@ -57,6 +60,12 @@ export function mediaKindOf(name: string, mime: string): 'audio' | 'video' | nul
   if (['mp3', 'm4a', 'aac', 'wav', 'ogg', 'opus', 'flac'].includes(ext)) return 'audio';
   if (['mp4', 'mov', 'webm', 'mkv', '3gp'].includes(ext)) return 'video';
   return null;
+}
+
+export function isImageFile(name: string, mime: string): boolean {
+  if (mime.startsWith('image/')) return mime !== 'image/svg+xml';
+  const ext = name.toLowerCase().split('.').pop() ?? '';
+  return ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif', 'bmp'].includes(ext);
 }
 
 /** Strip path components and control characters from a display name. */
@@ -99,6 +108,7 @@ export function requestsFromText(text: string, subject?: string): CaptureRequest
 export function normalizeShare(env: ShareEnvelope): NormalizedShare {
   const rejected = [...(env.errors ?? [])];
   const requests: CaptureRequest[] = [];
+  const images: SharedFile[] = [];
   if (typeof env.text === 'string' && env.text.trim()) {
     requests.push(...requestsFromText(env.text, env.subject));
   }
@@ -116,12 +126,25 @@ export function normalizeShare(env: ShareEnvelope): NormalizedShare {
     if (tfmt) {
       if (size > MAX_TRANSCRIPT_BYTES) rejected.push({ name, reason: 'Transcript file is larger than 5 MB.' });
       else requests.push({ kind: 'transcript_file', file, format: tfmt });
+    } else if (isImageFile(name, mime)) {
+      if (size > MAX_IMAGE_BYTES) rejected.push({ name, reason: 'Image is larger than 30 MB.' });
+      else images.push(file);
     } else if (mkind) {
       if (size > MAX_MEDIA_BYTES) rejected.push({ name, reason: 'Media file is larger than 200 MB.' });
       else requests.push({ kind: 'media_file', file, mediaKind: mkind });
     } else {
       rejected.push({ name, reason: `Unsupported file type (${mime || 'unknown'}).` });
     }
+  }
+  if (images.length) {
+    // A caption shared with screenshots (no link) belongs to the image note rather than a separate item.
+    const textIdx = requests.findIndex((r) => r.kind === 'text');
+    const caption = textIdx >= 0 ? requests.splice(textIdx, 1)[0] : undefined;
+    requests.push({
+      kind: 'images', files: images,
+      text: caption?.kind === 'text' ? caption.text : undefined,
+      title: env.subject?.trim() || undefined,
+    });
   }
   // Collapse duplicate links shared together.
   const seen = new Set<string>();

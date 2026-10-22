@@ -72,6 +72,7 @@
         <data android:mimeType="application/x-subrip"/>
         <data android:mimeType="audio/*"/>
         <data android:mimeType="video/*"/>
+        <data android:mimeType="image/*"/>
       </intent-filter>
       <intent-filter>
         <action android:name="android.intent.action.SEND_MULTIPLE"/>
@@ -82,6 +83,7 @@
         <data android:mimeType="application/x-subrip"/>
         <data android:mimeType="audio/*"/>
         <data android:mimeType="video/*"/>
+        <data android:mimeType="image/*"/>
       </intent-filter>
     </activity>
   </application>

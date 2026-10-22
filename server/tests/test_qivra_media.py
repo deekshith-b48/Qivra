@@ -84,7 +84,7 @@ def test_live_youtube_short_transcription(tmp_path):
 def test_live_instagram_and_x(tmp_path, url):
     try:
         out = media.transcribe_url(url, tmp_path)
-        assert out["segments"]
+        assert out["segments"] or out.get("ocr_segments")  # music-only reels: on-screen text when RapidOCR is installed
     except MediaError as e:  # music-only or login-gated posts must fail with a clear code
         assert e.code in {"NO_SPEECH", "NO_AUDIO", "LOGIN_REQUIRED", "NO_MEDIA_IN_POST"}, e.code
     assert not any((tmp_path / "tmp").iterdir())

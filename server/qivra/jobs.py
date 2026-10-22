@@ -159,12 +159,21 @@ class JobRunner:
                 self._apply_post_meta(item, meta)
             raise JobFailure(exc.code, exc.message, exc.retryable) from exc
         segs = out["segments"]
-        tr = self.store.upsert_transcript(item["id"], text=segments_to_text(segs), segments=segs,
-                                          language=out["language"], kind="original", source="server_whisper",
-                                          provider=out["provider"])
-        meta = self._apply_post_meta(item, out["meta"])
-        return {"transcript_id": tr["id"], "segments": len(segs), "language": out["language"],
-                "provider": out["provider"], "meta": meta}
+        result: dict = {"segments": len(segs), "language": out["language"], "provider": out["provider"]}
+        if segs:
+            tr = self.store.upsert_transcript(item["id"], text=segments_to_text(segs), segments=segs,
+                                              language=out["language"], kind="original", source="server_whisper",
+                                              provider=out["provider"])
+            result["transcript_id"] = tr["id"]
+        ocr = out.get("ocr_segments") or []
+        if ocr:  # on-screen text of a reel with no (or little) speech, timestamped per sampled frame
+            tr = self.store.upsert_transcript(item["id"], text=segments_to_text(ocr), segments=ocr,
+                                              language="und", kind="original", source="video_ocr",
+                                              provider="rapidocr")
+            result.update(ocr_transcript_id=tr["id"], ocr_segments=len(ocr))
+            result.setdefault("transcript_id", tr["id"])
+        result["meta"] = self._apply_post_meta(item, out["meta"])
+        return result
 
     def _apply_post_meta(self, item: dict, meta: dict) -> dict:
         from .media import clean_caption

@@ -64,4 +64,6 @@ def create_app(config: QivraConfig | None = None, *, include_legacy: bool = True
     app.include_router(router)
     if cfg.start_job_worker:
         services.jobs.start()
+        from . import embeddings
+        embeddings.warm_up()  # load the local embedding model in the background
     return app

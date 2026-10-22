@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { ApiError, API_ERROR_HELP, type Health } from '../core/api';
 import { formatLocal } from '../core/dates';
+import { isPrivateNetworkUrl } from '../core/net';
 import { formatPairingCode, manualPairing, parsePairingQr, QR_ERROR_MESSAGES, type PairingPayload } from '../core/qr';
 import type { RootProps } from '../navigation/types';
 import { requestSync } from '../services/processing';
@@ -53,8 +54,8 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
   const start = async (payload: PairingPayload) => {
     setStage({ k: 'probing', payload });
     try {
-      const { health, clockSkewMs } = await probeServer(payload);
-      setStage({ k: 'confirm', payload, health, skewMs: clockSkewMs });
+      const probed = await probeServer(payload);
+      setStage({ k: 'confirm', payload: probed.payload, health: probed.health, skewMs: probed.clockSkewMs });
     } catch (e) {
       setStage({ k: 'error', ...describe(e), payload });
     }
@@ -90,14 +91,18 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
 
   if (connection) {
     const healthy = !connection.lastError;
+    const alts = connection.altUrls ?? [];
+    const awayUrl = [connection.serverUrl, ...alts].find(isPrivateNetworkUrl);
     return (
       <Screen>
         <Header title="Connect to My Server" onBack={() => navigation.goBack()} />
         <Card>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: space.sm }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space.xs, marginBottom: space.sm }}>
             <Chip label={healthy ? 'Connected' : 'Connection problem'} tone={healthy ? 'accent' : 'danger'} icon={healthy ? 'checkmark-circle' : 'alert-circle'} />
+            {awayUrl ? <AwayBadge /> : null}
           </View>
           <T v="subtitle" selectable>{connection.serverUrl}</T>
+          {alts.length ? <T v="small" color="textMuted" selectable>Also tries: {alts.join(', ')}</T> : null}
           <T v="small" color="textMuted">Server ID {connection.serverId}{connection.serverVersion ? ` · v${connection.serverVersion}` : ''}{connection.lanEnabled === false ? ' · localhost-only mode' : ''}</T>
           <T v="small" color="textMuted">This device: {connection.deviceName} ({connection.deviceId})</T>
           <T v="small" color="textMuted">Paired {formatLocal(connection.pairedAt, tz)}</T>
@@ -107,6 +112,7 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
         {connection.lastError ? <Banner tone="danger" title="Last check failed" body={`${connection.lastError.message}\n(${formatLocal(connection.lastError.at, tz)})`} /> : null}
         {connection.lastError?.kind === 'revoked' ? <Banner tone="warning" title="This device was revoked" body="Disconnect, then pair again with a new code from the server." /> : null}
         {connection.cleartext ? <Banner tone="warning" title="Plain HTTP" body="Traffic to this server is not encrypted. Use it only on a network you trust (home Wi-Fi or your own VPN)." /> : null}
+        {awayUrl ? null : <AwayHowTo />}
         <View style={{ gap: space.sm, marginTop: space.md }}>
           <Button title="Check connection now" icon="pulse-outline" loading={busy} onPress={() => void run(() => checkConnection())} />
           <Button kind="outline" title="Sync now" icon="sync-outline" onPress={() => void run(() => requestSync())} />
@@ -138,6 +144,7 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
         <T v="mono" selectable>.venv/bin/python -m qivra serve --lan</T>
         <T v="small" color="textMuted" style={{ marginTop: 4 }}>2. It prints the real server URL, a one-time Access ID and a QR code (valid ~5 minutes). Press Enter there for a new one.</T>
         <T v="small" color="textMuted">3. Keep the phone on the same Wi-Fi, then scan or type the code below.</T>
+        <T v="small" color="textMuted" style={{ marginTop: 4 }}>Away from home too? With Tailscale on both devices, start it with --remote instead of --lan.</T>
         <T v="small" color="textMuted" style={{ marginTop: 4 }}>Once paired, shared Instagram and X videos are transcribed automatically by the server (install the media extras there: .venv/bin/pip install -r requirements-media.txt).</T>
       </Card>
 
@@ -147,6 +154,8 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
         <Card style={{ marginTop: space.md }}>
           <T v="subtitle">Connect to this server?</T>
           <T selectable style={{ marginTop: 4 }}>{stage.payload.serverUrl}</T>
+          {stage.payload.altUrls.length ? <T v="small" color="textMuted" selectable>Also remembered: {stage.payload.altUrls.join(', ')}</T> : null}
+          {[stage.payload.serverUrl, ...stage.payload.altUrls].some(isPrivateNetworkUrl) ? <View style={{ flexDirection: 'row', marginTop: 4 }}><AwayBadge /></View> : null}
           <T v="small" color="textMuted">Qivra server v{stage.health.version} · ID {stage.health.server_id}{stage.payload.serverId ? ' (matches the QR code)' : ''}</T>
           <T v="small" color="textMuted">Access ID {formatPairingCode(stage.payload.pairingId)}{stage.payload.expiresAt ? ` · expires ${formatLocal(stage.payload.expiresAt, tz, { timeStyle: 'short' })}` : ''}</T>
           {Math.abs(stage.skewMs) > 120_000 ? <Banner tone="warning" title="Clocks differ" body={`This phone's clock is ${Math.round(Math.abs(stage.skewMs) / 60000)} min off from the server. Expiry is checked with the server's clock.`} /> : null}
@@ -180,9 +189,24 @@ export default function ConnectServerScreen({ navigation, route }: RootProps<'Co
           </Section>
         </>
       ) : null}
+      <AwayHowTo />
       <Divider />
       <Troubleshooting />
     </Screen>
+  );
+}
+
+function AwayBadge() {
+  return <Chip label="Works away from home" tone="info" icon="globe-outline" />;
+}
+
+function AwayHowTo() {
+  return (
+    <Card style={{ marginTop: space.md }}>
+      <T v="subtitle">Use Qivra away from home</T>
+      <T v="small" color="textMuted" style={{ marginTop: 4 }}>Install Tailscale on your Mac and phone, sign in with the same account, then pair again.</T>
+      <T v="small" color="textMuted">Start the server with --remote so the QR code includes the private Tailscale address. Nothing is exposed to the internet: only your own devices can reach it.</T>
+    </Card>
   );
 }
 
@@ -191,7 +215,7 @@ function Troubleshooting() {
     <Section title="Troubleshooting">
       <T v="small" color="textMuted">• Same laptop / emulator: the Android emulator reaches the laptop at http://10.0.2.2:&lt;port&gt; (server in default localhost mode). A USB phone can use “adb reverse tcp:5001 tcp:5001” and http://127.0.0.1:5001.</T>
       <T v="small" color="textMuted">• Same Wi-Fi: start with --lan and use the LAN URL it prints. If it times out, allow incoming connections for Python in the laptop firewall, and check the phone isn't on a guest network.</T>
-      <T v="small" color="textMuted">• Different network: direct connections are not possible. Use a VPN you control (e.g. Tailscale) and start the server with --allow-host/--advertise-url for the VPN address. Never expose the server publicly.</T>
+      <T v="small" color="textMuted">• Different network: use a private VPN you control. With Tailscale on both devices, start the server with --remote and pair again; the phone then switches between the home and Tailscale addresses automatically. For WireGuard, add --allow-host/--advertise-url for the VPN address. Never expose the server publicly.</T>
       <T v="small" color="textMuted">• Wrong port or “not a Qivra server”: the port changes if 5000 is busy — copy the URL the server prints.</T>
       <T v="small" color="textMuted">• Laptop IP changed: disconnect and pair again with the new URL.</T>
       <T v="small" color="textMuted">• Expired or used code: press Enter in the server terminal or run python -m qivra pair --port &lt;port&gt;.</T>

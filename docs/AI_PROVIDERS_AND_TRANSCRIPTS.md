@@ -57,6 +57,11 @@ Chosen with `QIVRA_TRANSCRIBER` in `server/qivra.env` (or the environment); the 
 
 Local engines never fall back to a cloud engine. A reel takes roughly a minute with local Whisper on a laptop and a few seconds with Groq. Live check: `QIVRA_LIVE=1 .venv/bin/python -m pytest -q -s tests/test_qivra_transcribers.py -k live` (sends a generated WAV to Groq).
 
+### Text in images and on screen (OCR)
+
+- **Shared screenshots and photos (phone, offline):** the share target accepts `image/*` (≤ 30 MB each, SVG refused). Images shared together become one note item with the images as media (a swipeable hero on the item page); a caption shared with them becomes the note. Before enrichment, `src/services/ocr.ts` reads the text on the device with Google ML Kit text recognition (`@react-native-ml-kit/text-recognition`, MIT, bundled models, no network; script picked from the phone language: Latin, Chinese, Devanagari, Japanese, Korean) and stores it as a transcript with source `image_ocr` — one segment per image, treated as text (like `web_article`), so it feeds search, summaries, key points and flashcards. No text found → Ready with "No text was found in this image"; a build without the native module → Ready with "Text recognition is not available in this build". Needs a prebuild/rebuild after install; the five ML Kit script models add to the APK size.
+- **Reels with on-screen text (server, optional):** install `pip install -r requirements-ocr.txt` (RapidOCR, `rapidocr-onnxruntime`, Apache-2.0, ONNX Runtime on the CPU). When speech transcription ends with `NO_SPEECH` / `NO_AUDIO` or under 25 characters, `transcribe_url` downloads a ≤ 720p video rendition (same allow-listed hosts, no cookies), samples a frame every 2 s with PyAV (`QIVRA_OCR_EVERY_S`, at most `QIVRA_OCR_MAX_FRAMES`=150), reads each frame and de-duplicates text that stays on screen (`server/qivra/video_ocr.py`): each segment's `start_ms` is when that text first appeared; watermarks and repeated captions are kept once. It is stored as a `video_ocr` transcript (provider `rapidocr`, language `und`) next to any speech transcript, and the phone imports it as `server_video_ocr` with timestamps. Without RapidOCR (or if the video cannot be downloaded) the result is exactly as before: `NO_SPEECH` / `NO_AUDIO`. Live check: `QIVRA_LIVE=1 .venv/bin/python -m pytest -q tests/test_qivra_video_ocr.py -k live` (generated image and video, no network).
+
 ## Transcripts
 
 | Source | How | Notes |
@@ -64,6 +69,8 @@ Local engines never fall back to a cloud engine. A reel takes roughly a minute w
 | SRT / WebVTT / TXT file | Share sheet, or Add transcript → file (document picker / SAF) | ≤ 5 MB; parsed on device |
 | Pasted text | Capture → Transcript, or item → Add transcript | `[mm:ss] text` lines keep timestamps |
 | YouTube captions | Item → "Captions via server" | Server job using the optional `youtube-transcript-api`; only captions YouTube publishes; fails honestly with `CAPTIONS_UNAVAILABLE` / `CAPTIONS_NOT_FOUND` |
+| Shared screenshots / photos | Share sheet (`image/*`) | On-device OCR → source `image_ocr` (see *Text in images and on screen*) |
+| On-screen text of a reel without speech | Automatic, with `requirements-ocr.txt` on the server | Source `video_ocr`, timestamped per sampled frame |
 | Audio/video you are allowed to process | Share or Capture → Audio/video (≤ 200 MB), then "Transcribe on server" (explicit, confirmed upload) | Server engine from `QIVRA_TRANSCRIBER` (Groq Whisper with local fallback, or local only) |
 | Instagram | — | Not downloaded by Qivra. Save the link, add your own transcript, or use SuperBrain's legacy analyzer on the server with your own account at your own risk |
 

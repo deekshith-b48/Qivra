@@ -14,6 +14,7 @@ import type { RootProps } from '../navigation/types';
 import { deleteItemFiles, pickMediaFile } from '../services/capture';
 import { getRepo } from '../services/db';
 import { emit } from '../services/events';
+import { similarItems } from '../services/semantic';
 import { makeCards } from '../services/flashcards';
 import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
 import { Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
@@ -23,6 +24,7 @@ import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, Timestam
 import { radius, space, useTheme } from '../ui/theme';
 import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
 import { YouTubeHero, type YouTubeHeroHandle } from '../ui/YouTubeHero';
+import { ImageHero } from '../ui/ImageHero';
 
 function stepsFor(item: Item, hasSpeech: boolean, hasArticle: boolean, isVideo: boolean): { label: string; state: StepState }[] {
   const s = item.status;
@@ -36,6 +38,16 @@ function stepsFor(item: Item, hasSpeech: boolean, hasArticle: boolean, isVideo: 
     { label: 'Summary', state: summary },
     { label: 'Ready', state: s === 'READY' ? 'done' : 'todo' },
   ];
+}
+
+/** A label for non-speech text sources (articles, READMEs, OCR); null for spoken transcripts. */
+function textKindLabel(source: string): string | null {
+  const src = source.replace(/^server_/, '');
+  if (src === 'github_readme') return 'README';
+  if (src === 'web_article') return 'Article';
+  if (src === 'image_ocr') return 'Text from image';
+  if (src === 'video_ocr') return 'On-screen text';
+  return ARTICLE_SOURCES.has(source) ? 'Text' : null;
 }
 
 export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemDetail'>) {
@@ -81,6 +93,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     void (async () => (await getRepo()).markViewed(id))();
   }, [id]);
 
+  const similar = useQuery(() => similarItems(id), ['items', 'jobs'], [id]);
   const d = q.data;
   const atParam = route.params.at;
   const videoIdForAt = d?.item.url ? analyzeUrl(d.item.url)?.youtubeId : undefined;
@@ -115,7 +128,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const e = item.enrichment;
   const isVideo = VIDEO_SOURCES.includes(item.sourceType);
   const ytId = item.url ? analyzeUrl(item.url)?.youtubeId : undefined;
-  const contentLabel = activeT && ARTICLE_SOURCES.has(activeT.source) ? (activeT.source === 'github_readme' ? 'README' : 'Article') : 'Transcript';
+  const contentLabel = activeT ? textKindLabel(activeT.source) ?? 'Transcript' : 'Transcript';
 
   const repoOp = async (fn: (repo: Awaited<ReturnType<typeof getRepo>>) => Promise<unknown>) => {
     await fn(await getRepo());
@@ -192,9 +205,11 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         </>}
       />
       <View style={{ paddingHorizontal: space.lg, paddingBottom: space.xxl }}>
-        {/* Hero: YouTube plays in place; other sources open the original */}
+        {/* Hero: YouTube plays in place; shared images show in place; other sources open the original */}
         {ytId ? (
           <YouTubeHero ref={heroRef} videoId={ytId} thumbnailUrl={item.thumbnailUrl || null} onTime={onTime} badge={<PlatformBadge source={item.sourceType} onMedia />} />
+        ) : d.media.some((m) => m.mime.startsWith('image/')) ? (
+          <ImageHero uris={d.media.filter((m) => m.mime.startsWith('image/')).reverse().map((m) => m.uri)} badge={<PlatformBadge source={item.sourceType} onMedia />} />
         ) : (
         <Pressable onPress={() => openAt(null)} disabled={!item.url} accessibilityRole="button" accessibilityLabel={isVideo ? 'Play on the original app' : 'Open original page'}
           style={{ borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.surfaceAlt, aspectRatio: item.thumbnailUrl ? 16 / 9 : undefined, minHeight: item.thumbnailUrl ? undefined : 120, justifyContent: 'center', alignItems: 'center' }}>
@@ -323,14 +338,14 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
                 {ordered.length > 1 ? (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                     {ordered.map((t) => (
-                      <Chip key={t.id} label={ARTICLE_SOURCES.has(t.source) ? (t.source === 'github_readme' ? 'README' : 'Article') : `${languageName(t.language)}${t.kind === 'translation' ? ' · translation' : ''}`} selected={activeT?.id === t.id} onPress={() => setTranscriptId(t.id)} />
+                      <Chip key={t.id} label={textKindLabel(t.source) ?? `${languageName(t.language)}${t.kind === 'translation' ? ' · translation' : ''}`} selected={activeT?.id === t.id} onPress={() => setTranscriptId(t.id)} />
                     ))}
                   </View>
                 ) : null}
                 {activeT ? (
                   <>
                     <T v="caption" color="textFaint">
-                      {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'} · {languageName(activeT.language)} ({activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'}){activeT.hasTimestamps ? '' : ' · no timestamps in source'}{activeT.corrected ? ' · corrected' : ''}
+                      {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)}`} ({activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'}){activeT.hasTimestamps ? '' : ' · no timestamps in source'}{activeT.corrected ? ' · corrected' : ''}
                     </T>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.sm }}>
                       <Button kind="outline" title="Language" icon="language-outline" onPress={() => setLangOpen(true)} />
@@ -434,7 +449,20 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           </View>
         ) : null}
 
-        {d.related.length ? (
+        {/* Related by meaning (local embeddings); falls back to shared tags when no embedding model is available. */}
+        {similar.data?.length ? (
+          <Section title="Related">
+            {similar.data.some((r) => r.nearDuplicate) ? (
+              <Banner tone="info" icon="copy-outline" title="You may have saved this already" body="A very similar item is in your library (marked below)." />
+            ) : null}
+            {similar.data.map((r) => (
+              <View key={r.item.id}>
+                {r.nearDuplicate ? <Chip label="Very similar" tone="info" icon="copy-outline" /> : null}
+                <ItemCard item={r.item} timezone={tz} onPress={() => navigation.push('ItemDetail', { id: r.item.id })} />
+              </View>
+            ))}
+          </Section>
+        ) : d.related.length ? (
           <Section title="Related">
             {d.related.map((r) => <ItemCard key={r.id} item={r} timezone={tz} onPress={() => navigation.push('ItemDetail', { id: r.id })} />)}
           </Section>

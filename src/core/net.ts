@@ -4,7 +4,8 @@
  * Android's network-security-config cannot express "cleartext only to private
  * IP ranges", so cleartext is permitted at the platform level and enforced
  * here instead: plain http:// is allowed only to loopback, RFC1918, link-local,
- * CGNAT (Tailscale-style VPN) and *.local hosts. Everything else must be https.
+ * CGNAT (Tailscale-style VPN), Tailscale MagicDNS (*.ts.net) and *.local hosts.
+ * Everything else must be https.
  */
 
 const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
@@ -16,9 +17,19 @@ export function parseIpv4(host: string): number[] | null {
   return parts.every((p) => p >= 0 && p <= 255) ? parts : null;
 }
 
+/** `mac.tail1234.ts.net`: resolves only inside the user's own tailnet (MagicDNS). */
+export function isTailnetName(rawHost: string): boolean {
+  const host = rawHost.toLowerCase().replace(/\.$/, '');
+  return host.endsWith('.ts.net') && host.split('.').length >= 3;
+}
+
+function isCgnat(v4: number[]): boolean {
+  return v4[0] === 100 && v4[1] >= 64 && v4[1] <= 127;
+}
+
 export function isPrivateHost(rawHost: string): boolean {
   const host = rawHost.toLowerCase().replace(/^\[|\]$/g, '');
-  if (host === 'localhost' || host.endsWith('.local')) return true;
+  if (host === 'localhost' || host.endsWith('.local') || isTailnetName(host)) return true;
   const v4 = parseIpv4(host);
   if (v4) {
     const [a, b] = v4;
@@ -28,7 +39,7 @@ export function isPrivateHost(rawHost: string): boolean {
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) ||
       (a === 169 && b === 254) ||
-      (a === 100 && b >= 64 && b <= 127)
+      isCgnat(v4)
     );
   }
   if (host.includes(':')) {
@@ -72,4 +83,20 @@ export function checkServerUrl(raw: string): UrlCheck {
 /** Canonical base URL: scheme://host[:port] with no path, query or trailing slash. */
 export function baseUrlOf(url: URL): string {
   return `${url.protocol}//${url.host}`;
+}
+
+/**
+ * True for a private VPN address (Tailscale/WireGuard: 100.64/10 or *.ts.net),
+ * which keeps working when the phone is away from home Wi-Fi.
+ */
+export function isPrivateNetworkUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  const v4 = parseIpv4(host);
+  return v4 ? isCgnat(v4) : isTailnetName(host);
 }

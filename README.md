@@ -10,7 +10,7 @@ Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra s
 
 ## Get Qivra
 
-**[Download the latest APK (1.8.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
+**[Download the latest APK (1.9.0)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
 
 > The APK is signed with the Android debug key. It is meant for personal use and sideloading, not the Play Store.
 
@@ -50,6 +50,12 @@ Qivra never makes up a transcript. A music-only reel finishes as "No speech to t
 - **Key moments:** the important points, each linked to its timestamp. Tap one to open the video at that second.
 - **Keyword highlights:** concepts copied word for word from the source, plus tools and recurring phrases, highlighted across the summary and the transcript. Tap a keyword to see only the lines that mention it.
 - **Tools, repos and commands** are pulled out as they appear in the source. Commands are shown and can be copied, but are never run.
+
+### Smarter capture and search (1.9)
+- **Text from images:** share screenshots, photos or carousels to Qivra and their text is read on the phone (ML Kit), then summarised and searchable.
+- **On-screen text in reels:** reels with no speech get the text shown on screen read by your server (RapidOCR on sampled frames), with timestamps.
+- **Search by meaning:** your server runs a small multilingual embedding model (fastembed), with no cloud and no key. Library search adds **Related by meaning**, item pages show **Related** items and flag likely duplicates, and Ask finds matches by meaning too. An English search can find a Hindi reel about the same topic.
+- **Away from home:** use your server anywhere over Tailscale or WireGuard, with `--remote`. The phone switches addresses on its own, and nothing is exposed to the internet.
 
 ### Search, ask and report
 - **Search from the Library bar:** full-text search on the device with SQLite FTS5, works offline. Results are grouped by item, and transcript matches show their timestamps. Semantic search is added when an embedding model is configured.
@@ -176,11 +182,15 @@ See [Security and privacy](docs/SECURITY_AND_PRIVACY.md) for the full threat not
 cd server
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-qivra.txt -r requirements-media.txt
+# optional: search by meaning, and on-screen text in reels
+.venv/bin/pip install -r requirements-embeddings.txt -r requirements-ocr.txt
 cp qivra.env.example qivra.env
 .venv/bin/python -m qivra serve --lan
 ```
 
 In `qivra.env`, set `QIVRA_AI_API_KEY` (for example a Groq key) and keep `QIVRA_TRANSCRIBER=groq` for fast cloud transcription. Remove that line to keep all audio on your laptop. The server prints its LAN address, a one-time Access ID and a QR code. In Qivra, open **Settings → Connect to My Server → Scan QR code**.
+
+**Away from home:** install Tailscale on the Mac and the phone, sign in with the same account, start the server with `--remote` instead of `--lan`, and pair again. The phone then switches between the home Wi-Fi and the private Tailscale address on its own; nothing is exposed to the internet. Details: [docs/LOCAL_SERVER_AND_QR_PAIRING.md](docs/LOCAL_SERVER_AND_QR_PAIRING.md#away-from-home-tailscale--wireguard).
 
 Optional: `pip install -r requirements-transcribe-anything.txt` adds MLX-accelerated Whisper on Apple Silicon as the local engine. See [Local server and QR pairing](docs/LOCAL_SERVER_AND_QR_PAIRING.md) and [Voice and transcription](docs/VOICE_AND_TRANSCRIPTION.md).
 

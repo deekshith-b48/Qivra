@@ -2,12 +2,15 @@
  * Pairing QR payload validation. The app never trusts QR content: it must be
  * a version-1 Qivra payload with a well-formed local/https server URL, a
  * pairing code in the expected alphabet, and an expiry that has not passed.
+ * The optional `alt_urls` (e.g. a Tailscale address) is additive, so it needs
+ * no version bump; each entry is validated like `server_url` and invalid ones are dropped.
  */
 
 import { baseUrlOf, checkServerUrl } from './net';
 
 export const PAIRING_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const MAX_QR_LENGTH = 1024;
+export const MAX_ALT_URLS = 4;
 /** Tolerated clock skew between phone and laptop when checking expiry locally. */
 export const CLOCK_SKEW_MS = 2 * 60_000;
 
@@ -15,6 +18,8 @@ export interface PairingPayload {
   version: 1;
   product: 'Qivra';
   serverUrl: string;
+  /** Other addresses of the same server, tried when `serverUrl` is unreachable. */
+  altUrls: string[];
   serverId: string | null;
   pairingId: string;
   expiresAt: string | null;
@@ -94,18 +99,34 @@ export function parsePairingQr(raw: string, nowMs: number): { ok: true; payload:
     if (t + CLOCK_SKEW_MS < nowMs) return { ok: false, error: 'EXPIRED' };
     expiresAt = new Date(t).toISOString();
   }
+  const serverUrl = baseUrlOf(check.url);
   return {
     ok: true,
     payload: {
       version: 1,
       product: 'Qivra',
-      serverUrl: baseUrlOf(check.url),
+      serverUrl,
+      altUrls: parseAltUrls(o.alt_urls, serverUrl),
       serverId,
       pairingId: code,
       expiresAt,
       cleartext: check.cleartext,
     },
   };
+}
+
+function parseAltUrls(raw: unknown, primary: string): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const u of raw) {
+    if (typeof u !== 'string') continue;
+    const c = checkServerUrl(u);
+    if (!c.ok || c.url.pathname !== '/' || c.url.search || c.url.hash) continue;
+    const base = baseUrlOf(c.url);
+    if (base !== primary && !out.includes(base)) out.push(base);
+    if (out.length >= MAX_ALT_URLS) break;
+  }
+  return out;
 }
 
 /** Build a payload from manual entry (server URL + access ID). */
@@ -120,6 +141,6 @@ export function manualPairing(serverUrl: string, accessId: string):
   }
   return {
     ok: true,
-    payload: { version: 1, product: 'Qivra', serverUrl: baseUrlOf(check.url), serverId: null, pairingId: code, expiresAt: null, cleartext: check.cleartext },
+    payload: { version: 1, product: 'Qivra', serverUrl: baseUrlOf(check.url), altUrls: [], serverId: null, pairingId: code, expiresAt: null, cleartext: check.cleartext },
   };
 }

@@ -21,6 +21,8 @@ from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse
 
+from . import embeddings as local_embeddings  # (ai_gateway.embeddings() is the API handler below)
+
 logger = logging.getLogger(__name__)
 
 ENV_FILE_NAME = "qivra.env"
@@ -79,11 +81,15 @@ def config() -> dict | None:
     if url.scheme not in ("http", "https") or not host or (url.scheme == "http" and not _private_host(host)):
         logger.warning("QIVRA_AI_BASE_URL ignored: use https for hosted providers.")
         return None
+    upstream_embed = os.getenv("QIVRA_AI_EMBEDDING_MODEL", "").strip() or None
+    # No hosted embedding model (Groq has none): use the local one on this machine if installed.
+    local_embed = upstream_embed is None and local_embeddings.available()
     return {
         "base_url": base,
         "host": host,
         "model": model,
-        "embedding_model": os.getenv("QIVRA_AI_EMBEDDING_MODEL", "").strip() or None,
+        "embedding_model": upstream_embed or (local_embeddings.label() if local_embed else None),
+        "embedding_local": local_embed,
         "api_key": os.getenv("QIVRA_AI_API_KEY", "").strip() or None,
     }
 
@@ -94,7 +100,8 @@ def describe() -> dict:
     if cfg is None:
         return {"enabled": False}
     return {"enabled": True, "upstream": cfg["host"], "model": cfg["model"],
-            "embedding_model": cfg["embedding_model"], "external": not _private_host(cfg["host"])}
+            "embedding_model": cfg["embedding_model"], "embedding_local": cfg["embedding_local"],
+            "external": not _private_host(cfg["host"])}
 
 
 def _headers(cfg: dict) -> dict:
@@ -218,6 +225,14 @@ def embeddings(body: dict[str, Any]) -> dict:
         inputs = [inputs]
     if not isinstance(inputs, list) or not inputs or len(inputs) > MAX_EMBED_INPUTS or not all(isinstance(i, str) for i in inputs):
         raise GatewayError(400, "INVALID_REQUEST", f"input must be 1–{MAX_EMBED_INPUTS} strings.")
+    if cfg["embedding_local"]:
+        try:
+            vectors = local_embeddings.embed(inputs)
+        except Exception as exc:  # model download blocked, out of memory…
+            logger.warning("Local embeddings failed (%s)", type(exc).__name__)
+            raise GatewayError(503, "EMBEDDINGS_UNAVAILABLE", "The server's local embedding model is not available.") from exc
+        return {"object": "list", "model": cfg["embedding_model"],
+                "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)]}
     return _post(cfg, "/embeddings", {"model": cfg["embedding_model"], "input": inputs}, timeout=60.0)
 
 

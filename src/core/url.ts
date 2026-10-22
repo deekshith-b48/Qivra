@@ -11,8 +11,8 @@ export type SourceType = 'youtube' | 'instagram' | 'x' | 'github' | 'podcast' | 
 export const VIDEO_SOURCES: SourceType[] = ['youtube', 'instagram', 'x', 'podcast'];
 export const WEBSITE_SOURCES: SourceType[] = ['web', 'github'];
 export const NOTE_SOURCES: SourceType[] = ['note', 'text', 'file'];
-/** Transcript-table sources that hold article/README text rather than speech. */
-export const ARTICLE_SOURCES = new Set(['web_article', 'github_readme']);
+/** Transcript-table sources that hold article/README/on-screen text rather than speech. */
+export const ARTICLE_SOURCES = new Set(['web_article', 'github_readme', 'image_ocr']);
 
 export const SOURCE_LABELS: Record<SourceType, string> = {
   youtube: 'YouTube',

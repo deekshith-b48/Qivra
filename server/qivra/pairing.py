@@ -3,8 +3,8 @@
 Protocol (see docs/LOCAL_SERVER_AND_QR_PAIRING.md):
   1. The laptop owner (loopback only) creates a challenge: an 8-character code
      (40 bits) that expires after `pairing_ttl_s` seconds and can be used once.
-  2. The QR code carries the server URL, server_id, pairing code and expiry —
-     never the device credential, the legacy token, or any provider key.
+  2. The QR code carries the server URL (plus optional alternate URLs, e.g. a
+     Tailscale address), server_id, pairing code and expiry — never the device credential, the legacy token, or any provider key.
   3. The phone posts the code to /api/v1/pairing/complete. The challenge is
      consumed atomically (replay-safe) and a random device token is returned once.
   4. Only the SHA-256 hash of the device token is stored. Revocation is immediate.
@@ -79,7 +79,8 @@ class PairingService:
         expires_at = iso(expires)
         self.store.create_pairing(code, expires_at)
         url = server_url or (self.config.advertised_urls[0] if self.config.advertised_urls else None)
-        payload = build_qr_payload(url, code, self.store.server_id, expires_at) if url else None
+        alts = [u for u in self.config.advertised_urls if url and u.rstrip("/") != url.rstrip("/")]
+        payload = build_qr_payload(url, code, self.store.server_id, expires_at, alts) if url else None
         return {
             "pairing_id": code,
             "pairing_id_display": format_pairing_code(code),
@@ -144,8 +145,13 @@ class PairingService:
         return device
 
 
-def build_qr_payload(server_url: str, code: str, server_id: str, expires_at: str) -> dict:
-    return {
+MAX_ALT_URLS = 4
+
+
+def build_qr_payload(server_url: str, code: str, server_id: str, expires_at: str,
+                     alt_urls: list[str] | None = None) -> dict:
+    """`alt_urls` is optional and additive, so version-1 apps simply ignore it."""
+    payload = {
         "version": PAIRING_PAYLOAD_VERSION,
         "product": PRODUCT,
         "server_url": server_url.rstrip("/"),
@@ -153,3 +159,12 @@ def build_qr_payload(server_url: str, code: str, server_id: str, expires_at: str
         "pairing_id": code,
         "expires_at": expires_at,
     }
+    primary = payload["server_url"]
+    alts: list[str] = []
+    for u in alt_urls or []:
+        u = u.rstrip("/")
+        if u and u != primary and u not in alts:
+            alts.append(u)
+    if alts:
+        payload["alt_urls"] = alts[:MAX_ALT_URLS]
+    return payload

@@ -5,6 +5,7 @@
  */
 
 import { type AiGatewayInfo, ApiError, QivraClient, type Health } from '../core/api';
+import { firstReachable, orderedUrls } from '../core/failover';
 import type { PairingPayload } from '../core/qr';
 import { CLOCK_SKEW_MS } from '../core/qr';
 import { disableSync, enableSync } from '../sync/engine';
@@ -14,6 +15,8 @@ import { deleteSecret, getSecret, SECRET_KEYS, setSecret } from './secure';
 
 export interface Connection {
   serverUrl: string;
+  /** Other addresses of the same server (e.g. Tailscale), tried when `serverUrl` fails. Undefined on older connections. */
+  altUrls?: string[];
   serverId: string;
   deviceId: string;
   deviceName: string;
@@ -65,19 +68,27 @@ export async function getClient(): Promise<QivraClient | null> {
 
 export type PairStep = 'checking' | 'pairing' | 'verifying' | 'done';
 
-/** Step 1 (before confirmation): reach the server and check it is the one in the QR. */
-export async function probeServer(payload: PairingPayload): Promise<{ health: Health; clockSkewMs: number }> {
-  const anon = new QivraClient({ baseUrl: payload.serverUrl, retries: 1 });
-  const health = await anon.health(6000);
-  if (payload.serverId && health.server_id !== payload.serverId) {
-    throw new ApiError('wrong_server', 'This address answered, but it is a different Qivra server than the QR code describes.');
-  }
+/**
+ * Step 1 (before confirmation): reach the server and check it is the one in the QR.
+ * Tries the QR's alternate addresses when the primary is unreachable; the returned
+ * payload has the address that answered as `serverUrl`.
+ */
+export async function probeServer(payload: PairingPayload): Promise<{ health: Health; clockSkewMs: number; payload: PairingPayload }> {
+  const urls = orderedUrls(payload.serverUrl, payload.altUrls);
+  const { url, value: health } = await firstReachable(urls, async (baseUrl) => {
+    const anon = new QivraClient({ baseUrl, retries: urls.length > 1 ? 0 : 1 });
+    const h = await anon.health(6000);
+    if (payload.serverId && h.server_id !== payload.serverId) {
+      throw new ApiError('wrong_server', 'This address answered, but it is a different Qivra server than the QR code describes.');
+    }
+    return h;
+  });
   const skew = Date.parse(health.time) - Date.now();
   if (payload.expiresAt && Date.parse(payload.expiresAt) + CLOCK_SKEW_MS < Date.parse(health.time)) {
     // Expiry is judged by the server's clock, so a wrong phone clock can't block or extend pairing.
     throw new ApiError('pairing', 'This pairing code has expired. Generate a new one on the server.', 410, 'PAIRING_EXPIRED');
   }
-  return { health, clockSkewMs: skew };
+  return { health, clockSkewMs: skew, payload: { ...payload, serverUrl: url, altUrls: urls.filter((u) => u !== url) } };
 }
 
 /** Steps 2–3: exchange the one-time code for a device credential, then verify it. */
@@ -91,7 +102,7 @@ export async function completePairing(payload: PairingPayload, deviceName: strin
   try {
     const status = await authed.pairingStatus();
     const conn: Connection = {
-      serverUrl: payload.serverUrl, serverId: res.server_id, deviceId: res.device.id, deviceName: res.device.name, pairedAt: new Date().toISOString(),
+      serverUrl: payload.serverUrl, altUrls: payload.altUrls ?? [], serverId: res.server_id, deviceId: res.device.id, deviceName: res.device.name, pairedAt: new Date().toISOString(),
       cleartext: payload.cleartext, lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version,
       lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway),
     };
@@ -109,19 +120,29 @@ export async function completePairing(payload: PairingPayload, deviceName: strin
   }
 }
 
-/** Authenticated health check. Updates "last successful check" only on success. */
+/**
+ * Authenticated health check. Updates "last successful check" only on success.
+ * If the current address is unreachable (e.g. away from home Wi-Fi), the saved
+ * alternates are tried and the first that answers becomes the current address.
+ */
 export async function checkConnection(): Promise<Connection | null> {
   const c = await getConnection();
   if (!c) return null;
-  const client = await getClient();
-  if (!client) {
+  const token = await getSecret(SECRET_KEYS.deviceToken);
+  if (!token) {
     await saveConnection({ ...c, lastError: { kind: 'unauthorized', message: 'The saved device credential is missing. Pair again.', at: new Date().toISOString() } });
     return getConnection();
   }
+  const urls = orderedUrls(c.serverUrl, c.altUrls);
   try {
-    const status = await client.pairingStatus();
-    if (status.server.id !== c.serverId) throw new ApiError('wrong_server', 'A different Qivra server is now answering at this address.');
-    await saveConnection({ ...c, lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version, lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway) });
+    const { url, value: status } = await firstReachable(urls, async (baseUrl) => {
+      // With alternates, fail over quickly instead of retrying a network the phone has left.
+      const client = new QivraClient(urls.length > 1 ? { baseUrl, token, retries: 0, timeoutMs: 6000 } : { baseUrl, token });
+      const st = await client.pairingStatus();
+      if (st.server.id !== c.serverId) throw new ApiError('wrong_server', 'A different Qivra server is now answering at this address.');
+      return st;
+    });
+    await saveConnection({ ...c, serverUrl: url, altUrls: urls.filter((u) => u !== url), lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version, lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway) });
   } catch (e) {
     const err = e instanceof ApiError ? e : new ApiError('offline', String(e));
     await saveConnection({ ...c, lastError: { kind: err.kind, message: err.message, at: new Date().toISOString() } });

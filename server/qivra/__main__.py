@@ -2,12 +2,15 @@
 
     python -m qivra serve              # localhost only (default, safest)
     python -m qivra serve --lan        # also reachable from phones on the same Wi-Fi
+                                       # (and over Tailscale/WireGuard if this Mac is on one)
+    python -m qivra serve --remote     # like --lan, but the QR prefers the private-VPN URL
     python -m qivra pair               # new one-time QR/access ID for a running server
     python -m qivra devices            # list paired devices
     python -m qivra revoke <device_id> # revoke a device credential
 
 URLs are printed only after a real health check against the bound socket.
-The server never opens a public tunnel; see docs/LOCAL_SERVER_AND_QR_PAIRING.md.
+The server never opens a public tunnel or changes VPN settings; it only detects
+an existing private network. See docs/LOCAL_SERVER_AND_QR_PAIRING.md.
 """
 
 from __future__ import annotations
@@ -61,6 +64,8 @@ def print_qr(payload: dict) -> bool:
 def show_pairing(challenge: dict, show_qr: bool = True) -> None:
     print(f"\n{BOLD}Pairing{RESET}")
     print(f"  Server URL : {challenge['server_url']}")
+    for alt in (challenge.get("qr_payload") or {}).get("alt_urls", []):
+        print(f"  Also       : {alt}  {DIM}(the phone falls back to it automatically){RESET}")
     print(f"  Access ID  : {BOLD}{format_pairing_code(challenge['pairing_id'])}{RESET}  "
           f"{DIM}(one-time, expires {challenge['expires_at']}, ~{challenge['ttl_seconds'] // 60} min){RESET}")
     if show_qr and challenge.get("qr_payload"):
@@ -74,7 +79,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from .app import create_app
     from .config import QivraConfig
-    from .netinfo import choose_port, detect_lan_ips
+    from .netinfo import PrivateNetwork, choose_port, detect_lan_ips, detect_private_network
 
     from . import ai_gateway, transcribers
     from .config import SERVER_DIR
@@ -89,9 +94,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
     cfg.scheme = scheme
 
     lan_ips: list[str] = []
+    vpn = PrivateNetwork()
     if args.lan:
         lan_ips = detect_lan_ips()
-        cfg.allowed_hosts |= set(lan_ips)
+        vpn = detect_private_network()
+        cfg.allowed_hosts |= set(lan_ips) | set(vpn.hosts)
     else:
         cfg.allowed_hosts.add("10.0.2.2")  # Android emulator → host loopback
     for h in args.allow_host or []:
@@ -99,7 +106,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     local_url = f"{scheme}://127.0.0.1:{port}"
     lan_urls = [f"{scheme}://{ip}:{port}" for ip in lan_ips]
-    advertised = list(args.advertise_url or []) + (lan_urls if args.lan else [local_url])
+    vpn_urls = [f"{scheme}://{h}:{port}" for h in vpn.hosts]
+    advertised = advertised_order(list(args.advertise_url or []), lan_urls, vpn_urls, local_url,
+                                  lan=args.lan, remote=args.remote)
     cfg.advertised_urls = advertised
 
     print(f"{BOLD}QIVRA LOCAL SERVER{RESET}  {DIM}v{SERVER_VERSION} · SuperBrain backend{RESET}")
@@ -149,9 +158,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
                        else f"{YELLOW}not verified from this machine{RESET}")
             print(f"  {u}   ({verdict})")
         print(f"  {DIM}If the phone cannot connect, allow incoming connections for Python in the firewall.{RESET}")
+        print(f"\n{BOLD}Private network (works anywhere){RESET}")
+        if vpn_urls:
+            for u in vpn_urls:
+                c, h = _http("GET", f"{u}/api/health") if scheme == "http" else (0, {})
+                verdict = ("reachable from this machine" if c == 200 and h.get("product") == PRODUCT
+                           else "not verified from this machine")
+                print(f"  {u}   {DIM}({verdict}; Tailscale/WireGuard — only your own devices can reach it){RESET}")
+            if not args.remote:
+                print(f"  {DIM}Included in the QR as a fallback. Use --remote to make it the primary URL.{RESET}")
+        else:
+            print(f"  {DIM}None detected. To use Qivra away from home: install Tailscale on this Mac and the phone, "
+                  f"sign in with the same account, restart with --remote and pair again.{RESET}")
     print(f"\n{BOLD}Security{RESET}")
     print(f"  Local-network pairing: {'enabled' if args.lan else 'disabled (localhost only; use --lan)'}")
-    print("  Public exposure: disabled (no tunnels are started)")
+    print("  Public exposure: disabled (no tunnels are started; VPN addresses are private to your tailnet)")
     print(f"  Transport: {'HTTPS' if scheme == 'https' else 'HTTP — not encrypted in transit; use only on a trusted network'}")
     print(f"  Server ID: {services.store.server_id}")
     gw = ai_gateway.describe()
@@ -196,6 +217,22 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def advertised_order(explicit: list[str], lan_urls: list[str], vpn_urls: list[str], local_url: str,
+                     lan: bool, remote: bool) -> list[str]:
+    """QR URL order: explicit --advertise-url first, then LAN or VPN depending on --remote."""
+    if not lan:
+        ordered = explicit + [local_url]
+    elif remote:
+        ordered = explicit + vpn_urls + lan_urls
+    else:
+        ordered = explicit + lan_urls + vpn_urls
+    out: list[str] = []
+    for u in ordered:
+        if u not in out:
+            out.append(u)
+    return out
+
+
 def _owner_base(args) -> str:
     return f"http://127.0.0.1:{args.port}"
 
@@ -237,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve", help="start the server")
     s.add_argument("--lan", action="store_true", help="listen on all interfaces for phones on the same network")
+    s.add_argument("--remote", action="store_true",
+                   help="implies --lan; put the Tailscale/WireGuard URL first in the QR (works away from home)")
     s.add_argument("--port", type=int, default=None)
     s.add_argument("--no-qr", action="store_true")
     s.add_argument("--no-legacy", action="store_true", help="do not mount legacy SuperBrain endpoints")
@@ -254,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("device_id")
     args = p.parse_args(argv)
     if args.cmd == "serve":
+        args.lan = args.lan or args.remote
         args.port_explicit = args.port is not None
         args.port = args.port or int(os.getenv("PORT", "5000"))
         if bool(args.tls_cert) != bool(args.tls_key):

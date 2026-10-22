@@ -1,0 +1,4 @@
+# Optional: read on-screen text in reels that have no speech (job "transcribe_url" → transcript source "video_ocr").
+# Apache-2.0; ONNX Runtime on the CPU, detection/recognition models ship inside the wheel (no network at run time).
+# Frames are sampled with PyAV (av, from requirements-media.txt). Install alongside requirements-media.txt.
+rapidocr-onnxruntime>=1.2

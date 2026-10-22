@@ -24,6 +24,7 @@ import { getRepo } from './db';
 import { emit } from './events';
 import { getClient, getConnection } from './server';
 import { generateReport } from './reports';
+import { ocrItemImages } from './ocr';
 import { getSettings } from './settings';
 
 class JobError extends Error {
@@ -120,7 +121,10 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
     }
   }
 
-  // 2. Speech transcript for video posts: YouTube captions on the phone, otherwise the paired server.
+  // 2. Text in shared screenshots/photos (on-device OCR) — before enrichment so summaries and search use it.
+  const ocr = item.sourceType === 'note' ? await ocrItemImages(repo, item) : 'no_images';
+
+  // 3. Speech transcript for video posts: YouTube captions on the phone, otherwise the paired server.
   let src = await sourceText(repo, item);
   if (VIDEO_LIKE.has(item.sourceType) && !src.hasSpeech) {
     const outcome = await obtainTranscript(repo, item);
@@ -154,7 +158,12 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
   }
   item = await moveTo(repo, item, 'ENRICHING');
   await enrichAndIndex(repo, item, src.body, src.timed, true);
-  return { status: 'READY' };
+  if (ocr === 'unavailable' || ocr === 'no_text') {
+    const message = ocr === 'no_text' ? 'No text was found in this image.' : 'Text recognition is not available in this build, so the image text is not searchable yet.';
+    await repo.db.run('UPDATE items SET error_code = ?, error_message = ? WHERE id = ?', [ocr === 'no_text' ? 'INFO_NO_TEXT' : 'INFO_OCR_UNAVAILABLE', message, item.id]);
+    emit('items');
+  }
+  return { status: 'READY', ...(ocr === 'no_images' ? {} : { ocr }) };
 }
 
 type TranscriptOutcome =

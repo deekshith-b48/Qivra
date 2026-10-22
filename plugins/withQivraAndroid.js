@@ -2,7 +2,7 @@
  * Expo config plugin: Qivra's Android native configuration.
  *
  *  - ShareActivity (ACTION_SEND / ACTION_SEND_MULTIPLE) for links, text,
- *    transcripts (SRT/VTT/TXT) and user-chosen audio/video.
+ *    transcripts (SRT/VTT/TXT), user-chosen audio/video and images (OCR'd on device).
  *  - network_security_config.xml: system CAs only (user-installed CAs are not
  *    trusted). Cleartext stays permitted at the platform level because Android
  *    cannot scope it to private IP ranges; the app's HTTP layer
@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { withAndroidManifest, withDangerousMod, withGradleProperties, AndroidConfig } = require('expo/config-plugins');
 
-const SHARE_MIME = ['text/plain', 'text/*', 'text/vtt', 'application/x-subrip', 'audio/*', 'video/*'];
+const SHARE_MIME = ['text/plain', 'text/*', 'text/vtt', 'application/x-subrip', 'audio/*', 'video/*', 'image/*'];
 
 function shareActivity(pkg) {
   const filter = (action) => ({

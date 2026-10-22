@@ -1,5 +1,5 @@
 /**
- * Capture: share-sheet inbox, manual saves, transcript import and media import.
+ * Capture: share-sheet inbox, manual saves, transcript import, media and image import.
  * Items are persisted before any network work happens.
  */
 
@@ -84,6 +84,21 @@ export async function captureRequest(req: CaptureRequest, origin: 'share' | 'loc
       const { item } = await repo.createItem({ sourceType: 'file', title: req.file.name, origin });
       const stored = await storeMedia(toUri(req.file.path), req.file.name, req.file.mime, req.file.size, true);
       await repo.addMedia(item.id, stored);
+      await schedulePipeline(item.id);
+      emit('items');
+      return { itemId: item.id, title: item.title, kind: req.kind, duplicate: false, status: item.status };
+    }
+    case 'images': {
+      // A note item holding the image(s); on-device OCR (services/ocr.ts) runs in the pipeline before enrichment.
+      const firstLine = (req.text ?? '').split('\n')[0].trim();
+      const fallback = req.files.length > 1 ? `${req.files.length} images` : req.files[0].name.replace(/\.[a-z0-9]{1,5}$/i, '');
+      const title = req.title || (firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine) || fallback;
+      const { item } = await repo.createItem({ sourceType: 'note', title, note: req.text ?? '', origin });
+      for (const f of req.files) {
+        const uri = toUri(f.path);
+        if (!isAppPrivate(uri)) continue;
+        await repo.addMedia(item.id, await storeMedia(uri, f.name, f.mime, f.size, true));
+      }
       await schedulePipeline(item.id);
       emit('items');
       return { itemId: item.id, title: item.title, kind: req.kind, duplicate: false, status: item.status };

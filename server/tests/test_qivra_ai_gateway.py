@@ -27,6 +27,7 @@ def gateway(monkeypatch):
     monkeypatch.setenv("QIVRA_AI_API_KEY", KEY)
     monkeypatch.setenv("QIVRA_AI_MODEL", "openai/gpt-oss-120b")
     monkeypatch.delenv("QIVRA_AI_EMBEDDING_MODEL", raising=False)
+    monkeypatch.setenv("QIVRA_LOCAL_EMBEDDINGS", "0")  # these tests cover the hosted-provider path
     calls = []
     state = {"status": 200, "body": {"model": "openai/gpt-oss-120b",
                                       "choices": [{"message": {"role": "assistant", "content": "Hi [S1]"}}],
@@ -45,7 +46,7 @@ def test_phone_chats_through_server_and_never_sees_the_key(env, gateway, caplog)
     token, _ = env.pair()
     status = env.phone.get("/api/v1/pairing/status", headers=auth(token)).json()
     assert status["ai_gateway"] == {"enabled": True, "upstream": "api.groq.com", "model": "openai/gpt-oss-120b",
-                                    "embedding_model": None, "external": True}
+                                    "embedding_model": None, "embedding_local": False, "external": True}
     r = env.phone.post("/api/v1/ai/chat/completions", headers=auth(token), json={
         "model": "something-else", "messages": [{"role": "user", "content": "hello"}],
         "max_tokens": 99999, "temperature": 0.1, "user": "drop-me"})

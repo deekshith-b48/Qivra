@@ -5,13 +5,16 @@ Pipeline (runs only inside the job worker, never in a request handler):
      (no login cookies are used: private or login-gated posts fail honestly).
   2. faster-whisper (local, free) transcribes it with timestamps and language
      detection; SuperBrain's Groq/openai-whisper path is the fallback.
-  3. The temp folder is always deleted.
+  3. No speech (or only a few words)? With RapidOCR installed, a small video
+     rendition is downloaded and its on-screen text read (video_ocr.py).
+  4. The temp folder is always deleted.
 Only an allow-list of video hosts is accepted, so the server cannot be used as
 a general-purpose downloader or to reach private network addresses.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -28,6 +31,8 @@ ALLOWED_HOSTS = {
 }
 MAX_SECONDS = int(os.getenv("QIVRA_MAX_MEDIA_SECONDS", "3600"))
 MAX_BYTES = int(os.getenv("QIVRA_MAX_MEDIA_BYTES", str(300 * 1024 * 1024)))
+
+logger = logging.getLogger("qivra.media")
 
 
 
@@ -78,6 +83,15 @@ class _QuietLogger:
 
 
 def download_audio(url: str, workdir: Path) -> tuple[Path, dict]:
+    return _download(url, workdir, "bestaudio/best[acodec!=none]/best", "media")
+
+
+def download_video(url: str, workdir: Path) -> tuple[Path, dict]:
+    """A small video rendition (for on-screen text), same hosts and limits, no cookies."""
+    return _download(url, workdir, "best[height<=720][vcodec!=none]/bestvideo[height<=720]/best[vcodec!=none]/best", "video")
+
+
+def _download(url: str, workdir: Path, fmt: str, stem: str) -> tuple[Path, dict]:
     try:
         import yt_dlp
     except ImportError as exc:
@@ -90,8 +104,8 @@ def download_audio(url: str, workdir: Path) -> tuple[Path, dict]:
         return None
 
     opts = {
-        "format": "bestaudio/best[acodec!=none]/best",
-        "outtmpl": str(workdir / "media.%(ext)s"),
+        "format": fmt,
+        "outtmpl": str(workdir / f"{stem}.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -115,7 +129,7 @@ def download_audio(url: str, workdir: Path) -> tuple[Path, dict]:
         if not entries:
             raise MediaError("NO_MEDIA_IN_POST", "This post has no video or audio to transcribe.")
         info = entries[0]
-    files = [p for p in workdir.iterdir() if p.is_file() and p.name.startswith("media.") and p.suffix != ".part"]
+    files = [p for p in workdir.iterdir() if p.is_file() and p.name.startswith(f"{stem}.") and p.suffix != ".part"]
     if not files:
         if info.get("duration") and info["duration"] > MAX_SECONDS:
             raise MediaError("TOO_LONG", f"Video is longer than {MAX_SECONDS // 60} minutes.")
@@ -141,6 +155,37 @@ def transcribe_file(path: Path) -> tuple[list[dict], str, str]:
         raise MediaError(exc.code, exc.message, exc.retryable) from exc
 
 
+# Speech results that send the video to on-screen text recognition (video_ocr.py).
+OCR_FALLBACK_CODES = {"NO_SPEECH", "NO_AUDIO"}
+SHORT_TRANSCRIPT_CHARS = 25
+
+
+def _has_video(path: Path) -> bool:
+    try:
+        import av
+        with av.open(str(path)) as c:
+            return bool(c.streams.video)
+    except Exception:
+        return False
+
+
+def on_screen_text(url: str, workdir: Path, audio_path: Path | None = None) -> list[dict]:
+    """Timestamped on-screen text of a post, or [] when RapidOCR is missing or nothing is readable."""
+    from . import video_ocr
+    if not video_ocr.available():
+        logger.info("On-screen text skipped: RapidOCR is not installed (pip install -r requirements-ocr.txt).")
+        return []
+    try:
+        path = audio_path if audio_path is not None and _has_video(audio_path) else download_video(url, workdir)[0]
+        return video_ocr.ocr_video(path)
+    except MediaError as exc:
+        logger.info("On-screen text skipped: %s", exc.code)
+        return []
+    except Exception:
+        logger.warning("On-screen text recognition failed.", exc_info=True)
+        return []
+
+
 def transcribe_url(url: str, data_dir: Path) -> dict:
     check_url(url)
     tmp_root = data_dir / "tmp"
@@ -148,16 +193,25 @@ def transcribe_url(url: str, data_dir: Path) -> dict:
     workdir = Path(tempfile.mkdtemp(prefix="media_", dir=tmp_root))
     try:
         path, meta = download_audio(url, workdir)
+        segments, language, provider = [], "und", ""
+        speech_error: MediaError | None = None
         try:
             segments, language, provider = transcribe_file(path)
         except MediaError as exc:
-            exc.meta = meta  # type: ignore[attr-defined]  # post details are still useful
-            raise
-        if not segments:
-            err = MediaError("NO_SPEECH", "No speech was detected (the audio may be music only).")
-            err.meta = meta  # type: ignore[attr-defined]
-            raise err
-        return {"segments": segments, "language": language, "provider": provider, "meta": meta}
+            if exc.code not in OCR_FALLBACK_CODES:
+                exc.meta = meta  # type: ignore[attr-defined]  # post details are still useful
+                raise
+            speech_error = exc
+        if not segments and speech_error is None:
+            speech_error = MediaError("NO_SPEECH", "No speech was detected (the audio may be music only).")
+        # Music-only reels often carry their message as text on screen.
+        short = sum(len(s.get("text", "")) for s in segments) < SHORT_TRANSCRIPT_CHARS
+        ocr_segments = on_screen_text(url, workdir, path) if speech_error is not None or short else []
+        if speech_error is not None and not ocr_segments:
+            speech_error.meta = meta  # type: ignore[attr-defined]
+            raise speech_error
+        return {"segments": segments, "language": language, "provider": provider, "meta": meta,
+                "ocr_segments": ocr_segments}
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

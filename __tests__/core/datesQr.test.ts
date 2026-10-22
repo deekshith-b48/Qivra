@@ -48,7 +48,7 @@ describe('QR pairing payload validation', () => {
 
   test('valid payload', () => {
     expect(parse(good)).toEqual({ ok: true, payload: {
-      version: 1, product: 'Qivra', serverUrl: 'http://10.109.230.239:5001', serverId: '90726e5714364abe', pairingId: 'CCWW5HVZ',
+      version: 1, product: 'Qivra', serverUrl: 'http://10.109.230.239:5001', altUrls: [], serverId: '90726e5714364abe', pairingId: 'CCWW5HVZ',
       expiresAt: '2026-10-20T20:36:39.048Z', cleartext: true,
     } });
   });

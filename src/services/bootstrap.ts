@@ -8,6 +8,7 @@ import { getRepo } from './db';
 import { runLegacyImport } from './legacyImport';
 import { requestSync, runDueJobs, wakeServerJobs } from './processing';
 import { refreshDailyDigest } from './reminders';
+import { ensureEmbeddings } from './semantic';
 import { checkConnection, getConnection } from './server';
 import { maybeGenerateWeeklyReport } from './weeklyReport';
 
@@ -34,6 +35,8 @@ export async function boot(): Promise<BootResult> {
     }
     await runDueJobs();
     await refreshDailyDigest();
+    // Backfill meaning-based search for anything not embedded yet (new items, or a newly available model).
+    if (await ensureEmbeddings().catch(() => false)) await runDueJobs();
     await maybeGenerateWeeklyReport();
   })();
   return { onboarded, legacyImported: legacy?.posts ?? 0, shared };
@@ -50,6 +53,8 @@ export async function onResume(): Promise<BootResult['shared']> {
     }
     await runDueJobs();
     await refreshDailyDigest();
+    // Backfill meaning-based search for anything not embedded yet (new items, or a newly available model).
+    if (await ensureEmbeddings().catch(() => false)) await runDueJobs();
     await maybeGenerateWeeklyReport();
   })();
   return shared;

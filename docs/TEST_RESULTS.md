@@ -1,5 +1,19 @@
 # Test results
 
+## 1.9.0 (2026-10-22): OCR, search by meaning, away-from-home access
+
+- Release APK: `dist/Qivra-1.9.0-release.apk` (94 MB; ML Kit text models are bundled), version code 13.
+- `tsc` and Biome pass. Jest: 288 passed, 4 live tests skipped. Server pytest: 125 passed, 9 live skipped. Live checks run with `QIVRA_LIVE=1` and pass: RapidOCR on an image and on a video, and multilingual embedding similarity (English ↔ Hindi 0.62, unrelated ≈ 0).
+- Emulator (release APK, throwaway server with the Groq gateway and local embeddings):
+  - An image with text, shared from Google Photos, stayed in Photos and gave the notification "Ready: ocr_test — Postgres tips Use a GIN indexX for JSONB queries." The text came from on-device OCR, with one ML Kit misread ("indexX").
+  - Library search "turn speech into text": a keyword hit (OpenWhispr) plus "Related by meaning: zackees/transcribe-anything", which shares no words with the query.
+  - The item page for transcribe-anything shows Related: OpenWhispr, matched by embeddings.
+  - The connection screen shows the "Use Qivra away from home" guidance.
+- Not verified on devices:
+  - Tailscale (this Mac has no Tailscale; detection and failover are covered by mocked tests).
+  - On-screen text in a real silent reel (a generated test video passes).
+- Testing note: `adb am start` cannot lend a MediaStore image to another app, so the image was shared from the Photos app instead.
+
 ## 1.8.0 (2026-10-22): UI theme revamp
 
 - Release APK: `dist/Qivra-1.8.0-release.apk`, version code 12. New native module: `expo-linear-gradient`. New font: Plus Jakarta Sans.
