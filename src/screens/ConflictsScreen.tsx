@@ -2,6 +2,7 @@ import React from 'react';
 import { View } from 'react-native';
 import type { RootProps } from '../navigation/types';
 import { emit } from '../services/events';
+import { deleteLocalFiles } from '../services/capture';
 import { getRepo } from '../services/db';
 import { requestSync } from '../services/processing';
 import { resolveConflict, type Resolution } from '../sync/engine';
@@ -28,7 +29,7 @@ export default function ConflictsScreen({ navigation }: RootProps<'Conflicts'>) 
   }, ['conflicts', 'items']);
 
   const resolve = (id: string, choice: Resolution) => run(async () => {
-    await resolveConflict(await getRepo(), id, choice);
+    await deleteLocalFiles(await resolveConflict(await getRepo(), id, choice));
     emit('conflicts', 'items', 'collections');
     await requestSync();
   });
@@ -41,7 +42,9 @@ export default function ConflictsScreen({ navigation }: RootProps<'Conflicts'>) 
         return (
           <Card key={c.id} style={{ marginBottom: space.md }}>
             <T v="subtitle">{local?.title || String(r.title ?? r.name ?? c.entityId)}</T>
-            {local ? (
+            {r.deleted === true ? (
+              <T v="small" color="danger" style={{ marginTop: space.xs }}>Deleted on another device. "Keep server's" deletes it here too.</T>
+            ) : local ? (
               <>
                 <Field label="Title" mine={local.title} theirs={String(r.title ?? '')} />
                 <Field label="Note" mine={local.note} theirs={String(r.note ?? '')} />

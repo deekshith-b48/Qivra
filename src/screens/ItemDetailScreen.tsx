@@ -345,7 +345,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
                 {activeT ? (
                   <>
                     <T v="caption" color="textFaint">
-                      {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)}`} ({activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'}){activeT.hasTimestamps ? '' : ' · no timestamps in source'}{activeT.corrected ? ' · corrected' : ''}
+                      {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps in source'}{activeT.corrected ? ' · corrected' : ''}
                     </T>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.sm }}>
                       <Button kind="outline" title="Language" icon="language-outline" onPress={() => setLangOpen(true)} />

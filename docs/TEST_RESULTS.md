@@ -1,5 +1,20 @@
 # Test results
 
+## 1.9.1 (2026-10-22): privacy and safety fixes from a code audit
+
+- Release APK: `dist/Qivra-1.9.1-release.apk`, version code 14. No new dependencies.
+- `tsc` passes. Jest: 293 passed, 4 live tests skipped. Server pytest: 128 passed, 9 live skipped. New tests:
+  - Commands in server summaries keep the "potentially destructive" warning.
+  - Deleting an item removes its transcripts and uploads on the server, its server search hits, and its text; older deletes are cleaned at startup.
+  - Server transcript search treats `%` and `_` literally.
+  - Items deleted on another device hand back their media files for removal; conflicts with a deleted item show as deletions, and "Keep both" keeps this phone's copy with its media.
+  - Stored vectors are parsed once and re-read only after the library changes.
+  - The new server and conflict tests were checked to fail on the old code.
+- Emulator (release APK built just before the final "Keep both" fix, throwaway server):
+  - A server item with `sudo rm -rf ~/` and `ls -la` shows "⚠ Potentially destructive" on the first command only.
+  - Deleting "Elephant" on the phone, then syncing, left an empty tombstone on the server; its transcript, upload file and search hit were gone.
+- Not verified on devices: the conflict screen for an item deleted on another device (needs two phones; covered by tests).
+
 ## 1.9.0 (2026-10-22): OCR, search by meaning, away-from-home access
 
 - Release APK: `dist/Qivra-1.9.0-release.apk` (94 MB; ML Kit text models are bundled), version code 13.

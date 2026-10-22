@@ -9,6 +9,7 @@ import type { ChunkHit, Item } from '../db/types';
 import { loadProvider } from './ai';
 import { getRepo } from './db';
 import { emit } from './events';
+import { embeddingRows } from './semantic';
 import { getSettings } from './settings';
 
 export function toEvidence(i: Item): EvidenceItem {
@@ -31,7 +32,7 @@ export async function agentData(repo: Repo): Promise<AgentData> {
   if (provider?.embed && embeddingModel) {
     data.semanticSearch = async (q, limit) => {
       const [qv] = await provider.embed!([q]);
-      const all = await repo.allEmbeddings(embeddingModel);
+      const all = await embeddingRows(embeddingModel);
       const top = all.map((e) => ({ e, score: cosine(qv, e.vector) })).sort((a, b) => b.score - a.score).slice(0, limit);
       const out: EvidenceChunk[] = [];
       for (const t of top) {

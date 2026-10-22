@@ -231,5 +231,9 @@ export async function pickMediaFile(attachTo?: string): Promise<CaptureResult | 
 
 export async function deleteItemFiles(itemIds: string[]): Promise<void> {
   const repo = await getRepo();
-  for (const id of itemIds) for (const m of await repo.listMedia(id)) await FS.deleteAsync(m.uri, { idempotent: true }).catch(() => undefined);
+  for (const id of itemIds) await deleteLocalFiles((await repo.listMedia(id)).map((m) => m.uri));
+}
+
+export async function deleteLocalFiles(uris: string[]): Promise<void> {
+  for (const uri of uris) await FS.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
 }

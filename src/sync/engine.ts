@@ -15,6 +15,7 @@
  */
 
 import type { QivraClient, ServerEntity, SyncChange } from '../core/api';
+import { detectDestructive } from '../core/enrich';
 import { newId } from '../core/ids';
 import { sanitizeRules } from '../core/smart';
 import type { Repo } from '../db/repo';
@@ -28,6 +29,8 @@ export interface SyncStats {
   conflicts: number;
   pulled: number;
   purged: number;
+  /** Local media files of items deleted elsewhere; the caller removes them from storage. */
+  removedFiles: string[];
 }
 
 export async function itemToServerData(repo: Repo, item: Item): Promise<Record<string, unknown>> {
@@ -53,8 +56,9 @@ export async function itemToServerData(repo: Repo, item: Item): Promise<Record<s
   };
 }
 
-export async function runSync(repo: Repo, client: QivraClient, opts: { maxRounds?: number } = {}): Promise<SyncStats> {
-  const stats: SyncStats = { pushed: 0, applied: 0, conflicts: 0, pulled: 0, purged: 0 };
+export async function runSync(repo: Repo, client: QivraClient, opts: { maxRounds?: number; removedFiles?: string[] } = {}): Promise<SyncStats> {
+  // The caller may pass its own list so files of items purged before a failed round are still known.
+  const stats: SyncStats = { pushed: 0, applied: 0, conflicts: 0, pulled: 0, purged: 0, removedFiles: opts.removedFiles ?? [] };
   let cursor = Number((await repo.getMeta('sync.cursor')) ?? 0);
   for (let round = 0; round < (opts.maxRounds ?? 20); round++) {
     const { changes, sentRevs } = await collectOutgoing(repo);
@@ -79,7 +83,7 @@ export async function runSync(repo: Repo, client: QivraClient, opts: { maxRounds
         await markAcknowledged(repo, c.kind, c.id, c.server.revision, sentRevs.get(`${c.kind}:${c.id}`) ?? 0);
         continue;
       }
-      await repo.addConflict(c.kind, c.id, c.server.data, c.server.revision);
+      await repo.addConflict(c.kind, c.id, remoteSide(c.server), c.server.revision);
       stats.conflicts++;
     }
     // Collections first, so item → collection memberships can be attached.
@@ -88,7 +92,7 @@ export async function runSync(repo: Repo, client: QivraClient, opts: { maxRounds
     for (const ent of ordered) {
       if (justApplied.has(`${ent.kind}:${ent.id}`) && justApplied.get(`${ent.kind}:${ent.id}`) === ent.revision) continue;
       if (conflicted.has(`${ent.kind}:${ent.id}`)) continue; // already handled from the push response
-      const r = await applyRemote(repo, ent);
+      const r = await applyRemote(repo, ent, stats.removedFiles);
       if (r === 'pulled') stats.pulled++;
       else if (r === 'conflict') stats.conflicts++;
       else if (r === 'purged') stats.purged++;
@@ -138,8 +142,13 @@ async function markAcknowledged(repo: Repo, kind: 'item' | 'collection', id: str
   );
 }
 
+/** What a conflict records as the server's side; a deletion has no content, only the marker. */
+function remoteSide(ent: ServerEntity): Record<string, unknown> {
+  return ent.deleted ? { deleted: true } : ent.data;
+}
+
 /** Apply one change from the server feed. */
-export async function applyRemote(repo: Repo, ent: ServerEntity): Promise<'pulled' | 'skipped' | 'conflict' | 'purged'> {
+export async function applyRemote(repo: Repo, ent: ServerEntity, removedFiles: string[] = []): Promise<'pulled' | 'skipped' | 'conflict' | 'purged'> {
   const table = ent.kind === 'item' ? 'items' : 'collections';
   const local = await repo.db.get<Row>(`SELECT * FROM ${table} WHERE id = ?`, [ent.id]);
   if (local) {
@@ -152,12 +161,13 @@ export async function applyRemote(repo: Repo, ent: ServerEntity): Promise<'pulle
         await repo.db.run(`UPDATE ${table} SET server_revision = ? WHERE id = ?`, [ent.revision, ent.id]);
         return 'skipped';
       }
-      await repo.addConflict(ent.kind, ent.id, ent.data, ent.revision);
+      await repo.addConflict(ent.kind, ent.id, remoteSide(ent), ent.revision);
       return 'conflict';
     }
   }
   if (ent.deleted) {
     if (local) {
+      if (ent.kind === 'item') for (const m of await repo.listMedia(ent.id)) removedFiles.push(m.uri);
       await repo.db.run(`DELETE FROM ${table} WHERE id = ?`, [ent.id]);
       return 'purged';
     }
@@ -194,7 +204,7 @@ async function writeRemoteItem(repo: Repo, ent: ServerEntity): Promise<void> {
       enrichmentJson = JSON.stringify({
         origin: 'server', version: Number(enrichment.version ?? 1), provider: String(enrichment.provider ?? 'server'), generatedAt: String(enrichment.generatedAt ?? now),
         summary: String(enrichment.summary ?? ''), keyPoints: arr(enrichment.keyPoints), concepts: arr(enrichment.concepts), tools: arr(enrichment.tools),
-        commands: arr(enrichment.commands).map((c) => ({ command: c, destructive: false })), repos: arr(enrichment.repos), urls: [],
+        commands: arr(enrichment.commands).map((c) => ({ command: c, ...detectDestructive(c) })), repos: arr(enrichment.repos), urls: [],
         tags: arr(enrichment.tags), followUpQuestions: arr(enrichment.followUpQuestions), actionItems: arr(enrichment.actionItems), timestamps: [],
       });
       if (!summary && enrichment.summary) {
@@ -260,10 +270,16 @@ function validStatus(s: string): string {
 
 export type Resolution = 'keep_local' | 'keep_remote' | 'keep_both';
 
-/** Resolve a recorded conflict. Nothing is lost: keep_both duplicates the local version. */
-export async function resolveConflict(repo: Repo, conflictId: string, choice: Resolution): Promise<void> {
+/**
+ * Resolve a recorded conflict. Nothing is lost: keep_both duplicates the local version.
+ * Returns local media files of an item removed because the server's side is a deletion.
+ */
+export async function resolveConflict(repo: Repo, conflictId: string, choice: Resolution): Promise<string[]> {
   const c = (await repo.openConflicts()).find((x) => x.id === conflictId);
   if (!c) throw new Error('Conflict not found or already resolved');
+  // Deleted elsewhere: "keep both" means keep this phone's copy, with its media and transcripts.
+  if (choice === 'keep_both' && (c.remote as { deleted?: unknown }).deleted === true) choice = 'keep_local';
+  const removedFiles: string[] = [];
   const table = c.entityKind === 'item' ? 'items' : 'collections';
   if (choice === 'keep_local') {
     // Rebase the local edit on the server's revision; the next sync applies it deliberately.
@@ -281,10 +297,11 @@ export async function resolveConflict(repo: Repo, conflictId: string, choice: Re
     }
     await repo.db.run(`UPDATE ${table} SET local_rev = synced_local_rev, sync_status = 'synced', server_revision = NULL WHERE id = ?`, [c.entityId]);
     await applyRemote(repo, {
-      kind: c.entityKind, id: c.entityId, revision: c.remoteRevision, seq: 0, deleted: false, data: c.remote,
+      kind: c.entityKind, id: c.entityId, revision: c.remoteRevision, seq: 0, deleted: (c.remote as { deleted?: unknown }).deleted === true, data: c.remote,
       created_at: String((c.remote as { createdAt?: string }).createdAt ?? new Date().toISOString()), updated_at: new Date().toISOString(), updated_by: null,
-    });
+    }, removedFiles);
   }
   await repo.resolveConflictRecord(conflictId, choice);
+  return removedFiles;
 }
 

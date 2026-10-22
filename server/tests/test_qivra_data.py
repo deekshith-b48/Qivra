@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -335,3 +336,44 @@ def test_device_push_keeps_server_owned_fields(paired):
     assert push["applied"]
     data = env.services.store.get_entity("item", "p1")["data"]
     assert data["note"] == "mine" and data["metadata"]["thumbnail"] == "https://cdn/x.jpg"
+
+
+def test_deleting_an_item_removes_its_transcripts_and_uploads(paired):
+    env, h, _ = paired
+    env.phone.post("/api/v1/items", json=item("gone", "Secret talk"), headers=h)
+    env.phone.post("/api/v1/items/gone/transcripts/import", headers=h, json={"text": SRT, "language": "en"})
+    env.phone.post("/api/v1/items/gone/media", headers=h, files={"file": ("a.mp3", b"ID3data", "audio/mpeg")})
+    path = Path(env.services.store.latest_media("gone")["path"])
+    assert path.exists()
+    assert env.phone.delete("/api/v1/items/gone", headers=h).status_code == 200
+    assert env.services.store.list_transcripts("gone") == []
+    assert env.services.store.latest_media("gone") is None and not path.exists()
+    hits = env.phone.post("/api/v1/search", json={"query": "Claude Code tutorial"}, headers=h).json()
+    assert hits["passages"] == []
+
+
+def test_transcript_search_treats_percent_literally(paired):
+    env, h, _ = paired
+    env.phone.post("/api/v1/items", json=item("p1"), headers=h)
+    env.phone.post("/api/v1/items/p1/transcripts/import", headers=h, json={"text": "we grew 100 users", "language": "en"})
+    assert env.services.store.search_transcripts(["100%"]) == []
+    env.phone.post("/api/v1/items/p1/transcripts/import", headers=h,
+                   json={"text": "we grew 100% this year", "language": "en", "source": "other"})
+    assert len(env.services.store.search_transcripts(["100%"])) == 1
+
+
+def test_deleted_item_keeps_no_content_and_old_deletes_are_cleaned_at_startup(paired):
+    env, h, _ = paired
+    store = env.services.store
+    env.phone.post("/api/v1/items", json=item("t1", "Private title", note="private note"), headers=h)
+    env.phone.delete("/api/v1/items/t1", headers=h)
+    assert store.get_entity("item", "t1")["data"] == {}
+    # An item deleted by an older server version: content still in the tombstone and a transcript left over.
+    env.phone.post("/api/v1/items", json=item("t2", "Old"), headers=h)
+    env.phone.post("/api/v1/items/t2/transcripts/import", headers=h, json={"text": "left over words", "language": "en"})
+    with store._conn:
+        store._conn.execute("UPDATE qv_entities SET deleted=1 WHERE id='t2'")
+    reopened = type(store)(store.db_path)
+    assert reopened.get_entity("item", "t2")["data"] == {}
+    assert reopened.list_transcripts("t2") == []
+    reopened.close()

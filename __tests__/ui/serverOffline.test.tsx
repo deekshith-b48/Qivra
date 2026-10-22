@@ -7,7 +7,7 @@ import { resetTestRepo } from '../helpers/uiSetup';
 const processing = jest.requireActual('../../src/services/processing') as typeof import('../../src/services/processing');
 
 jest.mock('../../src/services/server', () => ({ getClient: jest.fn(), getConnection: jest.fn(async () => ({ serverUrl: 'http://192.168.1.2:5001' })), checkConnection: jest.fn() }));
-jest.mock('../../src/sync/engine', () => ({ runSync: jest.fn(async () => undefined), enableSync: jest.fn(), disableSync: jest.fn() }));
+jest.mock('../../src/sync/engine', () => ({ runSync: jest.fn(async () => ({ removedFiles: [] })), enableSync: jest.fn(), disableSync: jest.fn() }));
 
 beforeEach(() => {
   resetTestRepo();

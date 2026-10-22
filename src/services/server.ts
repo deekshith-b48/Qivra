@@ -142,7 +142,7 @@ export async function checkConnection(): Promise<Connection | null> {
       if (st.server.id !== c.serverId) throw new ApiError('wrong_server', 'A different Qivra server is now answering at this address.');
       return st;
     });
-    await saveConnection({ ...c, serverUrl: url, altUrls: urls.filter((u) => u !== url), lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version, lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway) });
+    await saveConnection({ ...c, serverUrl: url, cleartext: url.startsWith('http:'), altUrls: urls.filter((u) => u !== url), lastHealthAt: new Date().toISOString(), lastError: null, serverVersion: status.server.version, lanEnabled: status.server.lan_enabled, aiAvailable: status.ai?.available ?? null, aiGateway: gatewayOf(status.ai_gateway) });
   } catch (e) {
     const err = e instanceof ApiError ? e : new ApiError('offline', String(e));
     await saveConnection({ ...c, lastError: { kind: err.kind, message: err.message, at: new Date().toISOString() } });

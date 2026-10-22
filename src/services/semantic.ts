@@ -5,11 +5,25 @@
  * multilingual model (nothing leaves your network).
  */
 
-import { centroids, NEAR_DUPLICATE, rankChunks, similarItemIds } from '../core/semantic';
+import { centroids, type ChunkVector, NEAR_DUPLICATE, rankChunks, similarItemIds } from '../core/semantic';
 import type { Item } from '../db/types';
 import { aiInfo, loadProvider } from './ai';
 import { getRepo } from './db';
-import { emit } from './events';
+import { emit, subscribe } from './events';
+
+let cache: { model: string; rows: Promise<ChunkVector[]> } | null = null;
+// New embeddings and deletions both emit 'items', so the cached vectors never go stale.
+subscribe((topic) => { if (topic === 'items') cache = null; });
+
+/** Every stored vector for `model`, parsed once and reused until the library changes. */
+export async function embeddingRows(model: string): Promise<ChunkVector[]> {
+  if (cache?.model !== model) {
+    const rows = getRepo().then((repo) => repo.allEmbeddings(model));
+    cache = { model, rows };
+    rows.catch(() => { if (cache?.rows === rows) cache = null; });
+  }
+  return cache.rows;
+}
 
 export interface SimilarItem {
   item: Item;
@@ -21,10 +35,10 @@ export interface SimilarItem {
 export async function similarItems(itemId: string, k = 4): Promise<SimilarItem[]> {
   const model = (await aiInfo()).embeddingModel;
   if (!model) return [];
-  const repo = await getRepo();
-  const rows = await repo.allEmbeddings(model);
+  const rows = await embeddingRows(model);
   const best = similarItemIds(itemId, centroids(rows), k);
   if (!best.length) return [];
+  const repo = await getRepo();
   const items = new Map((await repo.itemsByIds(best.map((b) => b.itemId))).map((i) => [i.id, i]));
   return best.filter((b) => items.has(b.itemId)).map((b) => ({ item: items.get(b.itemId)!, score: b.score, nearDuplicate: b.score >= NEAR_DUPLICATE }));
 }
@@ -40,7 +54,7 @@ export async function searchByMeaning(query: string, k = 12, signal?: AbortSigna
   const { provider, embeddingModel } = await loadProvider();
   if (!provider?.embed || !embeddingModel || !query.trim()) return [];
   const repo = await getRepo();
-  const rows = await repo.allEmbeddings(embeddingModel);
+  const rows = await embeddingRows(embeddingModel);
   if (!rows.length) return [];
   const [qv] = await provider.embed([query.trim()], signal);
   const ranked = rankChunks(qv, rows, k * 3, 2);

@@ -67,12 +67,13 @@ export function SearchResults({ query, onOpen, bottomInset = 120 }: { query: str
   // Meaning-based matches (local embeddings): items about the same thing even with no shared words.
   useEffect(() => {
     let cancelled = false;
+    const ctrl = new AbortController();
     setMeaning([]);
     const q = query.trim();
     if (scope !== 'all' || q.length < 3) return;
     const t = setTimeout(() => {
       void (async () => {
-        const found = await searchByMeaning(q, 8).catch(() => []);
+        const found = await searchByMeaning(q, 8, ctrl.signal).catch(() => []);
         if (cancelled || !found.length) return;
         const items = new Map((await (await getRepo()).itemsByIds(found.map((f) => f.itemId))).map((i) => [i.id, i]));
         if (cancelled) return;
@@ -82,7 +83,7 @@ export function SearchResults({ query, onOpen, bottomInset = 120 }: { query: str
         }));
       })();
     }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearTimeout(t); ctrl.abort(); };
   }, [query, scope]);
 
   const extra = meaning.filter((m) => !(hits ?? []).some((h) => h.itemId === m.itemId));

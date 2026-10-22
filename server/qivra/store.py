@@ -152,6 +152,7 @@ class QivraStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._migrate()
+        self._purge_deleted_items()
 
     # ── schema ────────────────────────────────────────────────────────────
     def _migrate(self) -> None:
@@ -241,6 +242,7 @@ class QivraStore:
         Returns ("applied", entity) or ("conflict", current_server_entity).
         base_revision None/0 means "create"; it conflicts if the entity exists.
         """
+        media: list[str] = []
         with self._lock, self._conn:
             row = self._conn.execute(
                 "SELECT * FROM qv_entities WHERE kind=? AND id=?", (kind, entity_id)
@@ -262,9 +264,34 @@ class QivraStore:
                 self._conn.execute(
                     "UPDATE qv_entities SET revision=revision+1, seq=?, deleted=?, data_json=?, "
                     "updated_at=?, updated_by=? WHERE kind=? AND id=?",
-                    (seq, 1 if deleted else 0, json.dumps(data), now, actor, kind, entity_id),
+                    # A tombstone keeps no content: devices only need to know the entity is gone.
+                    (seq, 1 if deleted else 0, json.dumps({} if deleted else data), now, actor, kind, entity_id),
                 )
-            return "applied", self.get_entity(kind, entity_id)
+                if deleted and kind == "item":
+                    media = self._purge_item_content(entity_id)
+        for path in media:  # only after the commit, so a failed write never loses files
+            Path(path).unlink(missing_ok=True)
+        return "applied", self.get_entity(kind, entity_id)
+
+    def _purge_deleted_items(self) -> None:
+        """Clean up items deleted before tombstones were emptied on delete (runs at startup, cheap when clean)."""
+        media: list[str] = []
+        with self._lock, self._conn:
+            ids = [r["id"] for r in self._conn.execute(
+                "SELECT id FROM qv_entities WHERE kind='item' AND deleted=1 AND (data_json != '{}' "
+                "OR id IN (SELECT item_id FROM qv_transcripts) OR id IN (SELECT item_id FROM qv_media))")]
+            for item_id in ids:
+                media += self._purge_item_content(item_id)
+            self._conn.execute("UPDATE qv_entities SET data_json='{}' WHERE deleted=1 AND data_json != '{}'")
+        for path in media:
+            Path(path).unlink(missing_ok=True)
+
+    def _purge_item_content(self, item_id: str) -> list[str]:
+        """A deleted item's transcripts and uploads go too; returns the upload paths to remove from disk."""
+        paths = [r["path"] for r in self._conn.execute("SELECT path FROM qv_media WHERE item_id=?", (item_id,))]
+        self._conn.execute("DELETE FROM qv_media WHERE item_id=?", (item_id,))
+        self._conn.execute("DELETE FROM qv_transcripts WHERE item_id=?", (item_id,))
+        return paths
 
     def patch_entity(self, kind: str, entity_id: str, patch: dict, *, base_revision: int | None,
                      actor: str | None) -> tuple[str, dict | None]:
@@ -365,7 +392,8 @@ class QivraStore:
                 self.put_entity("item", item_id, data, base_revision=existing["revision"],
                                 deleted=bool(r["is_hidden"]), actor="superbrain")
                 mirrored += 1
-            if r["audio_transcription"] and r["audio_transcription"].strip():
+            current = self.get_entity("item", item_id)
+            if r["audio_transcription"] and r["audio_transcription"].strip() and current and not current["deleted"]:
                 self.upsert_transcript(item_id, text=r["audio_transcription"].strip(), segments=[],
                                        language="und", kind="original", source="superbrain_audio",
                                        provider="superbrain")
@@ -400,10 +428,10 @@ class QivraStore:
     def search_transcripts(self, terms: list[str], limit: int = 40) -> list[dict]:
         if not terms:
             return []
-        clause = " OR ".join("LOWER(text) LIKE ?" for _ in terms)
-        rows = self._conn.execute(
-            f"SELECT * FROM qv_transcripts WHERE {clause} LIMIT ?", [f"%{t}%" for t in terms] + [limit]
-        )
+        clause = " OR ".join("LOWER(text) LIKE ? ESCAPE '\\'" for _ in terms)
+        # Escape LIKE wildcards so a search for "100%" means the text "100%".
+        like = ["%" + t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for t in terms]
+        rows = self._conn.execute(f"SELECT * FROM qv_transcripts WHERE {clause} LIMIT ?", like + [limit])
         return [_transcript_row(r) for r in rows]
 
     # ── devices & pairing ────────────────────────────────────────────────

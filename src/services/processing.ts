@@ -18,8 +18,9 @@ import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
 import { CaptionsUnavailable, fetchYouTubeCaptions } from '../core/youtubeCaptions';
 import type { Repo } from '../db/repo';
 import type { Item, Job } from '../db/types';
-import { runSync } from '../sync/engine';
+import { runSync as runSyncRaw } from '../sync/engine';
 import { aiInfo, loadProvider } from './ai';
+import { deleteLocalFiles } from './capture';
 import { getRepo } from './db';
 import { emit } from './events';
 import { getClient, getConnection } from './server';
@@ -400,6 +401,17 @@ async function applyServerPostMeta(repo: Repo, itemId: string, client: NonNullab
     });
   } catch {
     /* best effort */
+  }
+}
+
+/** Sync, then delete the media files of items that were deleted on another device. */
+async function runSync(repo: Repo, client: Parameters<typeof runSyncRaw>[1]) {
+  const removed: string[] = [];
+  try {
+    const { removedFiles: _removed, ...stats } = await runSyncRaw(repo, client, { removedFiles: removed });
+    return stats;
+  } finally {
+    await deleteLocalFiles(removed); // also when a later round fails: those rows are already gone
   }
 }
 
