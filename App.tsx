@@ -5,6 +5,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { DarkTheme, DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
+import * as Notifications from 'expo-notifications';
+import { notificationLink } from './src/core/reminderTimes';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { AppState, View } from 'react-native';
@@ -19,7 +21,9 @@ import CaptureScreen from './src/screens/CaptureScreen';
 import CollectionsScreen from './src/screens/CollectionsScreen';
 import ConflictsScreen from './src/screens/ConflictsScreen';
 import ConnectServerScreen from './src/screens/ConnectServerScreen';
+import DevScreen from './src/screens/DevScreen';
 import GlanceScreen from './src/screens/GlanceScreen';
+import HighlightsScreen from './src/screens/HighlightsScreen';
 import ItemDetailScreen from './src/screens/ItemDetailScreen';
 import JobsScreen from './src/screens/JobsScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
@@ -40,6 +44,7 @@ import { FloatingTabBar, type TabSpec } from './src/ui/nav/FloatingTabBar';
 import { dueCount } from './src/services/flashcards';
 import { Banner, ErrorBoundary, Loading, Screen } from './src/ui/components';
 import { ThemeProvider, useTheme } from './src/ui/theme';
+import { useSettings } from './src/ui/useSettings';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator<TabParamList>();
@@ -50,12 +55,15 @@ const TABS: Record<keyof TabParamList, TabSpec> = {
   Glance: { label: 'Glance', icon: ['grid', 'grid-outline'] },
   Library: { label: 'Library', icon: ['folder', 'folder-outline'] },
   Agent: { label: 'Ask', icon: ['chatbubble-ellipses', 'chatbubble-ellipses-outline'] },
+  Dev: { label: 'Dev', icon: ['code-slash', 'code-slash-outline'] },
 };
 
 function MainTabs() {
   const [captureOpen, setCaptureOpen] = useState(false);
   const due = useQuery(() => dueCount(), ['cards', 'items']).data ?? 0;
   const tabs = { ...TABS, Glance: { ...TABS.Glance, badge: due || undefined } };
+  // The Dev tab exists only for people who turned on Developer mode.
+  const devMode = !!useSettings()?.devMode;
   return (
     <>
       <Tabs.Navigator
@@ -65,6 +73,7 @@ function MainTabs() {
         <Tabs.Screen name="Today" component={TodayScreen} options={{ title: 'Home', tabBarAccessibilityLabel: 'Home' }} />
         <Tabs.Screen name="Glance" component={GlanceScreen} options={{ title: 'Glance', tabBarAccessibilityLabel: 'Glance' }} />
         <Tabs.Screen name="Library" component={LibraryScreen} />
+        {devMode ? <Tabs.Screen name="Dev" component={DevScreen} options={{ title: 'Dev', tabBarAccessibilityLabel: 'Developer mode' }} /> : null}
         <Tabs.Screen name="Agent" component={AgentScreen} options={{ title: 'Ask', tabBarAccessibilityLabel: 'Ask your library' }} />
       </Tabs.Navigator>
       <CaptureSheet
@@ -106,9 +115,17 @@ function Root() {
     const linkSub = Linking.addEventListener('url', ({ url }) => {
       if (url.includes('share')) void onResume().then(showShare);
     });
+    // Tapping a Qivra notification (revisit reminder, daily digest) opens the screen it links to.
+    const openLink = (r: Notifications.NotificationResponse | null) => {
+      const url = notificationLink(r?.notification.request.content.data);
+      if (url) void Linking.openURL(url);
+    };
+    void Notifications.getLastNotificationResponseAsync().then(openLink).catch(() => undefined);
+    const tapSub = Notifications.addNotificationResponseReceivedListener(openLink);
     return () => {
       appSub.remove();
       linkSub.remove();
+      tapSub.remove();
     };
   }, []);
 
@@ -125,7 +142,7 @@ function Root() {
     <NavigationContainer
       ref={nav}
       theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
-      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Glance: { path: 'glance', alias: ['study'] }, Library: 'library', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
+      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Glance: { path: 'glance', alias: ['study'] }, Library: 'library', Dev: 'dev', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
     >
       <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>
@@ -137,6 +154,7 @@ function Root() {
         <Stack.Screen name="ShareReceipt" component={ShareReceiptScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Collections" component={CollectionsScreen} />
         <Stack.Screen name="Review" component={ReviewScreen} />
+        <Stack.Screen name="Highlights" component={HighlightsScreen} />
         <Stack.Screen name="Reports" component={ReportsScreen} />
         <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />

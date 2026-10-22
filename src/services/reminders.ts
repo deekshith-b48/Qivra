@@ -11,6 +11,7 @@ import { Platform } from 'react-native';
 import { rangeFor } from '../core/dates';
 import { digestMessage } from '../core/digest';
 import { getRepo } from './db';
+import { emit } from './events';
 import { getSettings } from './settings';
 
 const CHANNEL = 'qivra-digest';
@@ -37,7 +38,7 @@ async function schedule(hour: number, minute: number): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(ID_KEY).catch(() => undefined);
   await Notifications.scheduleNotificationAsync({
     identifier: ID_KEY,
-    content: { ...content, data: { route: 'Today' } },
+    content: { ...content, data: { url: 'qivra://today' } },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute, channelId: CHANNEL },
   });
 }
@@ -64,4 +65,43 @@ export async function refreshDailyDigest(): Promise<void> {
 
 export async function disableDailyReminder(): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(ID_KEY).catch(() => undefined);
+}
+
+// ── Revisit reminders: "remind me about this item" ───────────────────────────
+const ITEM_CHANNEL = 'qivra-revisit';
+
+/** Schedule (or move) a reminder for one item. The notification opens that item. */
+export async function scheduleItemReminder(itemId: string, at: Date): Promise<'scheduled' | 'denied'> {
+  const current = await Notifications.getPermissionsAsync();
+  let granted = current.granted;
+  if (!granted && current.canAskAgain) granted = (await Notifications.requestPermissionsAsync()).granted;
+  if (!granted) return 'denied';
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(ITEM_CHANNEL, {
+      name: 'Revisit reminders', importance: Notifications.AndroidImportance.HIGH,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    });
+  }
+  const repo = await getRepo();
+  const item = await repo.getItem(itemId);
+  if (!item) return 'scheduled';
+  const old = await repo.reminderNotificationId(itemId);
+  if (old) await Notifications.cancelScheduledNotificationAsync(old).catch(() => undefined);
+  const id = await Notifications.scheduleNotificationAsync({
+    content: { title: 'Time to revisit', body: item.title || item.url || 'A saved item', data: { url: `qivra://item/${itemId}` } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: ITEM_CHANNEL },
+  });
+  await repo.setReminder(itemId, at.toISOString(), id);
+  emit('items');
+  return 'scheduled';
+}
+
+export async function clearItemReminders(itemIds: string[]): Promise<void> {
+  const repo = await getRepo();
+  for (const id of itemIds) {
+    const n = await repo.reminderNotificationId(id);
+    if (n) await Notifications.cancelScheduledNotificationAsync(n).catch(() => undefined);
+    await repo.setReminder(id, null, null);
+  }
+  emit('items');
 }

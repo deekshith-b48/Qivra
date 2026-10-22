@@ -260,6 +260,26 @@ CREATE INDEX IF NOT EXISTS idx_cards_due ON cards (due_at);
 CREATE INDEX IF NOT EXISTS idx_cards_item ON cards (item_id);
 `,
   },
+  {
+    version: 3,
+    name: 'favourites, highlights and revisit reminders',
+    sql: `
+ALTER TABLE items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE items ADD COLUMN remind_at TEXT;
+ALTER TABLE items ADD COLUMN remind_notification_id TEXT;
+
+CREATE TABLE IF NOT EXISTS highlights (
+  id         TEXT PRIMARY KEY,
+  item_id    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  text       TEXT NOT NULL,
+  start_ms   INTEGER,
+  source     TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_highlights_item ON highlights (item_id);
+CREATE INDEX IF NOT EXISTS idx_items_remind ON items (remind_at);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

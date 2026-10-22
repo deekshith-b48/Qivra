@@ -127,14 +127,14 @@ test('collections: rule builder sheet shows a live count and creates a smart col
   expect((await repo.listCollections())[0].rules).toEqual({ sourceTypes: ['youtube'], concepts: ['gin index'], savedWithinDays: 7, unread: true });
 });
 
-test('home shows every feature as a tile, and quick-capture tiles open the right mode', async () => {
+test('home shortcuts reach every feature that is not a tab, and quick-capture pills open the right mode', async () => {
   const n = nav() as { navigate: jest.Mock };
   wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
-  await screen.findByText('Everything in Qivra');
+  await screen.findByText('Shortcuts');
   const expected: [string, unknown[]][] = [
-    ['Library', ['Main', { screen: 'Library' }]], ['Collections', ['Collections']], ['Ask', ['Main', { screen: 'Agent' }]],
-    ['Glance', ['Main', { screen: 'Glance' }]], ['Review cards', ['Review']], ['Reports', ['Reports']], ['Queue', ['Jobs']],
-    ['Server', ['ConnectServer']], ['AI models', ['AiProviders']], ['Voice settings', ['VoiceSettings']], ['Privacy', ['PrivacyStorage']],
+    ['Collections', ['Collections']], ['Reports', ['Reports']], ['Review', ['Review']], ['Queue', ['Jobs']],
+    ['Server', ['ConnectServer']], ['AI models', ['AiProviders']], ['Speech', ['VoiceSettings']], ['Privacy', ['PrivacyStorage']],
+    ['Settings', ['Settings']],
   ];
   for (const [label, args] of expected) {
     fireEvent.press(screen.getByRole('button', { name: label }));

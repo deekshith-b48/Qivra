@@ -3,25 +3,27 @@ import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Image, Linking, Pressable, ScrollView, View } from 'react-native';
 import { formatLocal } from '../core/dates';
+import { formatReminder, reminderPresets } from '../core/reminderTimes';
 import { keyMomentsOf } from '../core/enrich';
 import { extractKeywords, type Keyword } from '../core/highlights';
 import { languageName, LANGUAGES } from '../core/language';
 import { isFailed, isPending, STATUS_LABELS } from '../core/status';
 import { formatTimestamp, type Segment } from '../core/transcripts';
 import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
-import type { Item, Transcript } from '../db/types';
+import type { Highlight, Item, Transcript } from '../db/types';
 import type { RootProps } from '../navigation/types';
 import { deleteItemFiles, pickMediaFile } from '../services/capture';
 import { getRepo } from '../services/db';
+import { clearItemReminders, scheduleItemReminder } from '../services/reminders';
 import { emit } from '../services/events';
 import { similarItems } from '../services/semantic';
 import { makeCards } from '../services/flashcards';
 import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
-import { ActionPill, Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
+import { ActionPill, Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Row, Screen, Section, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard } from '../ui/ItemCard';
 import { Markdown } from '../ui/Markdown';
-import { markdownProse } from '../core/metadata';
+import { markdownProse, stripMarkdown } from '../core/metadata';
 import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, Segmented, TimestampPill, type StepState } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
 import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
@@ -40,6 +42,14 @@ function stepsFor(item: Item, hasSpeech: boolean, hasArticle: boolean, isVideo: 
     { label: 'Summary', state: summary },
     { label: 'Ready', state: s === 'READY' ? 'done' : 'todo' },
   ];
+}
+
+/** Starting point for a custom reminder: tomorrow at the next whole hour. */
+function defaultCustom(): Date {
+  const d = new Date(Date.now() + 86_400_000);
+  d.setMinutes(0, 0, 0);
+  d.setHours(d.getHours() + 1);
+  return d;
 }
 
 /** A label for non-speech text sources (articles, READMEs, OCR); null for spoken transcripts. */
@@ -70,6 +80,11 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const [draft, setDraft] = useState('');
   const [langOpen, setLangOpen] = useState(false);
   const [correcting, setCorrecting] = useState<{ ordinal: number; text: string } | null>(null);
+  // Long-press on a transcript line, key moment or the summary: save it as a highlight, copy it, or correct it.
+  const [picked, setPicked] = useState<{ text: string; startMs: number | null; source: Highlight['source']; ordinal?: number } | null>(null);
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [custom, setCustom] = useState<Date | null>(null);
+  const highlights = useQuery((repo) => repo.listHighlights({ itemId: id }), ['items'], [id]);
   const heroRef = useRef<YouTubeHeroHandle>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [nowMs, setNowMs] = useState<number | null>(null);
@@ -183,10 +198,23 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   // While the embedded video plays, the line being spoken is highlighted.
   const playingIndex = nowMs === null ? -1 : (segs.data ?? []).reduce((best, sg, i) => (sg.startMs !== null && sg.startMs <= nowMs + 300 ? i : best), -1);
-  const shownSegs = (segs.data ?? []).map((s, i) => ({ ...s, i })).filter((s) => !focus || s.text.toLowerCase().includes(focus.toLowerCase()));
+  // A Markdown README is stored as one block: a keyword filter shows its matching paragraphs instead.
+  const isMd = activeT?.format === 'md';
+  const lineSource = isMd && activeT ? stripMarkdown(activeT.text).split(/\n{2,}/).map((text) => ({ startMs: null, endMs: null, text: text.trim() })).filter((p) => p.text) : segs.data ?? [];
+  const shownSegs = lineSource.map((s, i) => ({ ...s, i })).filter((s) => !focus || s.text.toLowerCase().includes(focus.toLowerCase()));
   const info = item.errorCode?.startsWith('INFO_');
   const generating = !!d.aiJob && (d.aiJob.status === 'queued' || d.aiJob.status === 'running');
   const moments = keyMomentsOf(e);
+  const saveHighlight = () => run(async () => {
+    if (!picked) return;
+    await repoOp((r) => r.addHighlight({ itemId: id, text: picked.text, startMs: picked.startMs, source: picked.source }));
+    setPicked(null);
+  }, 'Could not save the highlight');
+  const remind = (at: Date) => run(async () => {
+    if ((await scheduleItemReminder(id, at)) === 'denied') Alert.alert('Notifications are off', 'Allow notifications for Qivra in Android settings to get reminders.');
+    setRemindOpen(false);
+    setCustom(null);
+  }, 'Could not set the reminder');
   // Error banners offer at most one primary and one secondary action.
   type Action = { title: string; icon: IconName; onPress: () => void };
   const importT: Action = { title: 'Import transcript', icon: 'document-text-outline', onPress: () => navigation.navigate('TranscriptImport', { itemId: id }) };
@@ -199,7 +227,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   const textTab = ordered.length > 0;
   const syncLabel = item.syncStatus === 'pending' ? 'Not synced yet' : item.syncStatus === 'conflicted' ? 'Sync conflict' : item.syncStatus === 'failed' ? 'Sync failed' : null;
-  const meta = [item.author, formatLocal(item.capturedAt, tz, { dateStyle: 'medium', timeStyle: 'short' }), item.language !== 'und' ? languageName(item.language) : '', item.origin === 'superbrain' ? 'From SuperBrain' : ''].filter(Boolean).join(' · ');
+  const meta = [item.author, formatLocal(item.capturedAt, tz, { dateStyle: 'medium', timeStyle: 'short' }), item.language !== 'und' ? languageName(item.language) : '', item.origin === 'superbrain' ? 'Imported' : ''].filter(Boolean).join(' · ');
   const showFocus = (term: string | null) => {
     setFocus(term);
     if (term) setTab('text');
@@ -243,7 +271,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           {generating ? <Provenance origin="generating" /> : null}
         </View>
         {item.summary ? (
-          <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} selectable />
+          <Pressable onLongPress={() => setPicked({ text: item.summary, startMs: null, source: 'summary' })} accessibilityHint="Long press to save as a highlight or copy">
+            <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} />
+          </Pressable>
         ) : (
           <T color="textFaint" style={{ marginTop: space.sm }}>{isPending(item.status) || item.status === 'TRANSCRIBING' ? 'The summary appears once the transcript is ready.' : 'No summary yet — there is no text to summarise.'}</T>
         )}
@@ -258,10 +288,26 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
               ) : (
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent, marginTop: 8, marginRight: 4 }} />
               )}
-              <HighlightedText text={k.text} terms={terms} style={{ flex: 1, fontSize: 14 }} />
+              <Pressable style={{ flex: 1 }} onLongPress={() => setPicked({ text: k.text, startMs: k.startMs, source: 'moment' })} accessibilityHint="Long press to save as a highlight or copy">
+                <HighlightedText text={k.text} terms={terms} style={{ fontSize: 14 }} />
+              </Pressable>
             </View>
           ))}
           {moments.length > 4 ? <Button kind="text" title={allMoments ? 'Show fewer' : `Show all (${moments.length})`} onPress={() => setAllMoments(!allMoments)} style={{ alignSelf: 'flex-start' }} /> : null}
+        </Section>
+      ) : null}
+
+      {highlights.data?.length ? (
+        <Section title="Your highlights">
+          {highlights.data.map((h) => (
+            <View key={h.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, marginBottom: space.sm, paddingLeft: space.md, borderLeftWidth: 3, borderLeftColor: c.tint.orange }}>
+              <View style={{ flex: 1 }}>
+                <T v="small" selectable>{h.text}</T>
+                {h.startMs !== null ? <View style={{ marginTop: 4, alignSelf: 'flex-start' }}><TimestampPill label={formatTimestamp(h.startMs)} onPress={ytId ? () => openAt(h.startMs) : undefined} /></View> : null}
+              </View>
+              <IconButton icon="close" size={16} label="Remove highlight" onPress={() => void run(() => repoOp((r) => r.deleteHighlight(h.id)))} />
+            </View>
+          ))}
         </Section>
       ) : null}
 
@@ -333,7 +379,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
               <View key={s.i} style={{ flexDirection: 'row', gap: space.md, paddingVertical: 6, paddingHorizontal: 4, borderRadius: radius.sm, backgroundColor: s.i === playingIndex ? c.accentSoft : 'transparent' }}
                 accessibilityState={{ selected: s.i === playingIndex }}>
                 {s.startMs !== null ? <TimestampPill label={formatTimestamp(s.startMs)} onPress={ytId ? () => openAt(s.startMs) : undefined} /> : null}
-                <Pressable style={{ flex: 1 }} onLongPress={() => setCorrecting({ ordinal: s.i, text: s.text })} accessibilityHint="Long press to correct this line">
+                <Pressable style={{ flex: 1 }} onLongPress={() => setPicked({ text: s.text, startMs: s.startMs, source: 'transcript', ordinal: isMd ? undefined : s.i })} accessibilityHint="Long press to save as a highlight, copy or correct this line">
                   <HighlightedText text={s.text} terms={focus ? [focus] : terms} style={{ fontSize: 15, lineHeight: 23 }} />
                 </Pressable>
               </View>
@@ -341,7 +387,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
             {!shownSegs.length ? <T color="textMuted">No lines match.</T> : null}
           </Card>
           {shownSegs.length > 500 ? <T v="small" color="textMuted">Showing the first 500 lines.</T> : null}
-          <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>{ytId ? 'Tap a timestamp to play it here · ' : ''}Long-press a line to correct it.</T>
+          <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>{ytId ? 'Tap a timestamp to play it here · ' : ''}Long-press a line to save it as a highlight or correct it.</T>
         </>
       )}
     </>
@@ -414,6 +460,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         title=""
         onBack={() => navigation.goBack()}
         actions={<>
+          <IconButton icon={item.favorite ? 'star' : 'star-outline'} color={item.favorite ? c.tint.yellow : undefined} label={item.favorite ? 'Remove from favourites' : 'Add to favourites'} onPress={() => void run(() => repoOp((r) => r.setFavorite([id], !item.favorite)))} />
           <IconButton icon={item.archived ? 'arrow-undo-outline' : 'archive-outline'} label={item.archived ? 'Restore from archive' : 'Archive'} onPress={() => void run(() => repoOp((r) => r.setArchived([id], !item.archived)))} />
           <IconButton icon="trash-outline" label="Delete item" color={c.danger} onPress={() => void del()} />
         </>}
@@ -460,6 +507,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
                 : r.total ? `No new cards · ${r.total} already made` : (r.note ?? 'No cards could be made.'));
             }, 'Could not make flashcards')} />
           {cardCount.data ? <ActionPill icon="school-outline" label="Review" onPress={() => navigation.navigate('Review')} /> : null}
+          <ActionPill icon={item.remindAt ? 'notifications' : 'notifications-outline'} label={item.remindAt ? formatReminder(item.remindAt, new Date()) : 'Remind'} a11yLabel={item.remindAt ? `Reminder set for ${formatReminder(item.remindAt, new Date())}` : 'Remind me to revisit'} onPress={() => setRemindOpen(true)} />
           {item.url ? <ActionPill icon="open-outline" label="Open" a11yLabel="Open original" onPress={() => void Linking.openURL(item.url!)} /> : null}
         </ScrollView>
         {cardsMsg ? <T v="caption" color="textMuted" accessibilityLiveRegion="polite" style={{ marginTop: space.xs }}>{cardsMsg}</T> : null}
@@ -502,6 +550,31 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
             <Chip key={l.code} label={l.name} selected={activeT?.language === l.code} onPress={() => void run(async () => { if (activeT) await repoOp((r) => r.setTranscriptLanguage(activeT.id, l.code)); setLangOpen(false); })} />
           ))}
         </View>
+      </Sheet>
+      <Sheet visible={!!picked} onClose={() => setPicked(null)} title={picked?.source === 'transcript' ? 'This line' : picked?.source === 'summary' ? 'Summary' : 'Key moment'}>
+        <T v="small" color="textMuted" numberOfLines={4} style={{ marginBottom: space.md }}>{picked?.startMs != null ? `${formatTimestamp(picked.startMs)} · ` : ''}{picked?.text}</T>
+        <Button title="Save highlight" icon="bookmark-outline" onPress={() => void saveHighlight()} />
+        <Button kind="outline" title="Copy" icon="copy-outline" style={{ marginTop: space.sm }} onPress={() => void Clipboard.setStringAsync(picked?.text ?? '').then(() => setPicked(null))} />
+        {picked?.ordinal !== undefined ? (
+          <Button kind="outline" title="Correct line" icon="create-outline" style={{ marginTop: space.sm }} onPress={() => { setCorrecting({ ordinal: picked.ordinal!, text: picked.text }); setPicked(null); }} />
+        ) : null}
+      </Sheet>
+      <Sheet visible={remindOpen} onClose={() => { setRemindOpen(false); setCustom(null); }} title="Remind me to revisit">
+        {reminderPresets(new Date()).map((p) => (
+          <Row key={p.key} icon="alarm-outline" tint={c.tint.orange} title={p.label} value={formatReminder(p.at.toISOString(), new Date())} onPress={() => void remind(p.at)} />
+        ))}
+        <View style={{ marginTop: space.md }}>
+          <T v="caption" color="textMuted">Custom</T>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.xs }}>
+            <IconButton icon="remove" label="One day earlier" onPress={() => setCustom((d) => new Date((d ?? defaultCustom()).getTime() - 86_400_000))} />
+            <IconButton icon="add" label="One day later" onPress={() => setCustom((d) => new Date((d ?? defaultCustom()).getTime() + 86_400_000))} />
+            <T style={{ flex: 1, textAlign: 'center', fontWeight: '600' }}>{formatReminder((custom ?? defaultCustom()).toISOString(), new Date())}</T>
+            <IconButton icon="chevron-down" label="One hour earlier" onPress={() => setCustom((d) => new Date((d ?? defaultCustom()).getTime() - 3_600_000))} />
+            <IconButton icon="chevron-up" label="One hour later" onPress={() => setCustom((d) => new Date((d ?? defaultCustom()).getTime() + 3_600_000))} />
+          </View>
+          <Button title="Set reminder" icon="notifications-outline" style={{ marginTop: space.sm }} disabled={(custom ?? defaultCustom()).getTime() <= Date.now()} onPress={() => void remind(custom ?? defaultCustom())} />
+        </View>
+        {item.remindAt ? <Button kind="text" title="Remove reminder" icon="close" style={{ marginTop: space.sm }} onPress={() => void run(async () => { await clearItemReminders([id]); setRemindOpen(false); })} /> : null}
       </Sheet>
       <Sheet visible={!!correcting} onClose={() => setCorrecting(null)} title="Correct this line">
         <Field label="Text" value={correcting?.text ?? ''} onChangeText={(t) => setCorrecting((x) => (x ? { ...x, text: t } : x))} multiline />

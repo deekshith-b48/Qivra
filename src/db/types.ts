@@ -42,6 +42,10 @@ export interface Item {
   createdAt: string;
   updatedAt: string;
   lastViewedAt: string | null;
+  /** Starred by the user (this phone only). */
+  favorite: boolean;
+  /** A revisit reminder is set for this time (this phone only). */
+  remindAt: string | null;
   archived: boolean;
   deleted: boolean;
   localRev: number;
@@ -84,6 +88,16 @@ export interface CollectionSuggestion {
   kind: 'concept' | 'tag';
   count: number;
   rules: SmartRules;
+}
+
+/** A quote saved from an item: a transcript line, key moment or summary sentence (this phone only). */
+export interface Highlight {
+  id: string;
+  itemId: string;
+  text: string;
+  startMs: number | null;
+  source: 'transcript' | 'moment' | 'summary';
+  createdAt: string;
 }
 
 /** A local-only flashcard with its spaced-repetition state. */

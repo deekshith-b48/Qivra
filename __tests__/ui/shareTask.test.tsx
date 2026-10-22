@@ -2,7 +2,7 @@ import * as FS from 'expo-file-system/legacy';
 import { drainShareInbox } from '../../src/services/capture';
 import { getRepo } from '../../src/services/db';
 import { readyMessage } from '../../src/services/notify';
-import { runDueJobs } from '../../src/services/processing';
+import { recoverIfIdle, runDueJobs } from '../../src/services/processing';
 import { runShareTask } from '../../src/services/shareTask';
 import { resetTestRepo } from '../helpers/uiSetup';
 
@@ -14,7 +14,7 @@ jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn(async () => ({ exists: false })),
 }));
 jest.mock('../../src/services/capture', () => ({ drainShareInbox: jest.fn() }));
-jest.mock('../../src/services/processing', () => ({ runDueJobs: jest.fn(async () => 0), wakeServerJobs: jest.fn(async () => undefined) }));
+jest.mock('../../src/services/processing', () => ({ runDueJobs: jest.fn(async () => 0), wakeServerJobs: jest.fn(async () => undefined), recoverIfIdle: jest.fn(async () => 0) }));
 jest.mock('../../src/services/server', () => ({ getConnection: jest.fn(async () => null), checkConnection: jest.fn() }));
 
 beforeEach(() => {
@@ -81,4 +81,11 @@ test('notification text covers each outcome', () => {
   expect(readyMessage({ ...base, status: 'READY' } as never).body).toBe('Saved to your library.');
   expect(readyMessage({ ...base, status: 'TRANSCRIBING' } as never).title).toBe('Saved: Reel');
   expect(readyMessage({ ...base, status: 'FAILED_PERMANENT' } as never).title).toBe('Could not finish: Reel');
+});
+
+test('a background share first recovers jobs left running by a killed app', async () => {
+  jest.mocked(drainShareInbox).mockResolvedValue({ results: [], rejected: [] });
+  jest.mocked(recoverIfIdle).mockClear();
+  await runShareTask();
+  expect(recoverIfIdle).toHaveBeenCalledTimes(1);
 });

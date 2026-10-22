@@ -22,6 +22,7 @@ import { runSync as runSyncRaw } from '../sync/engine';
 import { aiInfo, loadProvider } from './ai';
 import { deleteLocalFiles } from './capture';
 import { getRepo } from './db';
+import { fetchText } from './http';
 import { emit } from './events';
 import { getClient, getConnection } from './server';
 import { generateReport } from './reports';
@@ -40,20 +41,6 @@ const SERVER_RETRY_MS = 60_000;
 /** Make queued server jobs due now (called when the server is reachable again). */
 export async function wakeServerJobs(repo: Repo): Promise<void> {
   await repo.db.run(`UPDATE jobs SET run_after = ? WHERE status IN ('queued','failed_retryable') AND kind LIKE 'server_%'`, [new Date().toISOString()]);
-}
-
-async function fetchText(url: string, opts: { accept: string; timeoutMs: number }) {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), opts.timeoutMs);
-  try {
-    // Some sites (e.g. Wikipedia) reject the HTTP library's default User-Agent.
-    const res = await fetch(url, { headers: { Accept: opts.accept, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36 Qivra/1.1' }, signal: ctl.signal });
-    const len = Number(res.headers.get('content-length') ?? 0);
-    if (len > 3_000_000) return { ok: false, status: 413, text: '', contentType: '' };
-    return { ok: res.ok, status: res.status, text: await res.text(), contentType: res.headers.get('content-type') ?? '' };
-  } finally {
-    clearTimeout(t);
-  }
 }
 
 /** Move an item through the state machine, tolerating repeated runs. */
@@ -124,7 +111,8 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
               segments: [{ startMs: null, endMs: null, text: meta.markdown || meta.bodyText }],
             });
           }
-        } else {
+        } else if (!item.metadata) {
+          // Only mark "unavailable" the first time: a failed refetch (e.g. GitHub's rate limit) keeps what was saved.
           item = (await repo.updateItem(item.id, { metadata: { fetchedAt: new Date().toISOString(), provider: 'unavailable' } })) ?? item;
         }
       } catch {
@@ -447,6 +435,15 @@ async function handleScheduledReport(): Promise<Record<string, unknown>> {
 }
 
 let running = false;
+
+/**
+ * Re-queue jobs left 'running' by a killed process, but only when no job loop is
+ * active in this JS context (the open app may be running one right now).
+ */
+export async function recoverIfIdle(): Promise<number> {
+  if (running) return 0;
+  return (await getRepo()).recoverRunningJobs();
+}
 
 /** Claim and execute due jobs. Safe to call often; only one loop runs per JS context. */
 export async function runDueJobs(budgetMs = 25_000): Promise<number> {

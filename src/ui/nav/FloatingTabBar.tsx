@@ -27,7 +27,7 @@ export interface TabSpec {
   badge?: number;
 }
 
-export const BAR_HEIGHT = 64;
+export const BAR_HEIGHT = 58;
 const BAR_GAP = 12;
 
 /** Bottom space a screen must leave for the floating bar. */
@@ -57,6 +57,8 @@ export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, ad
   // A screen hides the bar with React Navigation's own option: tabBarStyle: { display: 'none' }.
   const focusedStyle = descriptors[state.routes[state.index]?.key]?.options.tabBarStyle as { display?: string } | undefined;
   if (keyboard || focusedStyle?.display === 'none') return null;
+  // Five tabs (Dev mode) still fit a phone-width capsule with tighter padding.
+  const tight = state.routes.length > 4;
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 8) + BAR_GAP }]}>
@@ -81,7 +83,7 @@ export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, ad
               accessibilityRole="tab"
               accessibilityLabel={spec.badge ? `${label}, ${spec.badge} due` : label}
               accessibilityState={{ selected: focused }}
-              style={[styles.tab, focused && [styles.activeTab, { backgroundColor: c.navActive }, c.scheme === 'light' && shadow.button]]}
+              style={[styles.tab, tight && styles.tabTight, focused && [styles.activeTab, tight && styles.activeTight, { backgroundColor: c.navActive }, c.scheme === 'light' && shadow.button]]}
             >
               <View>
                 <Ionicons name={spec.icon[focused ? 0 : 1]} size={22} color={focused ? c.onNavActive : c.navIcon} />
@@ -114,6 +116,8 @@ const styles = StyleSheet.create({
   },
   tab: { height: BAR_HEIGHT - 12, minWidth: 52, borderRadius: (BAR_HEIGHT - 12) / 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
   activeTab: { paddingHorizontal: 18 },
+  tabTight: { minWidth: 44, paddingHorizontal: 10 },
+  activeTight: { paddingHorizontal: 14 },
   badge: { position: 'absolute', top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   badgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   fab: { width: BAR_HEIGHT, height: BAR_HEIGHT, borderRadius: BAR_HEIGHT / 2, shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 },

@@ -1,6 +1,6 @@
 # Security and privacy
 
-## Findings in the SuperBrain baseline (all fixed)
+## Findings in the original baseline (all fixed)
 
 | # | Issue | Fix |
 |---|---|---|
@@ -39,6 +39,6 @@
 ## Known limitations
 
 - The release APK is signed with the Android **debug key** — anyone with that well-known key could sign an "update". Create a private release keystore before distributing beyond yourself.
-- The server's legacy SuperBrain routes (`/analyze`, `/export`, `/settings/*`, `/reset/*`) are still powerful; they now require loopback or a paired device.
+- The server's legacy routes (`/analyze`, `/export`, `/settings/*`, `/reset/*`) are still powerful; they now require loopback or a paired device.
 - SQLite on the device is not encrypted beyond Android's file-based encryption (SQLCipher was not enabled).
 - In-memory rate-limit counters reset when the server restarts (codes still expire within 5 minutes).

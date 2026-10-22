@@ -13,7 +13,7 @@ import type { Item } from '../db/types';
 import { drainShareInbox } from './capture';
 import { getRepo } from './db';
 import { type ReadyNote, readyNote, writeShareResult } from './notify';
-import { runDueJobs, wakeServerJobs } from './processing';
+import { recoverIfIdle, runDueJobs, wakeServerJobs } from './processing';
 import { checkConnection, getConnection } from './server';
 
 export const SHARE_TASK_NAME = 'QivraShare';
@@ -41,6 +41,8 @@ export async function runShareTask(opts: { budgetMs?: number; pollMs?: number } 
     const poll = opts.pollMs ?? POLL_MS;
     const deadline = Date.now() + budget;
     const repo = await getRepo();
+    // Android may have killed Qivra mid-job; the app is not open to recover it, so do it here.
+    await recoverIfIdle().catch(() => 0);
     const shared = await drainShareInbox();
     // Duplicates are notified too: the user shared it again and expects to land on it.
     itemIds = [...new Set(shared.results.filter((r) => r.itemId && !r.error).map((r) => r.itemId as string))];

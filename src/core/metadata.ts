@@ -126,7 +126,7 @@ export function cleanMarkdown(md: string): string {
       .replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, '') // linked badges
       .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
       .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/?[a-zA-Z][^>]*>/g, '') // HTML tags (their text stays)
+      .replace(/<\/?(?!https?:)[a-zA-Z][^>]*>/g, '') // HTML tags (their text stays); <https://…> autolinks are kept
       .replace(/\[\s*\]\([^)]*\)/g, '') // links left empty
       .replace(/^[ \t]+(#{1,6}\s)/gm, '$1')
       .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, (e) => decodeEntities(e))

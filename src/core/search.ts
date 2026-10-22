@@ -22,9 +22,13 @@ export interface LibraryFilter {
   concepts?: string[];
   /** Only items never opened. */
   unread?: boolean;
+  /** Only starred items. */
+  favorite?: boolean;
+  /** Only items opened at least once ("Recently viewed", with sort 'viewed'). */
+  viewed?: boolean;
 }
 
-export type SortKey = 'newest' | 'oldest' | 'title' | 'updated';
+export type SortKey = 'newest' | 'oldest' | 'title' | 'updated' | 'viewed';
 
 /** Turn free text into a safe FTS5 MATCH expression (AND of prefix terms). */
 export function buildFtsQuery(text: string): string | null {
@@ -77,6 +81,8 @@ export function buildFilterSql(f: LibraryFilter, alias = 'i'): { where: string; 
     params.push(concept.toLowerCase());
   }
   if (f.unread) clauses.push(`${alias}.last_viewed_at IS NULL`);
+  if (f.favorite) clauses.push(`${alias}.favorite = 1`);
+  if (f.viewed) clauses.push(`${alias}.last_viewed_at IS NOT NULL`);
   if (f.hasTranscript !== undefined) {
     clauses.push(`${f.hasTranscript ? '' : 'NOT '}EXISTS (SELECT 1 FROM transcripts tr WHERE tr.item_id = ${alias}.id)`);
   }
@@ -91,6 +97,8 @@ export function orderBySql(sort: SortKey, alias = 'i'): string {
       return `${alias}.title COLLATE NOCASE ASC, ${alias}.id ASC`;
     case 'updated':
       return `${alias}.updated_at DESC, ${alias}.id DESC`;
+    case 'viewed':
+      return `${alias}.last_viewed_at DESC, ${alias}.id DESC`;
     default:
       return `${alias}.captured_at DESC, ${alias}.id DESC`;
   }

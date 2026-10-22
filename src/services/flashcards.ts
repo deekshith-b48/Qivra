@@ -7,6 +7,7 @@
 import { clozeCards, flashcardPrompt, flashcardSource, type CardDraft, type Grade, parseFlashcards, schedule, sourceEvidence } from '../core/flashcards';
 import type { Card } from '../db/types';
 import { loadProvider } from './ai';
+import { noteCardReviewed } from './devFeeds';
 import { getRepo } from './db';
 import { emit } from './events';
 
@@ -70,6 +71,7 @@ export async function gradeCard(cardId: string, grade: Grade, now = new Date()):
   if (!card) return null;
   const next = schedule(card, grade, now);
   await repo.saveCardSchedule({ id: card.id, ...next });
+  await noteCardReviewed().catch(() => undefined); // daily habit (Dev mode)
   emit('cards');
   return { ...card, ...next };
 }

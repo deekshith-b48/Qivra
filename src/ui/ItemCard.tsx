@@ -55,6 +55,19 @@ export function StatusDot({ status }: { status: Item['status'] }) {
   );
 }
 
+/** Small inline marks before a title: a star for favourites, a bell for a revisit reminder. */
+function Marks({ item }: { item: Item }) {
+  const { c } = useTheme();
+  if (!item.favorite && !item.remindAt) return null;
+  return (
+    <>
+      {item.favorite ? <Ionicons name="star" size={14} color={c.tint.yellow} accessibilityLabel="Favourite" /> : null}
+      {item.remindAt ? <Ionicons name="notifications" size={13} color={c.tint.orange} accessibilityLabel="Reminder set" /> : null}
+      {' '}
+    </>
+  );
+}
+
 export function SyncChip({ status }: { status: Item['syncStatus'] }) {
   if (status === 'local_only' || status === 'synced') return null;
   return <Chip label={status === 'pending' ? 'Not synced yet' : status === 'conflicted' ? 'Sync conflict' : 'Sync failed'} tone={status === 'pending' ? 'neutral' : 'danger'} icon="sync-outline" />;
@@ -90,7 +103,7 @@ export function ItemCard({ item, onPress, onLongPress, selected, timezone, grid,
           </View>
         )}
         <View style={{ flex: grid ? undefined : 1 }}>
-          <T v="subtitle" numberOfLines={2}>{title}</T>
+          <T v="subtitle" numberOfLines={2}><Marks item={item} />{title}</T>
           {tldr && !grid ? <T v="small" color="textMuted" numberOfLines={1} style={{ marginTop: 2 }}>{tldr}</T> : null}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 6, gap: 6 }}>
             <T v="caption" color="textFaint">{SOURCE_LABELS[item.sourceType]} · {formatLocal(item.capturedAt, timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</T>
@@ -133,7 +146,7 @@ export function VideoCard({ item, onPress, onLongPress, selected, timezone, acti
         {selected ? <Ionicons name="checkmark-circle" size={28} color={c.accent} style={{ position: 'absolute', top: space.sm, right: space.sm }} /> : null}
       </View>
       <View style={{ paddingTop: space.sm, paddingHorizontal: 2 }}>
-        <T v="subtitle" numberOfLines={2}>{title}</T>
+        <T v="subtitle" numberOfLines={2}><Marks item={item} />{title}</T>
         {item.summary ? <T v="small" color="textMuted" numberOfLines={2} style={{ marginTop: 2 }}>{item.summary}</T> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6 }}>
           <T v="caption" color="textFaint">{[item.author, formatLocal(item.capturedAt, timezone, { month: 'short', day: 'numeric' })].filter(Boolean).join(' · ')}</T>
@@ -174,7 +187,7 @@ export function VideoTile({ item, onPress, onLongPress, selected, actions }: { i
         ) : null}
         {selected ? <Ionicons name="checkmark-circle" size={24} color={c.accent} style={{ position: 'absolute', top: 6, right: 6 }} /> : null}
       </View>
-      <T v="small" numberOfLines={2} style={{ marginTop: 6, fontWeight: '600' }}>{title}</T>
+      <T v="small" numberOfLines={2} style={{ marginTop: 6, fontWeight: '600' }}><Marks item={item} />{title}</T>
     </Pressable>
   );
 }

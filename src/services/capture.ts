@@ -11,6 +11,7 @@ import { isShareEnvelope, MAX_MEDIA_BYTES, MAX_TRANSCRIPT_BYTES, mediaKindOf, no
 import { parseTranscript, TranscriptParseError, type TranscriptFormat } from '../core/transcripts';
 import { Repo } from '../db/repo';
 import { getRepo } from './db';
+import { clearItemReminders } from './reminders';
 import { emit } from './events';
 import { schedulePipeline } from './processing';
 
@@ -229,7 +230,9 @@ export async function pickMediaFile(attachTo?: string): Promise<CaptureResult | 
   return { itemId, title: safeFileName(a.name), kind: 'media_file', duplicate: false, status: 'CAPTURED' };
 }
 
+/** Before deleting items: remove their local files and cancel their revisit reminders. */
 export async function deleteItemFiles(itemIds: string[]): Promise<void> {
+  await clearItemReminders(itemIds).catch(() => undefined);
   const repo = await getRepo();
   for (const id of itemIds) await deleteLocalFiles((await repo.listMedia(id)).map((m) => m.uri));
 }

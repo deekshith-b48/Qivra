@@ -12,6 +12,7 @@ import { formatTimestamp } from '../core/transcripts';
 import { getRepo } from '../services/db';
 import { searchByMeaning } from '../services/semantic';
 import { Chip, EmptyState, Loading, T } from './components';
+import { useQuery } from './hooks';
 import { PlatformBadge } from './media';
 import { space, useTheme } from './theme';
 
@@ -53,6 +54,8 @@ export function SearchResults({ query, onOpen, bottomInset = 120 }: { query: str
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [meaning, setMeaning] = useState<SearchHit[]>([]);
+  // Your saved highlights whose text contains the query.
+  const quotes = useQuery(async (repo) => (query.trim().length >= 2 ? repo.listHighlights({ text: query.trim(), limit: 5 }) : []), ['items'], [query]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,11 +113,24 @@ export function SearchResults({ query, onOpen, bottomInset = 120 }: { query: str
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: bottomInset + space.lg }}
       ListHeaderComponent={
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: space.sm }}>
-          {(['all', 'transcripts', 'notes'] as const).map((s) => (
-            <Chip key={s} label={s === 'all' ? 'Everything' : s === 'transcripts' ? 'In transcripts' : 'Notes & summaries'} selected={scope === s} onPress={() => setScope(s)} />
-          ))}
-        </View>
+        <>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: space.sm }}>
+            {(['all', 'transcripts', 'notes'] as const).map((s) => (
+              <Chip key={s} label={s === 'all' ? 'Everything' : s === 'transcripts' ? 'In transcripts' : 'Notes & summaries'} selected={scope === s} onPress={() => setScope(s)} />
+            ))}
+          </View>
+          {quotes.data?.length ? (
+            <View style={{ marginBottom: space.sm }}>
+              <T v="caption" color="textMuted" accessibilityRole="header" style={{ marginBottom: space.xs }}>YOUR HIGHLIGHTS</T>
+              {quotes.data.map((h) => (
+                <Pressable key={h.id} onPress={() => onOpen(h.itemId)} accessibilityRole="button" accessibilityLabel={`Highlight: ${h.text}`}
+                  style={{ paddingVertical: space.xs, paddingLeft: space.md, borderLeftWidth: 3, borderLeftColor: c.tint.orange, marginBottom: space.xs }}>
+                  <T v="small" numberOfLines={3}>{h.text}</T>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </>
       }
       renderItem={({ item: h }) => renderRow(h)}
       ListFooterComponent={
@@ -128,7 +144,7 @@ export function SearchResults({ query, onOpen, bottomInset = 120 }: { query: str
           ) : null}
         </>
       }
-      ListEmptyComponent={!loading && hits && !extra.length ? <EmptyState icon="search-outline" title="No results" body="Nothing you saved mentions that. Try fewer or different words." /> : null}
+      ListEmptyComponent={!loading && hits && !extra.length && !quotes.data?.length ? <EmptyState icon="search-outline" title="No results" body="Nothing you saved mentions that. Try fewer or different words." /> : null}
     />
   );
 }

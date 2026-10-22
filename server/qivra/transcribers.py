@@ -10,8 +10,8 @@ Order for QIVRA_TRANSCRIBER=auto (default, local only):
   1. transcribe-anything (https://github.com/zackees/transcribe-anything, BSD-3-Clause for pinned 4.1.2)
      — preferred on Apple Silicon, where it uses the MLX backend; also cpu/cuda.
   2. faster-whisper (in-process, CPU int8).
-  3. SuperBrain's analyzers.audio_transcribe (Groq Whisper API / openai-whisper).
-Set QIVRA_TRANSCRIBER to one of: auto, groq, transcribe-anything, faster-whisper, superbrain.
+  3. The built-in analyzers.audio_transcribe (Groq Whisper API / openai-whisper).
+Set QIVRA_TRANSCRIBER to one of: auto, groq, transcribe-anything, faster-whisper, whisper.
 Every engine returns real segments with millisecond timestamps when it has them.
 """
 
@@ -75,12 +75,13 @@ def available_engines() -> list[str]:
         engines.append("transcribe-anything")
     if importlib.util.find_spec("faster_whisper") is not None:
         engines.append("faster-whisper")
-    engines.append("superbrain")
+    engines.append("whisper")
     return engines
 
 
 def selected_engine() -> str:
     wanted = os.getenv("QIVRA_TRANSCRIBER", "auto").strip().lower()
+    wanted = {"superbrain": "whisper"}.get(wanted, wanted)  # older qivra.env files
     engines = available_engines()
     if wanted != "auto":
         if wanted not in engines:
@@ -93,7 +94,7 @@ def selected_engine() -> str:
         return "faster-whisper"
     if "transcribe-anything" in engines:
         return "transcribe-anything"
-    return "superbrain"
+    return "whisper"
 
 
 def describe() -> dict:
@@ -308,7 +309,7 @@ def _sb_transcribe(path: Path) -> tuple[list[dict], str, str]:
     return [{"start_ms": None, "end_ms": None, "text": text}], lang, provider
 
 
-ENGINES = {"groq": _groq_transcribe, "transcribe-anything": _ta_transcribe, "faster-whisper": _fw_transcribe, "superbrain": _sb_transcribe}
+ENGINES = {"groq": _groq_transcribe, "transcribe-anything": _ta_transcribe, "faster-whisper": _fw_transcribe, "whisper": _sb_transcribe}
 
 
 def transcribe_file(path: Path) -> tuple[list[dict], str, str]:

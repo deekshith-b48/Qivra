@@ -5,10 +5,10 @@
  ┌──────────────────────────────────────────────┐             ┌─────────────────────────────────┐
  │ ShareActivity.kt ──► files/share_inbox/*.json │             │ python -m qivra serve [--lan]    │
  │        │ QivraShareTaskService (headless JS)   │   HTTP(S)   │  ├─ /api/health, /api/v1/* (qivra)│
- │ App.tsx ─ screens ─ ui                         │ ◄─────────► │  ├─ legacy SuperBrain routes      │
+ │ App.tsx ─ screens ─ ui                         │ ◄─────────► │  ├─ legacy routes      │
  │   services: capture · processing · server      │  Bearer     │  ├─ jobs thread (metadata,        │
  │            agent · reports · background        │  device     │  │   captions, Whisper, enrich)   │
- │   core: url share transcripts enrich search    │  credential │  └─ SQLite superbrain.db          │
+ │   core: url share transcripts enrich search    │  credential │  └─ SQLite database          │
  │         dates qr agent reports api ai          │             │      (analyses + qv_* tables)     │
  │   db: qivra.db (SQLite + FTS5)   sync engine   │             └─────────────────────────────────┘
  │   SecureStore (Keystore): device token, AI key │
@@ -59,7 +59,7 @@ Only `plugins/android/ShareActivity.kt` and `plugins/android/QivraShareTaskServi
 
 ## Server
 
-`server/qivra/`: `config` · `store` (qv_* tables, migrations, legacy mirror) · `pairing` (codes, credentials, rate limiter) · `security` (Host/Origin/size guards, auth, headers) · `api_v1` · `jobs` · `knowledge` (retrieval, agent, reports) · `transcripts` · `transcribers` (Groq / local Whisper) · `media` (downloads) · `video_ocr` · `embeddings` (local fastembed) · `ai_gateway` (AI proxy; the key stays on the laptop) · `metadata` · `ai` · `netinfo` · `__main__` (launcher). The old SuperBrain app (`server/api.py`, `main.py`, `core/`, `analyzers/`, `instagram/`) is still mounted for the SuperBrain Android app and its database mirror; Qivra code imports only `core.model_router`, `analyzers.audio_transcribe` and `analyzers.caption` from it. API contract: `docs/LOCAL_SERVER_AND_QR_PAIRING.md`.
+`server/qivra/`: `config` · `store` (qv_* tables, migrations, legacy mirror) · `pairing` (codes, credentials, rate limiter) · `security` (Host/Origin/size guards, auth, headers) · `api_v1` · `jobs` · `knowledge` (retrieval, agent, reports) · `transcripts` · `transcribers` (Groq / local Whisper) · `media` (downloads) · `video_ocr` · `embeddings` (local fastembed) · `ai_gateway` (AI proxy; the key stays on the laptop) · `metadata` · `ai` · `netinfo` · `__main__` (launcher). The legacy app (`server/api.py`, `main.py`, `core/`, `analyzers/`, `instagram/`) is still mounted for older clients and the database mirror; Qivra code imports only `core.model_router`, `analyzers.audio_transcribe` and `analyzers.caption` from it. API contract: `docs/LOCAL_SERVER_AND_QR_PAIRING.md`.
 
 ## Supported Android versions
 

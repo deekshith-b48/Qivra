@@ -9,6 +9,8 @@ export type TabParamList = {
   Glance: undefined;
   /** `itemId` scopes the conversation to one saved item ("Ask this item"). */
   Agent: { conversationId?: string; prompt?: string; itemId?: string } | undefined;
+  /** Developer mode (only when the user opted in). */
+  Dev: undefined;
 };
 
 export type RootStackParamList = {
@@ -23,6 +25,8 @@ export type RootStackParamList = {
   /** Flashcard review: every due card, or only a collection's. */
   Review: { collectionId?: string } | undefined;
   Reports: undefined;
+  /** Every saved highlight (quote), grouped by item. */
+  Highlights: undefined;
   ReportDetail: { id: string };
   Settings: undefined;
   ConnectServer: { scanned?: string } | undefined;

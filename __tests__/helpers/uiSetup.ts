@@ -48,9 +48,22 @@ jest.mock('react-native-safe-area-context', () => {
 // Processing would hit the network for metadata; UI tests exercise the screens only.
 jest.mock('../../src/services/processing', () => ({
   schedulePipeline: jest.fn(async () => undefined),
+  recoverIfIdle: jest.fn(async () => 0),
   runDueJobs: jest.fn(async () => 0),
   requestSync: jest.fn(async () => undefined),
   requestServerProcessing: jest.fn(async () => undefined),
   requestModelEnrichment: jest.fn(async () => undefined),
   cancelItemProcessing: jest.fn(async () => undefined),
+}));
+
+// Notifications: permission (onboarding, settings) and scheduling (revisit reminders).
+jest.mock('expo-notifications', () => ({
+  getPermissionsAsync: jest.fn(async () => ({ granted: false, canAskAgain: true })),
+  requestPermissionsAsync: jest.fn(async () => ({ granted: false, canAskAgain: true })),
+  setNotificationChannelAsync: jest.fn(async () => null),
+  scheduleNotificationAsync: jest.fn(async () => 'notif-1'),
+  cancelScheduledNotificationAsync: jest.fn(async () => undefined),
+  AndroidImportance: { DEFAULT: 3, HIGH: 4 },
+  AndroidNotificationVisibility: { PRIVATE: 0 },
+  SchedulableTriggerInputTypes: { DATE: 'date', DAILY: 'daily' },
 }));

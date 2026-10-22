@@ -1,4 +1,4 @@
-"""The legacy SuperBrain app with Qivra mounted: token scoping and no token disclosure."""
+"""The legacy app with Qivra mounted: token scoping and no token disclosure."""
 
 import pytest
 from fastapi.testclient import TestClient

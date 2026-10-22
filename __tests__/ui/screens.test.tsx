@@ -25,12 +25,27 @@ const wrap = (el: React.ReactElement) => render(<ThemeProvider>{el}</ThemeProvid
 
 beforeEach(() => resetTestRepo());
 
-test('onboarding marks the app onboarded and opens the main tabs', async () => {
+test('onboarding: Skip jumps to setup, Get started marks the app onboarded and opens the main tabs', async () => {
   const n = nav() as { reset: jest.Mock };
   wrap(<OnboardingScreen navigation={n as never} route={{ key: 'o', name: 'Onboarding' } as never} />);
-  fireEvent.press(screen.getByRole('button', { name: 'Start using Qivra' }));
-  await waitFor(() => expect(n.reset).toHaveBeenCalled());
+  expect(screen.getByLabelText('Page 1 of 7')).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Skip' }));
+  expect(screen.getByLabelText('Page 7 of 7')).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Get started' }));
+  await waitFor(() => expect(n.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'Main' }] }));
   expect(await (await getRepo()).getMeta('app.onboarded')).toBe('1');
+});
+
+test('onboarding setup: notifications ask for permission; Connect opens the server screen over Home', async () => {
+  const Notifications = require('expo-notifications');
+  const ask = jest.spyOn(Notifications, 'requestPermissionsAsync').mockResolvedValue({ granted: true } as never);
+  const n = nav() as { reset: jest.Mock };
+  wrap(<OnboardingScreen navigation={n as never} route={{ key: 'o', name: 'Onboarding' } as never} />);
+  fireEvent.press(screen.getByRole('button', { name: 'Notifications: Allow' }));
+  expect(await screen.findByRole('button', { name: 'Notifications: Allowed' })).toBeTruthy();
+  expect(ask).toHaveBeenCalled();
+  fireEvent.press(screen.getByRole('button', { name: 'Connect your laptop: Connect' }));
+  await waitFor(() => expect(n.reset).toHaveBeenCalledWith({ index: 1, routes: [{ name: 'Main' }, { name: 'ConnectServer' }] }));
 });
 
 test('library has Videos / Websites / Notes sections and its search bar searches everything', async () => {
@@ -258,7 +273,7 @@ describe('library quick actions', () => {
     await seed();
     wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
     const tile = await screen.findByLabelText('YouTube video: Hooks deep dive. Ready.');
-    expect(tile.props.accessibilityActions.map((a: { name: string }) => a.name)).toEqual(['archive', 'collect', 'delete']);
+    expect(tile.props.accessibilityActions.map((a: { name: string }) => a.name)).toEqual(['archive', 'favorite', 'collect', 'delete']);
     fireEvent.press(screen.getByRole('button', { name: 'List view' }));
     expect(await screen.findByLabelText(/^YouTube video: Hooks deep dive\. Ready\.$/)).toBeTruthy();
     expect(await screen.findByRole('button', { name: 'Grid view' })).toBeTruthy();
@@ -295,7 +310,7 @@ describe('library quick actions', () => {
     const col = await repo.createCollection('Postgres');
     wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
     act$(await screen.findByLabelText(/Hooks deep dive/), 'collect');
-    fireEvent.press(await screen.findByRole('button', { name: /Postgres/ }));
+    fireEvent.press(await screen.findByRole('button', { name: /^Postgres \(/ }));
     await waitFor(async () => expect(await repo.itemCollectionIds(id)).toEqual([col.id]));
     expect(await screen.findByText('Added to Postgres')).toBeTruthy();
   });

@@ -149,7 +149,7 @@ export const palettes = { light, dark } as const;
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 
-export const radius = { sm: 10, md: 16, lg: 22, card: 22, tile: 16, input: 16, sheet: 28, pill: 999 } as const;
+export const radius = { sm: 10, md: 14, lg: 18, card: 18, tile: 14, input: 14, sheet: 24, pill: 999 } as const;
 
 /** Soft, wide shadows (light mode). Dark mode uses borders instead. */
 export const shadow = {
@@ -178,9 +178,9 @@ export function familyFor(weight: TextStyle['fontWeight'] | undefined): string {
 }
 
 export const type = {
-  display: { fontSize: 28, lineHeight: 34, fontFamily: fonts.bold, letterSpacing: -0.6 },
-  title: { fontSize: 20, lineHeight: 26, fontFamily: fonts.bold, letterSpacing: -0.3 },
-  subtitle: { fontSize: 16, lineHeight: 22, fontFamily: fonts.semibold, letterSpacing: -0.1 },
+  display: { fontSize: 24, lineHeight: 30, fontFamily: fonts.bold, letterSpacing: -0.5 },
+  title: { fontSize: 18, lineHeight: 24, fontFamily: fonts.bold, letterSpacing: -0.2 },
+  subtitle: { fontSize: 15, lineHeight: 20, fontFamily: fonts.semibold, letterSpacing: -0.1 },
   body: { fontSize: 15, lineHeight: 22, fontFamily: fonts.regular },
   small: { fontSize: 13, lineHeight: 18, fontFamily: fonts.regular },
   caption: { fontSize: 12, lineHeight: 16, fontFamily: fonts.medium, letterSpacing: 0.1 },

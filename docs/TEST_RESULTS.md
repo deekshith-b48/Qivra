@@ -1,5 +1,21 @@
 # Test results
 
+## 2.0.0 (2026-10-23): bring-your-own Groq key, compact UI, open fixes
+
+- Release APK: `dist/Qivra-2.0.0-release.apk`, version code 17.
+- `tsc` passes. Jest: 348 passed, 4 live tests skipped. Server pytest: 131 passed.
+- New tests (the upgrade test checked to fail on the old code):
+  - Onboarding Groq page: a valid key is verified against Groq and stored; a rejected key shows an error and stores nothing.
+  - A README upgrade whose GitHub fetch fails keeps the saved repo details.
+  - Tapping a keyword on a Markdown README filters its paragraphs; autolinks survive Markdown cleaning.
+  - A background share recovers jobs left running by a killed process.
+  - About shows the AGPL notice, "no warranty" and a link to NOTICE.md.
+- Emulator (release APK, fresh install, light and dark):
+  - Onboarding reaches the Groq page; an invalid key is rejected by Groq with a clear message; "Later" skips.
+  - Every main screen (Home, Glance, Library, Dev, item page, Ask, Settings) fits the screen with the smaller type and controls; no crashes.
+  - The UI text of every screen was dumped and searched: no upstream project name remains.
+  - Server banner: "QIVRA LOCAL SERVER v2.0.0".
+
 ## 1.9.3 (2026-10-22): colourful Home and Glance, compact item page, modern Ask
 
 - Release APK: `dist/Qivra-1.9.3-release.apk`, version code 16.

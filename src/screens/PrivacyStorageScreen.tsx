@@ -8,9 +8,11 @@ import { exportLibrary } from '../services/reports';
 import { disconnect, getConnection } from '../services/server';
 import { Banner, Button, Card, Header, Screen, Section, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
+import { useSettings } from '../ui/useSettings';
 import { space } from '../ui/theme';
 
 export default function PrivacyStorageScreen({ navigation }: RootProps<'PrivacyStorage'>) {
+  const devMode = !!useSettings()?.devMode;
   const { busy, run } = useAction();
   const stats = useQuery(async (repo) => {
     let mediaBytes = 0;
@@ -45,6 +47,7 @@ export default function PrivacyStorageScreen({ navigation }: RootProps<'PrivacyS
         <T v="small" color="textMuted">• Public metadata lookups for links you save (YouTube oEmbed, GitHub API, the web page itself).</T>
         <T v="small" color="textMuted">• If paired: titles, notes, tags, summaries and collections sync to your own server. Transcripts and media are sent only when you ask for server processing.</T>
         <T v="small" color="textMuted">• If you configure an AI model: the saved text needed for that request. External providers require your consent first.</T>
+        {devMode ? <T v="small" color="textMuted">• Dev mode: public searches to GitHub, Hacker News and Hugging Face (trends, the Claude Code corner and the topics you follow). No library content is sent.</T> : null}
         <T v="small" color="textMuted">• Nothing else: no analytics, no crash reporting, no ads.</T>
       </Section>
       <Section title="Export">

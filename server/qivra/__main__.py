@@ -111,7 +111,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                                   lan=args.lan, remote=args.remote)
     cfg.advertised_urls = advertised
 
-    print(f"{BOLD}QIVRA LOCAL SERVER{RESET}  {DIM}v{SERVER_VERSION} · SuperBrain backend{RESET}")
+    print(f"{BOLD}QIVRA LOCAL SERVER{RESET}  {DIM}v{SERVER_VERSION}{RESET}")
     if port_note:
         print(f"  {YELLOW}{port_note}{RESET}")
     app = create_app(cfg, include_legacy=not args.no_legacy)
@@ -278,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="implies --lan; put the Tailscale/WireGuard URL first in the QR (works away from home)")
     s.add_argument("--port", type=int, default=None)
     s.add_argument("--no-qr", action="store_true")
-    s.add_argument("--no-legacy", action="store_true", help="do not mount legacy SuperBrain endpoints")
+    s.add_argument("--no-legacy", action="store_true", help="do not mount the legacy endpoints")
     s.add_argument("--tls-cert")
     s.add_argument("--tls-key")
     s.add_argument("--allow-host", action="append", help="extra Host header value to accept (e.g. a VPN IP)")

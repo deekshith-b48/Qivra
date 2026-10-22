@@ -13,16 +13,16 @@ import React from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatLocal, rangeFor } from '../core/dates';
+import { formatReminder } from '../core/reminderTimes';
 import { STATUS_LABELS } from '../core/status';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { generateReport } from '../services/reports';
 import { Backdrop, Banner, Card, Chip, Loading, Section, SectionLink, T } from '../ui/components';
-import { Emoji } from '../ui/Emoji';
 import { useAction, useQuery } from '../ui/hooks';
 import { PlatformBadge } from '../ui/media';
 import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 import { radius, space, useTheme } from '../ui/theme';
-import { StatTile, TINT_CYCLE } from '../ui/tiles';
+import { IconTile, StatTile, TINT_CYCLE } from '../ui/tiles';
 import { useAiInfo, useSettings } from '../ui/useSettings';
 
 // Deep green → teal: white text stays above 4.5:1 across the whole gradient (system green/teal are too light).
@@ -44,12 +44,13 @@ export default function GlanceScreen({ navigation }: Props) {
       week,
       due: await repo.countDueCards(new Date().toISOString()),
       cards: await repo.cardStats(),
-      savedThisWeek: (await repo.itemsInRange(week.startIso, week.endIso, 1000)).length,
+      savedThisWeek: await repo.countWhere('captured_at >= ? AND captured_at < ?', [week.startIso, week.endIso]),
       ready: await repo.countWhere(`archived = 0 AND status = 'READY' AND last_viewed_at IS NULL`),
       queue: feed.processing.length + feed.needsYou.length,
       topics: (await repo.tagCountsInRange(week.startIso, week.endIso)).slice(0, 10),
       report: (await repo.listReports(1))[0] ?? null,
       recent: await repo.listItems({}, 'newest', 3),
+      reminders: await repo.upcomingReminders(new Date().toISOString(), 3),
     };
   }, ['items', 'jobs', 'cards', 'reports', 'settings'], [tz]);
   const d = q.data;
@@ -67,7 +68,7 @@ export default function GlanceScreen({ navigation }: Props) {
             {/* Review hero: what is due, and start right here. */}
             <LinearGradient colors={HERO} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ marginTop: space.lg, borderRadius: radius.card, padding: space.lg }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-                <Emoji name={d.due ? 'cards' : 'check'} size={30} />
+                <Ionicons name={d.due ? 'layers' : 'checkmark-circle'} size={28} color="#FFFFFF" />
                 <T v="subtitle" style={{ color: '#FFFFFF', flex: 1 }}>{d.due ? 'Flashcards' : 'All caught up'}</T>
               </View>
               <T v="display" style={{ color: '#FFFFFF', marginTop: space.sm }} accessibilityLabel={`${d.due} cards due`}>{d.due} due</T>
@@ -93,6 +94,24 @@ export default function GlanceScreen({ navigation }: Props) {
               </View>
             </Section>
 
+            {d.reminders.length ? (
+              <Section title="Upcoming reminders">
+                <Card style={{ paddingVertical: space.xs }}>
+                  {d.reminders.map((it) => (
+                    <Pressable key={it.id} onPress={() => navigation.navigate('ItemDetail', { id: it.id })} accessibilityRole="button" accessibilityLabel={`${it.title || 'Item'}, ${formatReminder(it.remindAt!, new Date())}`}
+                      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm, opacity: pressed ? 0.7 : 1 })}>
+                      <IconTile icon="notifications" tint="orange" size={32} />
+                      <View style={{ flex: 1 }}>
+                        <T v="small" numberOfLines={1} style={{ fontWeight: '600' }}>{it.title || it.url || 'Untitled'}</T>
+                        <T v="caption" color="textMuted">{formatReminder(it.remindAt!, new Date())}</T>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
+                    </Pressable>
+                  ))}
+                </Card>
+              </Section>
+            ) : null}
+
             {d.topics.length ? (
               <Section title="Top topics this week">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -114,7 +133,7 @@ export default function GlanceScreen({ navigation }: Props) {
             <Section title="Latest report" action={<SectionLink label="All" onPress={() => navigation.navigate('Reports')} />}>
               <Card onPress={d.report ? () => navigation.navigate('ReportDetail', { id: d.report!.id }) : undefined} label={d.report?.title}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-                  <Emoji name="chart" size={34} />
+                  <IconTile icon="document-text" tint="teal" size={40} />
                   <View style={{ flex: 1 }}>
                     <T v="subtitle" numberOfLines={2}>{d.report ? d.report.title : 'No report yet'}</T>
                     <T v="caption" color="textMuted">{d.report ? formatLocal(d.report.createdAt, tz, { dateStyle: 'medium', timeStyle: 'short' }) : 'A summary of what you saved, with sources.'}</T>

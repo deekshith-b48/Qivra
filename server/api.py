@@ -107,8 +107,8 @@ async def require_laptop(request: Request):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="SuperBrain",
-    description="AI-powered Instagram content analysis with caching",
+    title="Qivra legacy API",
+    description="Legacy endpoints of the Qivra server",
     version="1.02",
     # Qivra: no public API docs; they listed every route to anyone on the network.
     docs_url=None, redoc_url=None, openapi_url=None,
@@ -1032,7 +1032,7 @@ async def connect_info(request: Request):
         # Qivra: the Access Token is no longer disclosed here (this route is unauthenticated).
         "pairing": "Use the one-time QR code printed by `python -m qivra serve` (POST /api/v1/pairing/complete).",
         "version": "2.0.0",
-        "name": "SuperBrain"
+        "name": "Qivra"
     }
 
 

@@ -49,3 +49,7 @@ test('README keywords come from prose, not code, file names or flags', () => {
   expect(terms).not.toContain('video.mp4');
   expect(terms).not.toContain('insane');
 });
+
+test('autolinks survive README cleaning', () => {
+  expect(cleanMarkdown('Docs: <https://docs.example.dev> and <b>bold</b>')).toBe('Docs: <https://docs.example.dev> and bold');
+});

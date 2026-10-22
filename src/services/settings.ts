@@ -29,7 +29,15 @@ export interface Settings {
   /** Automatically transcribe shared Instagram/X/YouTube videos on the paired server. */
   autoTranscribe: boolean;
   voice: VoiceSettings;
+  /** Developer mode (opt-in at onboarding): shows the Dev tab with trends, Claude Code, follow-ups and habits. */
+  devMode: boolean;
+  /** Topics or repos to follow in Dev mode (at most 5). */
+  devFollows: string[];
+  /** Morning notification when followed topics have something new. */
+  devFollowNotify: boolean;
 }
+
+export const MAX_DEV_FOLLOWS = 5;
 
 export interface VoiceSettings {
   /** On-device speech model (see src/core/voiceModels.ts). */
@@ -74,6 +82,9 @@ export async function getSettings(): Promise<Settings> {
     serverProcessing: s.serverProcessing ?? false,
     autoTranscribe: s.autoTranscribe ?? true,
     voice: { ...DEFAULT_VOICE, ...(s.voice ?? {}) },
+    devMode: s.devMode ?? false,
+    devFollows: Array.isArray(s.devFollows) ? s.devFollows.filter((x) => typeof x === 'string' && x.trim()).slice(0, MAX_DEV_FOLLOWS) : ['Claude Code', 'MCP'],
+    devFollowNotify: s.devFollowNotify ?? false,
   };
 }
 

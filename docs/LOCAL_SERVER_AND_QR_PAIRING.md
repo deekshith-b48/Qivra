@@ -11,10 +11,10 @@ cd server
 
 Other commands (talk to a running server over loopback): `python -m qivra pair --port N` (new code), `python -m qivra devices --port N`, `python -m qivra revoke <device_id> --port N`. In the serve terminal: Enter = new code, `d` = devices, `q` = quit.
 
-Startup sequence: choose port (5000, or the next free one — never kills other processes) → mount Qivra on the SuperBrain app → mirror SuperBrain data → start uvicorn → **health-check `http://127.0.0.1:<port>/api/health`** → only then print URLs → in `--lan` mode detect private IPv4 addresses and probe each LAN URL from the machine itself → print security status → create a pairing challenge and print the Access ID and QR. Example of real output (2026-10-21, this machine):
+Startup sequence: choose port (5000, or the next free one — never kills other processes) → mount Qivra on the legacy app → mirror legacy data → start uvicorn → **health-check `http://127.0.0.1:<port>/api/health`** → only then print URLs → in `--lan` mode detect private IPv4 addresses and probe each LAN URL from the machine itself → print security status → create a pairing challenge and print the Access ID and QR. Example of real output (2026-10-21, this machine):
 
 ```
-QIVRA LOCAL SERVER  v1.0.0 · SuperBrain backend
+QIVRA LOCAL SERVER  v2.0.0
   Port 5000 is in use (on macOS often AirPlay Receiver); using 5001 instead.
 Status: Running (health check passed)
 Local
@@ -44,7 +44,7 @@ HTTPS: `--tls-cert cert.pem --tls-key key.pem`. Only certificates the phone alre
 
 `alt_urls` is optional (present only when the server has more than one advertised address, at most 4). It is additive, so the version stays 1 and older apps simply ignore it. The app validates every alternate with the same rules as `server_url` and silently drops invalid ones.
 
-No device credential, legacy token, database path or provider key is ever in the QR. The app (`src/core/qr.ts`) rejects: non-JSON, > 1 KB, wrong product, unknown version, non-http(s) URLs, URLs with path/query/credentials, plain HTTP to public hosts, codes outside the 32-character alphabet, malformed server ids, invalid or expired `expires_at` (2-minute skew tolerance), and old SuperBrain token QRs (explicit message).
+No device credential, legacy token, database path or provider key is ever in the QR. The app (`src/core/qr.ts`) rejects: non-JSON, > 1 KB, wrong product, unknown version, non-http(s) URLs, URLs with path/query/credentials, plain HTTP to public hosts, codes outside the 32-character alphabet, malformed server ids, invalid or expired `expires_at` (2-minute skew tolerance), and old permanent-token QRs (explicit message).
 
 ## Protocol
 
@@ -61,7 +61,7 @@ Brute force: 10 attempts/min per client IP (429), and a global budget of 20 fail
 
 - **A — same machine/emulator:** default localhost mode. Emulator → `http://10.0.2.2:<port>` (accepted Host). USB phone → `adb reverse tcp:<port> tcp:<port>` → `http://127.0.0.1:<port>`.
 - **B — same Wi-Fi:** `--lan`; the QR carries the LAN URL. Allowed Host headers are the detected LAN IPs + loopback names.
-- **C — elsewhere (private VPN):** see [Away from home](#away-from-home-tailscale--wireguard). Never port-forward or tunnel the server publicly (SuperBrain's automatic ngrok/localtunnel start was removed).
+- **C — elsewhere (private VPN):** see [Away from home](#away-from-home-tailscale--wireguard). Never port-forward or tunnel the server publicly (the original automatic ngrok/localtunnel start was removed).
 
 Changed LAN IP / different Wi-Fi / wrong port → the app's health check fails with a specific message; disconnect and pair again with the new URL. Server restart → credentials and unexpired challenges persist (tested).
 
@@ -109,7 +109,7 @@ QR order: with `--lan` the LAN URL is primary and the VPN URLs are `alt_urls`; w
 | POST/GET `/reports`, GET/DELETE `/reports/{id}` | device | reports in a timezone |
 | POST `/sync` | device | push changes with base revisions, pull change feed |
 
-Errors: `{"error": {"code", "message"}}`. JSON bodies > 2 MB → 413. Legacy SuperBrain routes stay mounted; the 8-character token works only from loopback (or with `QIVRA_ALLOW_LEGACY_LAN_TOKEN=1`), and paired-device credentials are accepted there too.
+Errors: `{"error": {"code", "message"}}`. JSON bodies > 2 MB → 413. Legacy routes stay mounted; the 8-character token works only from loopback (or with `QIVRA_ALLOW_LEGACY_LAN_TOKEN=1`), and paired-device credentials are accepted there too.
 
 ## Sync contract
 

@@ -2,7 +2,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, TextInput, View } from 'react-native';
+import { FlatList, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { rangeFor } from '../core/dates';
 import { languageName } from '../core/language';
@@ -16,7 +16,7 @@ import { getRepo } from '../services/db';
 import { emit, subscribe } from '../services/events';
 import { generateReport } from '../services/reports';
 import { updateSettings } from '../services/settings';
-import { Backdrop, Banner, Button, Chip, CircleButton, EmptyState, IconButton, Loading, Sheet, Snackbar, T } from '../ui/components';
+import { Backdrop, Banner, Button, Chip, CircleButton, EmptyState, IconButton, type IconName, Loading, Row, Sheet, Snackbar, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard, VideoCard, VideoTile } from '../ui/ItemCard';
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow';
@@ -25,6 +25,8 @@ import { Segmented } from '../ui/media';
 import { SearchResults } from '../ui/SearchResults';
 import { VoiceSheet } from '../ui/VoiceSheet';
 import { radius, space, type, useTheme } from '../ui/theme';
+import { IconTile, TINT_CYCLE } from '../ui/tiles';
+import { soft, type TintName } from '../ui/tokens';
 import { useSettings, useAiInfo } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Library'>, NativeStackScreenProps<RootStackParamList>>;
@@ -32,6 +34,12 @@ const PAGE = 30;
 /** How long Undo is offered after a quick archive or delete (generous for TalkBack users). */
 const UNDO_MS = 8000;
 type Section = 'videos' | 'websites' | 'notes';
+type Shelf = 'favorites' | 'unread' | 'viewed';
+const SHELVES: { key: Shelf; label: string; icon: IconName; tint: TintName }[] = [
+  { key: 'favorites', label: 'Favourites', icon: 'star', tint: 'yellow' },
+  { key: 'unread', label: 'Unread', icon: 'mail-unread', tint: 'blue' },
+  { key: 'viewed', label: 'Recently viewed', icon: 'eye', tint: 'purple' },
+];
 const SECTION_SOURCES: Record<Section, SourceType[]> = { videos: VIDEO_SOURCES, websites: WEBSITE_SOURCES, notes: NOTE_SOURCES };
 const SORTS: [SortKey, string][] = [['newest', 'Newest'], ['oldest', 'Oldest'], ['updated', 'Recently updated'], ['title', 'Title A–Z']];
 const DATES: [string, string][] = [['any', 'Any time'], ['today', 'Today'], ['week', 'Last 7 days'], ['last30', 'Last 30 days']];
@@ -53,6 +61,8 @@ export default function LibraryScreen({ navigation, route }: Props) {
   const [collectionId, setCollectionId] = useState<string | undefined>(route.params?.collectionId);
   const [archived, setArchived] = useState(false);
   const [section, setSection] = useState<Section>('videos');
+  const [shelf, setShelf] = useState<Shelf | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -82,21 +92,22 @@ export default function LibraryScreen({ navigation, route }: Props) {
   const filter: LibraryFilter = useMemo(() => {
     const allowed = SECTION_SOURCES[section];
     const chosen = sources.filter((s) => allowed.includes(s));
-    const f: LibraryFilter = { text: debounced, sourceTypes: chosen.length ? chosen : allowed, statuses, languages, tags, collectionId, archived };
+    const f: LibraryFilter = { text: debounced, sourceTypes: chosen.length ? chosen : allowed, statuses, languages, tags, collectionId, archived,
+      favorite: shelf === 'favorites' || undefined, unread: shelf === 'unread' || undefined, viewed: shelf === 'viewed' || undefined };
     if (date !== 'any') {
       const r = rangeFor(date as 'today' | 'week' | 'last30', Date.now(), tz);
       f.fromIso = r.startIso;
       f.toIso = r.endIso;
     }
     return f;
-  }, [debounced, sources, statuses, languages, tags, collectionId, archived, date, tz, section]);
+  }, [debounced, sources, statuses, languages, tags, collectionId, archived, date, tz, section, shelf]);
 
   const load = useCallback(async (reset: boolean) => {
     try {
       setLoading(true);
       const repo = await getRepo();
       const offset = reset ? 0 : items.length;
-      const page = await repo.listItems(filter, sort, PAGE, offset);
+      const page = await repo.listItems(filter, shelf === 'viewed' ? 'viewed' : sort, PAGE, offset);
       setItems((prev) => (reset ? page : [...prev, ...page.filter((p) => !prev.some((x) => x.id === p.id))]));
       setEnd(page.length < PAGE);
       if (reset) setTotal(await repo.countItems(filter));
@@ -106,7 +117,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [filter, sort, items.length]);
+  }, [filter, sort, shelf, items.length]);
 
   useEffect(() => {
     void load(true);
@@ -120,6 +131,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
     tags: (await repo.allTags()).slice(0, 30),
     languages: await repo.itemLanguages(),
     collections: await repo.listCollections(),
+    shelves: await repo.shelfCounts(),
     counts: {
       videos: await repo.countItems({ sourceTypes: VIDEO_SOURCES, archived, collectionId }),
       websites: await repo.countItems({ sourceTypes: WEBSITE_SOURCES, archived, collectionId }),
@@ -210,9 +222,14 @@ export default function LibraryScreen({ navigation, route }: Props) {
       });
     },
     collect: (item: Item) => { setCollectFor([item.id]); setCollectOpen(true); },
+    favorite: (item: Item) => void run(async () => {
+      await (await getRepo()).setFavorite([item.id], !item.favorite);
+      emit('items');
+    }),
   };
   const actionsFor = (item: Item): SwipeAction[] => [
     { name: 'archive', label: item.archived ? 'Restore' : 'Archive', icon: item.archived ? 'arrow-undo-outline' : 'archive-outline', tone: 'accent', run: () => quick.archive(item) },
+    { name: 'favorite', label: item.favorite ? 'Unstar' : 'Favourite', icon: item.favorite ? 'star' : 'star-outline', tone: 'accent', run: () => quick.favorite(item) },
     { name: 'collect', label: 'Collection', icon: 'folder-outline', tone: 'info', run: () => quick.collect(item) },
     { name: 'delete', label: 'Delete', icon: 'trash-outline', tone: 'danger', run: () => quick.remove(item) },
   ];
@@ -231,6 +248,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
               setSelected(new Set());
               navigation.navigate('ReportDetail', { id: r.id });
             }, 'Report failed')} />
+            <IconButton icon="star-outline" label="Add to favourites" onPress={() => void run(async () => { await (await getRepo()).setFavorite(ids, true); setSelected(new Set()); emit('items'); })} />
             <IconButton icon="folder-outline" label="Add to collection" onPress={() => setCollectOpen(true)} />
             <IconButton icon={archived ? 'arrow-undo-outline' : 'archive-outline'} label={archived ? 'Restore' : 'Archive'} onPress={() => void bulk.archive()} />
             <IconButton icon="trash-outline" label="Delete" color={c.danger} onPress={() => void bulk.delete()} />
@@ -240,8 +258,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
             <T v="display" style={{ flex: 1 }} accessibilityRole="header">{archived ? 'Archive' : collectionName ?? 'Library'}</T>
             <View style={{ flexDirection: 'row', gap: space.sm }}>
               <CircleButton icon={grid ? 'list-outline' : 'grid-outline'} label={grid ? 'List view' : 'Grid view'} onPress={() => void updateSettings({ libraryView: grid ? 'list' : 'grid' })} />
-              <CircleButton icon={archived ? 'albums-outline' : 'archive-outline'} label={archived ? 'Show library' : 'Show archive'} onPress={() => setArchived(!archived)} />
-              <CircleButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
+              <CircleButton icon="ellipsis-horizontal" label="More" onPress={() => setMenuOpen(true)} />
             </View>
           </>
         )}
@@ -260,6 +277,20 @@ export default function LibraryScreen({ navigation, route }: Props) {
           {text ? <IconButton icon="close-circle" label="Clear search" onPress={() => setText('')} color={c.textMuted} /> : <IconButton icon="mic-outline" label="Search by voice" onPress={() => setVoice(true)} />}
           <IconButton icon="options-outline" label={`Filters${activeFilters ? `, ${activeFilters} active` : ''}`} onPress={() => setFiltersOpen(true)} />
         </View>
+        {searching || archived ? null : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: space.md, marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.sm }}>
+            {SHELVES.map((sh) => (
+              <ShelfCard key={sh.key} icon={sh.icon} tint={sh.tint} label={sh.label} count={facets.data?.shelves[sh.key]} selected={shelf === sh.key}
+                onPress={() => { setShelf(shelf === sh.key ? null : sh.key); setSelected(new Set()); }} />
+            ))}
+            <ShelfCard icon="bookmark" tint="orange" label="Highlights" count={facets.data?.shelves.highlights} onPress={() => navigation.navigate('Highlights')} />
+            {(facets.data?.collections ?? []).map((col, i) => (
+              <ShelfCard key={col.id} icon={col.rules ? 'sparkles' : 'albums'} tint={TINT_CYCLE[(i + 3) % TINT_CYCLE.length]} label={col.name} count={col.itemCount} selected={collectionId === col.id}
+                onPress={() => setCollectionId(collectionId === col.id ? undefined : col.id)} />
+            ))}
+            <ShelfCard icon="add" tint="gray" label="New collection" onPress={() => navigation.navigate('Collections')} />
+          </ScrollView>
+        )}
         {searching ? null : <View style={{ marginTop: space.md }}>
           <Segmented<Section>
             value={section}
@@ -273,6 +304,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
         </View>}
         {searching ? null : <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm, flexWrap: 'wrap' }}>
           <T v="caption" color="textMuted" style={{ marginRight: space.sm }}>{total} item{total === 1 ? '' : 's'}</T>
+          {shelf ? <Chip label={SHELVES.find((x) => x.key === shelf)!.label} selected onPress={() => setShelf(null)} /> : null}
           {collectionName ? <Chip label={collectionName} selected onPress={() => setCollectionId(undefined)} /> : null}
           {activeFilters ? <Chip label={`${activeFilters} filter(s)`} tone="accent" onPress={() => setFiltersOpen(true)} /> : null}
         </View>}
@@ -321,6 +353,12 @@ export default function LibraryScreen({ navigation, route }: Props) {
       />}
       <VoiceSheet visible={voice} onClose={() => setVoice(false)} purpose="dictate" onText={(t) => setText(t.replace(/[.?!]+$/, ''))} onOpenSettings={() => navigation.navigate('VoiceSettings')} />
 
+      <Sheet visible={menuOpen} onClose={() => setMenuOpen(false)} title="Library">
+        <Row icon={archived ? 'albums' : 'archive'} tint={c.tint.gray} title={archived ? 'Show library' : 'Show archive'} onPress={() => { setArchived(!archived); setShelf(null); setMenuOpen(false); }} />
+        <Row icon="bookmark" tint={c.tint.orange} title="Highlights" value={String(facets.data?.shelves.highlights ?? '')} onPress={() => { setMenuOpen(false); navigation.navigate('Highlights'); }} />
+        <Row icon="albums" tint={c.tint.blue} title="Collections" onPress={() => { setMenuOpen(false); navigation.navigate('Collections'); }} />
+        <Row icon="settings" tint={c.tint.gray} title="Settings" onPress={() => { setMenuOpen(false); navigation.navigate('Settings'); }} />
+      </Sheet>
       <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filter & sort">
         <T v="caption" color="textMuted">Sort</T>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
@@ -375,5 +413,21 @@ export default function LibraryScreen({ navigation, route }: Props) {
       {busy ? <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}><Loading label="Working" /></View> : null}
       <Snackbar bottom={inset} message={snack?.message ?? null} actionLabel={snack?.undo ? 'Undo' : undefined} onAction={snack?.undo} />
     </SafeAreaView>
+  );
+}
+
+/** A shelf at the top of the Library: coloured icon, name and count. Selected shelves are outlined. */
+function ShelfCard({ icon, tint, label, count, selected, onPress }: { icon: IconName; tint: TintName; label: string; count?: number; selected?: boolean; onPress: () => void }) {
+  const { c } = useTheme();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={count !== undefined ? `${label}, ${count}` : label} accessibilityState={{ selected: !!selected }}
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 52, paddingLeft: 8, paddingRight: space.md, borderRadius: radius.lg,
+        backgroundColor: selected ? soft(c.tint[tint]) : c.surface, borderWidth: 1.5, borderColor: selected ? c.tint[tint] : c.border, opacity: pressed ? 0.7 : 1 })}>
+      <IconTile icon={icon} tint={tint} size={34} />
+      <View>
+        <T v="caption" style={{ fontWeight: '700' }} numberOfLines={1}>{label}</T>
+        {count !== undefined ? <T v="caption" color="textMuted">{count}</T> : null}
+      </View>
+    </Pressable>
   );
 }

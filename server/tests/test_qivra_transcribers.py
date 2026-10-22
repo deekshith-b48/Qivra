@@ -1,4 +1,4 @@
-"""Transcription engine registry (Groq / transcribe-anything / faster-whisper / SuperBrain)."""
+"""Transcription engine registry (Groq / transcribe-anything / faster-whisper / built-in Whisper)."""
 
 import json
 import os
@@ -29,7 +29,7 @@ def fake_ta(monkeypatch):
 
     mod.transcribe = transcribe
     monkeypatch.setitem(sys.modules, "transcribe_anything", mod)
-    monkeypatch.setattr(transcribers, "available_engines", lambda: ["transcribe-anything", "faster-whisper", "superbrain"])
+    monkeypatch.setattr(transcribers, "available_engines", lambda: ["transcribe-anything", "faster-whisper", "whisper"])
     return calls
 
 
@@ -45,7 +45,7 @@ def test_auto_prefers_transcribe_anything_on_apple_silicon(monkeypatch, fake_ta)
 
 
 def test_explicit_engine_must_be_installed(monkeypatch):
-    monkeypatch.setattr(transcribers, "available_engines", lambda: ["superbrain"])
+    monkeypatch.setattr(transcribers, "available_engines", lambda: ["whisper"])
     monkeypatch.setenv("QIVRA_TRANSCRIBER", "faster-whisper")
     with pytest.raises(TranscriberError) as e:
         selected_engine()
@@ -97,7 +97,7 @@ def test_python_api_finds_tools_without_activating_venv(monkeypatch, tmp_path, f
 @pytest.mark.parametrize("wanted", ["auto", "transcribe-anything"])
 def test_runtime_fallback_is_local_and_only_in_auto_mode(monkeypatch, tmp_path, wanted):
     monkeypatch.setenv("QIVRA_TRANSCRIBER", wanted)
-    monkeypatch.setattr(transcribers, "available_engines", lambda: ["transcribe-anything", "faster-whisper", "superbrain"])
+    monkeypatch.setattr(transcribers, "available_engines", lambda: ["transcribe-anything", "faster-whisper", "whisper"])
     monkeypatch.setattr(transcribers, "apple_silicon", lambda: True)
     calls = []
     def broken_ta(path):
@@ -107,7 +107,7 @@ def test_runtime_fallback_is_local_and_only_in_auto_mode(monkeypatch, tmp_path, 
         return [{"text": "A real transcript", "start_ms": 0, "end_ms": 1000}], "en", "faster-whisper-base"
     def cloud(path):
         pytest.fail("Local fallback must never switch to a possibly cloud-backed engine")
-    monkeypatch.setattr(transcribers, "ENGINES", {"transcribe-anything": broken_ta, "faster-whisper": local_fw, "superbrain": cloud})
+    monkeypatch.setattr(transcribers, "ENGINES", {"transcribe-anything": broken_ta, "faster-whisper": local_fw, "whisper": cloud})
     if wanted == "auto":
         assert transcribe_file(tmp_path / "note.wav")[2] == "faster-whisper-base"
         assert calls == ["local"]
@@ -175,9 +175,9 @@ def local_fw(monkeypatch):
         pytest.fail("Groq fallback must stay local")
 
     monkeypatch.setattr(transcribers, "ENGINES", {"groq": transcribers._groq_transcribe, "transcribe-anything": ta,
-                                                  "faster-whisper": fw, "superbrain": cloud})
+                                                  "faster-whisper": fw, "whisper": cloud})
     monkeypatch.setattr(transcribers, "available_engines",
-                        lambda: ["groq", "transcribe-anything", "faster-whisper", "superbrain"])
+                        lambda: ["groq", "transcribe-anything", "faster-whisper", "whisper"])
     return calls
 
 
@@ -245,7 +245,7 @@ def test_auto_mode_never_picks_groq(groq, monkeypatch):
 
 
 def test_groq_describe_and_banner(groq, monkeypatch):
-    monkeypatch.setattr(transcribers, "available_engines", lambda: ["groq", "faster-whisper", "superbrain"])
+    monkeypatch.setattr(transcribers, "available_engines", lambda: ["groq", "faster-whisper", "whisper"])
     info = transcribers.describe()
     assert info["engine"] == "groq" and info["cloud"] is True and info["fallback"] == ["faster-whisper"]
     assert SECRET not in json.dumps(info)
@@ -275,9 +275,9 @@ def test_groq_oversize_file_skips_upload(groq, local_fw, monkeypatch, tmp_path):
 
 def test_groq_fallback_raises_last_local_error(groq, monkeypatch, tmp_path):
     groq["reply"] = FakeResponse(429)
-    monkeypatch.setattr(transcribers, "available_engines", lambda: ["groq", "superbrain"])
+    monkeypatch.setattr(transcribers, "available_engines", lambda: ["groq", "whisper"])
     monkeypatch.setattr(transcribers, "ENGINES", {"groq": transcribers._groq_transcribe,
-                                                  "superbrain": lambda p: pytest.fail("no cloud fallback")})
+                                                  "whisper": lambda p: pytest.fail("no cloud fallback")})
     (tmp_path / "a.wav").write_bytes(b"x")
     with pytest.raises(TranscriberError) as e:
         transcribe_file(tmp_path / "a.wav")

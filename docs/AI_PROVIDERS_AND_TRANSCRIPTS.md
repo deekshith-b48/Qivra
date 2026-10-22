@@ -30,7 +30,7 @@ Put the provider in `server/qivra.env` (git-ignored; template `server/qivra.env.
 - A model configured on the phone still takes precedence. Configuring the key on the server is the owner's consent to send AI requests to that provider; the AI models screen shows which provider is in use.
 - Hosted providers must use `https://`. Recommended: Groq `openai/gpt-oss-120b` (verified against Groq's model list 2026-10-21; Groq has no embeddings) or Mistral `mistral-small-latest` + `mistral-embed`.
 
-### On the paired server — SuperBrain's ModelRouter (fallback when no gateway is configured)
+### On the paired server — the built-in ModelRouter (fallback when no gateway is configured)
 
 Server enrichment (`process kind=enrich`) and server agent answers use `core/model_router.py` (Groq, Gemini, OpenRouter keys in `server/config/.api_keys`, or Ollama). `server/qivra/ai.py` reports Ollama as available only if it actually answers on `OLLAMA_HOST`. No provider → job fails with `NO_PROVIDER` (not a fake success).
 
@@ -53,7 +53,7 @@ Chosen with `QIVRA_TRANSCRIBER` in `server/qivra.env` (or the environment); the 
 | `groq` | Groq's hosted Whisper (`whisper-large-v3-turbo`, override with `QIVRA_GROQ_WHISPER_MODEL`): multipart upload to `{QIVRA_AI_BASE_URL}/audio/transcriptions` with `response_format=verbose_json`, using the gateway key. Segments keep start/end times; the language name is stored as an ISO code (`English` → `en`); provider `groq-whisper-large-v3-turbo`. Only offered when `QIVRA_AI_BASE_URL` is `https://api.groq.com/openai/v1` and a key is set. If Groq fails — unreachable, 429 rate limit, 5xx, rejected key, invalid response, or audio over 25 MB (not uploaded) — the server falls back to transcribe-anything, then faster-whisper. | Yes, to Groq (the key stays on the server and is never logged or sent to phones) |
 | `auto` (default) | transcribe-anything (MLX on Apple Silicon) → faster-whisper if it fails; elsewhere faster-whisper. Never picks Groq. | No |
 | `transcribe-anything` / `faster-whisper` | That local engine only, no fallback. | No |
-| `superbrain` | SuperBrain's legacy analyzer (may itself call Groq). | Depends |
+| `whisper` | The built-in legacy analyzer (may itself call Groq). | Depends |
 
 Local engines never fall back to a cloud engine. A reel takes roughly a minute with local Whisper on a laptop and a few seconds with Groq. Live check: `QIVRA_LIVE=1 .venv/bin/python -m pytest -q -s tests/test_qivra_transcribers.py -k live` (sends a generated WAV to Groq).
 
@@ -72,7 +72,7 @@ Local engines never fall back to a cloud engine. A reel takes roughly a minute w
 | Shared screenshots / photos | Share sheet (`image/*`) | On-device OCR → source `image_ocr` (see *Text in images and on screen*) |
 | On-screen text of a reel without speech | Automatic, with `requirements-ocr.txt` on the server | Source `video_ocr`, timestamped per sampled frame |
 | Audio/video you are allowed to process | Share or Capture → Audio/video (≤ 200 MB), then "Transcribe on server" (explicit, confirmed upload) | Server engine from `QIVRA_TRANSCRIBER` (Groq Whisper with local fallback, or local only) |
-| Instagram | — | Not downloaded by Qivra. Save the link, add your own transcript, or use SuperBrain's legacy analyzer on the server with your own account at your own risk |
+| Instagram | — | Not downloaded by Qivra. Save the link, add your own transcript, or use the legacy analyzer on the server with your own account at your own risk |
 
 Parsing (`src/core/transcripts.ts`, mirrored in `server/qivra/transcripts.py`): tags/entities stripped, rolling-caption duplicates merged, timestamps kept only when present in the source. Chunks for search never split a timed segment, so every hit has a real time range.
 

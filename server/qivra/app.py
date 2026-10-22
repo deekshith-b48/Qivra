@@ -45,7 +45,7 @@ def create_app(config: QivraConfig | None = None, *, include_legacy: bool = True
     app.state.qivra = services
     mirrored = services.store.mirror_legacy_analyses()
     if mirrored:
-        print(f"[Qivra] Mirrored {mirrored} SuperBrain item(s) into the Qivra library")
+        print(f"[Qivra] Mirrored {mirrored} item(s) from the previous app into the library")
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError):

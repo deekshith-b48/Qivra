@@ -95,7 +95,7 @@ export function Wordmark({ size = 22 }: { size?: number }) {
 
 export function Card({ children, style, onPress, label }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; onPress?: () => void; label?: string }) {
   const { c } = useTheme();
-  const base = [{ backgroundColor: c.surface, borderRadius: radius.card, padding: space.lg }, elevation(c), style];
+  const base = [{ backgroundColor: c.surface, borderRadius: radius.card, padding: 14 }, elevation(c), style];
   if (!onPress) return <View style={base}>{children}</View>;
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [base, pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] }]}>
@@ -215,9 +215,9 @@ export function SectionLink({ label = 'See all', onPress }: { label?: string; on
 
 export function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <View style={{ marginTop: space.xl }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: space.md }}>
-        <T v="subtitle" style={{ flex: 1, fontSize: 17 }} accessibilityRole="header">{title}</T>
+    <View style={{ marginTop: space.lg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: space.sm }}>
+        <T v="subtitle" style={{ flex: 1, fontSize: 16 }} accessibilityRole="header">{title}</T>
         {action}
       </View>
       {children}
@@ -226,14 +226,18 @@ export function Section({ title, action, children }: { title: string; action?: R
 }
 
 /** Three (or more) numbers in one card, separated by thin dividers. */
-export function StatStrip({ items }: { items: { value: number | string; label: string; onPress?: () => void }[] }) {
+/** A slim bar of tappable numbers; each can carry a coloured icon next to its value. */
+export function StatStrip({ items }: { items: { value: number | string; label: string; onPress?: () => void; icon?: IconName; color?: string }[] }) {
   const { c } = useTheme();
   return (
-    <View style={[{ flexDirection: 'row', backgroundColor: c.surface, borderRadius: radius.card, paddingVertical: space.lg }, elevation(c)]}>
+    <View style={[{ flexDirection: 'row', backgroundColor: c.surface, borderRadius: radius.card, paddingVertical: space.md }, elevation(c)]}>
       {items.map((it, i) => (
         <Pressable key={it.label} onPress={it.onPress} disabled={!it.onPress} accessibilityRole={it.onPress ? 'button' : undefined} accessibilityLabel={`${it.value} ${it.label}`}
-          style={{ flex: 1, alignItems: 'center', borderLeftWidth: i ? StyleSheet.hairlineWidth : 0, borderColor: c.border }}>
-          <T v="title" style={{ fontSize: 22 }}>{String(it.value)}</T>
+          style={({ pressed }) => ({ flex: 1, alignItems: 'center', borderLeftWidth: i ? StyleSheet.hairlineWidth : 0, borderColor: c.border, opacity: pressed ? 0.6 : 1 })}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {it.icon ? <Ionicons name={it.icon} size={17} color={it.color ?? c.textMuted} /> : null}
+            <T v="title" style={{ fontSize: 22 }}>{String(it.value)}</T>
+          </View>
           <T v="caption" color="textMuted" style={{ marginTop: 2 }}>{it.label}</T>
         </Pressable>
       ))}
@@ -254,30 +258,37 @@ export function Group({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Row({ icon, title, subtitle, onPress, right, danger }: { icon?: IconName; title: string; subtitle?: string; onPress?: () => void; right?: React.ReactNode; danger?: boolean }) {
+/**
+ * A settings-style row. With `tint` the icon is white on a coloured rounded square (iOS Settings);
+ * `value` shows a short current value on the right, before the chevron.
+ */
+export function Row({ icon, tint, title, subtitle, value, onPress, right, danger }: { icon?: IconName; tint?: string; title: string; subtitle?: string; value?: string; onPress?: () => void; right?: React.ReactNode; danger?: boolean }) {
   const { c } = useTheme();
   const content = (
     <View style={styles.row}>
       {icon ? (
-        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: danger ? c.dangerSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center', marginRight: space.md }}>
-          <Ionicons name={icon} size={18} color={danger ? c.danger : c.text} />
+        <View style={{ width: tint ? 32 : 36, height: tint ? 32 : 36, borderRadius: tint ? 9 : 12, backgroundColor: tint ?? (danger ? c.dangerSoft : c.surfaceAlt), alignItems: 'center', justifyContent: 'center', marginRight: space.md }}>
+          <Ionicons name={icon} size={tint ? 17 : 18} color={tint ? '#FFFFFF' : danger ? c.danger : c.text} />
         </View>
       ) : null}
       <View style={{ flex: 1 }}>
         <T color={danger ? 'danger' : 'text'} style={{ fontWeight: '500' }}>{title}</T>
         {subtitle ? <T v="small" color="textMuted">{subtitle}</T> : null}
       </View>
+      {value ? <T v="small" color="textMuted" numberOfLines={1} style={{ maxWidth: '45%', marginRight: 4 }}>{value}</T> : null}
       {right ?? (onPress ? <Ionicons name="chevron-forward" size={18} color={c.textFaint} /> : null)}
     </View>
   );
   if (!onPress) return content;
-  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title} accessibilityHint={subtitle} android_ripple={{ color: c.surfaceAlt }}>{content}</Pressable>;
+  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={value ? `${title}, ${value}` : title} accessibilityHint={subtitle} android_ripple={{ color: c.surfaceAlt }}>{content}</Pressable>;
 }
 
-export function ToggleRow({ title, subtitle, value, onChange }: { title: string; subtitle?: string; value: boolean; onChange: (v: boolean) => void }) {
+export function ToggleRow({ title, subtitle, value, onChange, icon, tint }: { title: string; subtitle?: string; value: boolean; onChange: (v: boolean) => void; icon?: IconName; tint?: string }) {
   const { c } = useTheme();
   return (
     <Row
+      icon={icon}
+      tint={tint}
       title={title}
       subtitle={subtitle}
       right={<Switch value={value} onValueChange={onChange} accessibilityLabel={title} trackColor={{ true: c.primary, false: c.border }} thumbColor={c.surface} />}
@@ -381,12 +392,12 @@ export function Sheet({ visible, onClose, title, children }: { visible: boolean;
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.md },
-  circle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  button: { minHeight: 50, borderRadius: radius.pill, paddingHorizontal: space.xl, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm, borderWidth: 1, overflow: 'hidden' },
-  iconBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, maxWidth: 260 },
+  circle: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  button: { minHeight: 44, borderRadius: radius.pill, paddingHorizontal: space.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm, borderWidth: 1, overflow: 'hidden' },
+  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 5, borderRadius: radius.pill, maxWidth: 260 },
   chipTouch: { minHeight: 40, justifyContent: 'center', marginRight: 6, marginBottom: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: space.md, minHeight: 60 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, minHeight: 52 },
 });
 
 /** Bottom message with an optional action (e.g. Undo). The caller decides when to hide it. */

@@ -51,7 +51,7 @@ export const QR_ERROR_MESSAGES: Record<QrError, string> = {
   BAD_EXPIRY: 'The expiry time in this QR code is invalid.',
   EXPIRED: 'This pairing code has expired. Press Enter in the server terminal (or run `python -m qivra pair`) for a new one.',
   LEGACY_SUPERBRAIN:
-    'This is an old SuperBrain QR code containing a permanent token. Qivra does not accept it — start the server with `python -m qivra serve` and scan the new one-time code.',
+    'This is an old QR code format with a permanent token. Qivra does not accept it — start the server with `python -m qivra serve` and scan the new one-time code.',
 };
 
 export function normalizePairingCode(raw: string): string {

@@ -11,7 +11,7 @@ import { backoffMs, transition, type ItemStatus } from '../core/status';
 import { chunkSegments, hasTimestamps, segmentsToText, type Segment } from '../core/transcripts';
 import type { SqlDriver, SqlExecutor, SqlValue } from './driver';
 import type {
-  Card, ChunkHit, Citation, Collection, CollectionSuggestion, Conflict, Item, ItemMetadata, Job, JobKind, JobStatus, Message, NewItem, Origin, Report,
+  Card, ChunkHit, Citation, Collection, CollectionSuggestion, Conflict, Highlight, Item, ItemMetadata, Job, JobKind, JobStatus, Message, NewItem, Origin, Report,
   SyncStatus, Transcript, TranscriptInput,
 } from './types';
 
@@ -65,6 +65,40 @@ export class Repo {
     await ex.run('INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]);
   }
 
+  /** Meta keys starting with `prefix` (e.g. the days a habit was completed). */
+  async metaKeys(prefix: string): Promise<string[]> {
+    const rows = await this.db.all<{ key: string }>(`SELECT key FROM meta WHERE key LIKE ? ESCAPE '\\'`, [`${prefix.replace(/[\\%_]/g, (m) => `\\${m}`)}%`]);
+    return rows.map((r) => r.key);
+  }
+
+  /**
+   * Dev toolbox: every GitHub repo, tool and command found in the library's summaries,
+   * most mentioned first, with the items they came from.
+   */
+  async devToolbox(limit = 40): Promise<{
+    repos: { name: string; count: number; itemIds: string[] }[];
+    tools: { name: string; count: number }[];
+    commands: { command: string; destructive: boolean; reason: string | null; itemId: string }[];
+  }> {
+    const src = (path: string) => `json_each(CASE WHEN json_valid(i.enrichment_json) THEN i.enrichment_json ELSE '{}' END, '${path}')`;
+    const repos = await this.db.all<Row>(
+      `SELECT j.value AS name, COUNT(DISTINCT i.id) AS n, group_concat(DISTINCT i.id) AS ids FROM items i, ${src('$.repos')} j
+       WHERE i.deleted = 0 GROUP BY LOWER(j.value) ORDER BY n DESC, name ASC LIMIT ?`, [limit]);
+    const tools = await this.db.all<Row>(
+      `SELECT j.value AS name, COUNT(DISTINCT i.id) AS n FROM items i, ${src('$.tools')} j
+       WHERE i.deleted = 0 GROUP BY LOWER(j.value) ORDER BY n DESC, name ASC LIMIT ?`, [limit]);
+    const commands = await this.db.all<Row>(
+      `SELECT json_extract(j.value, '$.command') AS command, json_extract(j.value, '$.destructive') AS destructive,
+              json_extract(j.value, '$.reason') AS reason, MIN(i.id) AS item_id
+       FROM items i, ${src('$.commands')} j WHERE i.deleted = 0 AND json_extract(j.value, '$.command') IS NOT NULL
+       GROUP BY command ORDER BY MAX(i.captured_at) DESC LIMIT ?`, [limit]);
+    return {
+      repos: repos.map((r) => ({ name: str(r.name), count: Number(r.n), itemIds: str(r.ids).split(',').filter(Boolean) })),
+      tools: tools.map((r) => ({ name: str(r.name), count: Number(r.n) })),
+      commands: commands.map((r) => ({ command: str(r.command), destructive: Number(r.destructive) === 1, reason: strOrNull(r.reason), itemId: str(r.item_id) })),
+    };
+  }
+
   async getJson<T>(key: string, fallback: T): Promise<T> {
     return parseJson<T>(await this.getMeta(key), fallback);
   }
@@ -104,6 +138,8 @@ export class Repo {
       createdAt: str(r.created_at),
       updatedAt: str(r.updated_at),
       lastViewedAt: strOrNull(r.last_viewed_at),
+      favorite: Number(r.favorite) === 1,
+      remindAt: strOrNull(r.remind_at),
       archived: Number(r.archived) === 1,
       deleted: Number(r.deleted) === 1,
       localRev: Number(r.local_rev),
@@ -203,6 +239,62 @@ export class Repo {
 
   async markViewed(id: string): Promise<void> {
     await this.db.run('UPDATE items SET last_viewed_at = ? WHERE id = ?', [this.now(), id]);
+  }
+
+  // ── favourites, highlights, revisit reminders (this phone only: not synced) ──
+  async setFavorite(ids: string[], favorite: boolean): Promise<void> {
+    if (!ids.length) return;
+    await this.db.run(`UPDATE items SET favorite = ? WHERE id IN (${ids.map(() => '?').join(',')})`, [favorite ? 1 : 0, ...ids]);
+  }
+
+  async addHighlight(h: { itemId: string; text: string; startMs: number | null; source: Highlight['source'] }): Promise<Highlight> {
+    const out: Highlight = { id: newId('hl'), itemId: h.itemId, text: h.text.trim(), startMs: h.startMs, source: h.source, createdAt: this.now() };
+    await this.db.run('INSERT INTO highlights (id, item_id, text, start_ms, source, created_at) VALUES (?,?,?,?,?,?)',
+      [out.id, out.itemId, out.text, out.startMs, out.source, out.createdAt]);
+    return out;
+  }
+
+  /** Highlights of one item, or of the whole library (newest first, live items only); `text` filters by content. */
+  async listHighlights(opts: { itemId?: string; text?: string; limit?: number } = {}): Promise<Highlight[]> {
+    const where = ['i.deleted = 0'];
+    const params: SqlValue[] = [];
+    if (opts.itemId) { where.push('h.item_id = ?'); params.push(opts.itemId); }
+    if (opts.text) { where.push(`LOWER(h.text) LIKE ? ESCAPE '\\'`); params.push(`%${opts.text.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`)}%`); }
+    const rows = await this.db.all<Row>(
+      `SELECT h.* FROM highlights h JOIN items i ON i.id = h.item_id WHERE ${where.join(' AND ')} ORDER BY h.created_at DESC, h.rowid DESC LIMIT ?`,
+      [...params, opts.limit ?? 500],
+    );
+    return rows.map((r) => ({ id: str(r.id), itemId: str(r.item_id), text: str(r.text), startMs: r.start_ms === null ? null : Number(r.start_ms), source: str(r.source) as Highlight['source'], createdAt: str(r.created_at) }));
+  }
+
+  async deleteHighlight(id: string): Promise<void> {
+    await this.db.run('DELETE FROM highlights WHERE id = ?', [id]);
+  }
+
+  async setReminder(id: string, at: string | null, notificationId: string | null): Promise<void> {
+    await this.db.run('UPDATE items SET remind_at = ?, remind_notification_id = ? WHERE id = ?', [at, notificationId, id]);
+  }
+
+  async reminderNotificationId(id: string): Promise<string | null> {
+    return strOrNull((await this.db.get<Row>('SELECT remind_notification_id FROM items WHERE id = ?', [id]))?.remind_notification_id);
+  }
+
+  /** Items with a reminder still ahead, soonest first. */
+  async upcomingReminders(nowIso: string, limit = 20): Promise<Item[]> {
+    const rows = await this.db.all<Row>('SELECT * FROM items WHERE deleted = 0 AND remind_at IS NOT NULL AND remind_at > ? ORDER BY remind_at ASC LIMIT ?', [nowIso, limit]);
+    return Promise.all(rows.map((r) => this.rowToItem(r)));
+  }
+
+  /** Counts for the Library shelves. */
+  async shelfCounts(): Promise<{ favorites: number; unread: number; viewed: number; highlights: number }> {
+    const r = await this.db.get<Row>(
+      `SELECT
+         (SELECT COUNT(*) FROM items WHERE deleted = 0 AND archived = 0 AND favorite = 1) AS favorites,
+         (SELECT COUNT(*) FROM items WHERE deleted = 0 AND archived = 0 AND last_viewed_at IS NULL) AS unread,
+         (SELECT COUNT(*) FROM items WHERE deleted = 0 AND archived = 0 AND last_viewed_at IS NOT NULL) AS viewed,
+         (SELECT COUNT(*) FROM highlights h JOIN items i ON i.id = h.item_id WHERE i.deleted = 0) AS highlights`,
+    );
+    return { favorites: Number(r?.favorites ?? 0), unread: Number(r?.unread ?? 0), viewed: Number(r?.viewed ?? 0), highlights: Number(r?.highlights ?? 0) };
   }
 
   async setArchived(ids: string[], archived: boolean): Promise<number> {

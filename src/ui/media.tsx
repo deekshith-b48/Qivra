@@ -40,7 +40,7 @@ export function Segmented<K extends string>({ options, value, onChange }: { opti
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             accessibilityLabel={`${o.label}${o.count !== undefined ? `, ${o.count}` : ''}`}
-            style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.primary : 'transparent', flexDirection: 'row', gap: 6 }}
+            style={{ flex: 1, minHeight: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.primary : 'transparent', flexDirection: 'row', gap: 6 }}
           >
             <Text style={[type.subtitle, { fontSize: 14, color: on ? c.onPrimary : c.textMuted }]}>{o.label}</Text>
             {o.count !== undefined ? <Text style={[type.caption, { color: on ? c.onPrimary : c.textFaint, opacity: on ? 0.75 : 1 }]}>{o.count}</Text> : null}

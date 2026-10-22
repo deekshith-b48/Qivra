@@ -1,213 +1,170 @@
+<div align="center">
+
+<img src="assets/icon.png" width="88" alt="Qivra logo" />
+
 # Qivra
 
-**A private, local-first knowledge vault for Android.**
+**Turn what you save into what you know.**
 
-Share a reel, a post, a video or a web page to Qivra and keep scrolling. Qivra saves it on your phone, transcribes it, writes a one-line summary with timestamped key moments, highlights the phrases that matter, and notifies you when it is ready. You can then search everything you saved and ask questions that are answered from your own library, with citations.
+A private, local-first knowledge vault for Android. Share a reel, video, web page or note, and Qivra transcribes it, summarises it and makes it searchable and askable, on your phone.
 
-[![Latest release](https://img.shields.io/github/v/release/deekshith-b48/Qivra?label=latest%20release)](https://github.com/deekshith-b48/Qivra/releases/latest)
-[![Android](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)](https://github.com/deekshith-b48/Qivra)
+[![Latest release](https://img.shields.io/github/v/release/deekshith-b48/Qivra?label=release&color=E50914)](https://github.com/deekshith-b48/Qivra/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Android 7+](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)](https://github.com/deekshith-b48/Qivra/releases/latest)
+[![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo&logoColor=white)](https://docs.expo.dev/)
+[![Build](https://github.com/deekshith-b48/Qivra/actions/workflows/build.yml/badge.svg)](https://github.com/deekshith-b48/Qivra/actions/workflows/build.yml)
 
-## Get Qivra
+[Download](https://github.com/deekshith-b48/Qivra/releases/latest) · [Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Development](#development) · [Contributing](#contributing)
 
-**[Download the latest APK (1.9.3)](https://github.com/deekshith-b48/Qivra/releases/latest)**: package `com.qivra.app`, Android 7.0 or newer. Open the APK on your phone and allow your file manager to install unknown apps when Android asks. It installs as its own app, next to SuperBrain.
+</div>
 
-> The APK is signed with the Android debug key. It is meant for personal use and sideloading, not the Play Store.
+<p align="center">
+  <img src="docs/screenshots/home.jpg" width="19%" alt="Home" />
+  <img src="docs/screenshots/item.jpg" width="19%" alt="Item page with summary and key moments" />
+  <img src="docs/screenshots/ask.jpg" width="19%" alt="Ask your library" />
+  <img src="docs/screenshots/glance.jpg" width="19%" alt="Glance: review and weekly stats" />
+  <img src="docs/screenshots/dev.jpg" width="19%" alt="Dev mode" />
+</p>
+
+## Why Qivra
+
+Saved posts pile up and are never seen again. Qivra keeps them **useful**: every link becomes a transcript, a one-line summary, timestamped key moments and highlighted keywords, all stored in a SQLite database **on your phone**. You can search it offline and ask questions that are answered from your own library, with citations.
+
+- **Local-first:** your library lives on the device. No account, no cloud database.
+- **Bring your own AI key:** each user adds their own free Groq key during setup. No key ships in the app.
+- **Works without AI:** search, transcripts, extractive summaries and flashcards still work with no key at all.
 
 ## Features
 
-### Design
-- **Floating navigation:** a rounded capsule (**Home · Study · Library · Ask**) where the active tab expands to show its name, plus a separate round **+** button that saves anything.
-- **Light mode:** soft grey-white gradients, white rounded cards with gentle shadows, black pill controls, and the Plus Jakarta Sans font.
-- **Dark mode:** Rich Black `#221F1F` cards on near-black with a deep-red glow, Netflix Crimson `#E50914` for actions, Deep Red `#B81D24` gradients, and Soft White `#F5F5F1` text.
-- All colours, gradients, radii, shadows and type live in one file, [`src/ui/tokens.ts`](src/ui/tokens.ts). A test checks the contrast of every pairing.
-
-### Find your way around
-- **Three tabs and a "+" button:** **Home** shows what needs you, **Library** holds and searches everything, and **Ask** answers questions about your library. The centre **+** pastes a copied link, writes a note, records a voice note or imports a file.
-- **Home feed:** **Ready to review** (new and ready), **Needs you** (needs a transcript or failed), **In progress**, and one older item **from your library** each day. An opt-in **daily digest** notification arrives at 9 am.
-- **Watch inside Qivra:** YouTube items play on the item page. Tap a key moment, a transcript line or an Ask citation to jump straight to that second, and the line being spoken is highlighted as it plays.
-- **Library grid and swipe actions:** videos, websites and notes show as a 2-column grid, and the toggle switches to a list. In the list, **swipe right to archive** and **swipe left to add to a collection or delete**. Each action shows an **Undo** bar for 8 seconds, and a delete isn't written until that bar closes. The same actions are in TalkBack's actions menu.
-- **Ask about this:** every item has a button to chat with just that video or page. Answers cite its moments.
-
-### Save from anywhere, without leaving the app you are in
-- **Share sheet capture.** Share from Instagram, X, YouTube, a browser or any app. A toast confirms the save, and a short "Preparing transcript and summary…" notification shows while Qivra works. When it is done, a **"Ready: <title>"** notification with the summary opens the item.
-- **Libraries by kind.** Saved items are sorted into **Videos** (YouTube, Instagram, X), **Websites** (articles, docs, GitHub) and **Notes** (your notes, voice notes and imported files).
-- **Offline-safe.** Each share is written to disk before anything else runs, so it survives the app being killed or the network dropping.
-
-### Automatic transcripts
-| Source | How the transcript is made |
+| | |
 |---|---|
-| YouTube | Published captions are fetched **on the phone**, with real timestamps. |
-| Instagram reels, X videos | Your paired **Qivra server** downloads the public audio (yt-dlp, no cookies) and transcribes it with **Groq Whisper large-v3-turbo**, typically in a few seconds. It falls back to local Whisper on your laptop (transcribe-anything with MLX, or faster-whisper). |
-| Websites, GitHub | The readable article text, or the README, is extracted and indexed. |
-| Files and imports | SRT, VTT or TXT transcripts, and audio or video files (transcribed by the server). |
-| Voice notes | Recorded and transcribed **on the phone** with whisper.cpp (Whisper tiny, base or small, or NVIDIA Parakeet v3). Dictation also works in Notes, Search and the Agent. |
+| **Capture** | Share from Instagram, X, YouTube, a browser or any app and keep scrolling. Paste a link, write a note, record a voice note, or import files, screenshots and transcripts (SRT, VTT, TXT). Shares survive the app being killed. |
+| **Understand** | YouTube captions are fetched on the phone. Reels and X videos are transcribed by your optional server (Groq Whisper, or local Whisper). Text in images is read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
+| **Ask & learn** | Chat with your whole library or one item. Answers stream, cite numbered sources and jump to the right second of a video. Make flashcards from any item and review them with spaced repetition. Daily, weekly and topic reports export as Markdown or PDF. |
+| **Organise** | Library grid or list, full-text search (SQLite FTS5) and search by meaning, smart collections, favourites, highlights and revisit reminders. Swipe to archive or delete, with undo. |
+| **Dev mode** (opt-in) | A Dev tab with AI trends from GitHub, Hacker News and Hugging Face, Claude Code skills, plugins and MCP servers, follow-ups on topics you choose, and a daily-habit streak. Hidden unless you turn it on. |
+| **Privacy** | Keys in Android's Keystore, no backups to the cloud, permissions asked only when needed, and saved content treated as untrusted (commands are shown, never run). |
 
-Qivra never makes up a transcript. A music-only reel finishes as "No speech to transcribe", and a video without captions asks you for one.
+<details>
+<summary>More screenshots</summary>
+<p align="center">
+  <img src="docs/screenshots/library.jpg" width="24%" alt="Library" />
+  <img src="docs/screenshots/home_dark.jpg" width="24%" alt="Home, dark theme" />
+  <img src="docs/screenshots/settings_dark.jpg" width="24%" alt="Settings, dark theme" />
+</p>
+</details>
 
-### Summaries, key moments and highlights
-- **TL;DR:** a one-sentence summary, labelled "AI-generated" when a model wrote it. Without a model, Qivra writes an extractive summary on the device.
-- **Key moments:** the important points, each linked to its timestamp. Tap one to open the video at that second.
-- **Keyword highlights:** concepts copied word for word from the source, plus tools and recurring phrases, highlighted across the summary and the transcript. Tap a keyword to see only the lines that mention it.
-- **Tools, repos and commands** are pulled out as they appear in the source. Commands are shown and can be copied, but are never run.
+## Quick start
 
-### Smarter capture and search (1.9)
-- **Text from images:** share screenshots, photos or carousels to Qivra and their text is read on the phone (ML Kit), then summarised and searchable.
-- **On-screen text in reels:** reels with no speech get the text shown on screen read by your server (RapidOCR on sampled frames), with timestamps.
-- **Search by meaning:** your server runs a small multilingual embedding model (fastembed), with no cloud and no key. Library search adds **Related by meaning**, item pages show **Related** items and flag likely duplicates, and Ask finds matches by meaning too. An English search can find a Hindi reel about the same topic.
-- **Away from home:** use your server anywhere over Tailscale or WireGuard, with `--remote`. The phone switches addresses on its own, and nothing is exposed to the internet.
+### 1. Install the app
 
-### Search, ask and report
-- **Search from the Library bar:** full-text search on the device with SQLite FTS5, works offline. Results are grouped by item, and transcript matches show their timestamps. Semantic search is added when an embedding model is configured.
-- **Ask, like a modern chat assistant:**
-  - Answers stream in as they are written, and you can **Stop** at any time.
-  - Each answer has **Copy**, **Regenerate** and **Sources**.
-  - Tables, code blocks and lists render properly, and citations appear as numbered pills.
-  - Timestamps in "Ask about this" answers play the video from that second.
-  - A **Library / General** switch in the message box. Library answers only from what you saved, with sources. General chats about anything, labelled as not from your library. Greetings get a friendly reply, and when your library has nothing on a question, **Answer generally** asks again in General mode.
-- **Smart collections:** collections that fill themselves from rules (source, status, tags, concepts, unread, saved recently). Topics shared by 3 or more items are suggested automatically.
-- **Flashcards:** "Make flashcards" on any item turns its summary and key moments into question-and-answer cards. They are written by AI when available, or as fill-in-the-blank cards made on the phone. Review them with Again/Hard/Good/Easy spaced repetition; Home shows how many are due.
-- **Ask:** questions across the whole library, or about one item. Answers come only from your saved items and cite numbered sources [S1]. Saved content is treated as untrusted data, which guards against prompt injection. Without a model, Qivra returns the matching passages instead.
-- **Reports:** daily, weekly, topic, collection or a selection of items, with sources and gaps. Export as Markdown or plain text, or share as a PDF. An opt-in weekly report is prepared after 6 am each Monday (your timezone) and announced with a notification hidden on the lock screen.
-- **Collections, tags, notes and transcript corrections**, plus export and delete-everything under Privacy & storage.
+Download **`Qivra-2.0.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
 
-### Your own server (optional)
-- **QR pairing:** a one-time code that expires after 5 minutes, and a separate credential for each device. LAN access is opt-in.
-- **Sync** across devices, with revisions, conflict resolution and tombstones for deleted items.
-- **AI gateway:** put a provider key (for example Groq) in `server/qivra.env`. Paired phones get AI answers and summaries without any setup on the phone, and **the key never leaves your laptop**.
+> The APK is signed with the Android debug key and is meant for sideloading. Check the download against the `.sha256` file attached to the release.
 
-## Architecture
+### 2. Add your own Groq key
 
-```mermaid
-flowchart LR
-  subgraph Phone["Android phone: Qivra app (Expo SDK 54 · React Native 0.81 · TypeScript)"]
-    Share["ShareActivity (Kotlin)"] -->|"envelope in files/share_inbox"| Inbox[(Share inbox)]
-    Share -->|"startForegroundService"| Svc["QivraShareTaskService<br/>headless JS + foreground notification"]
-    Svc --> Task["shareTask.ts"]
-    UI["Tabs: Home · Library (+ search) · Ask<br/>Item page with YouTube player · Reports"] --> Services
-    Task --> Services["Services: capture · processing jobs · ai · sync · voice"]
-    Services --> Core["Core (pure TS): url · metadata · youtubeCaptions · enrich · highlights · agent · reports"]
-    Services --> DB[("SQLite + FTS5<br/>items · transcripts · chunks · jobs")]
-    Services --> Keystore[("Android Keystore<br/>device credential · AI key")]
-    Services --> Whisper["whisper.rn<br/>on-device speech-to-text"]
-  end
+The setup screens ask for an AI key. Groq's tier is free and fast:
 
-  subgraph Laptop["Your laptop: Qivra server (Python · FastAPI)"]
-    API["/api/v1: pairing · items · sync · jobs · search · agent · reports · ai"]
-    Jobs["Job worker: metadata · captions · transcribe_url · enrich"]
-    Engines["Transcribers: Groq Whisper → transcribe-anything (MLX) → faster-whisper"]
-    GW["AI gateway (key in qivra.env)"]
-    SDB[("SQLite<br/>qv_* tables + SuperBrain mirror")]
-    API --> Jobs --> Engines
-    API --> GW
-    API --> SDB
-  end
+1. Tap **Get a free Groq key**, sign in at [console.groq.com/keys](https://console.groq.com/keys) and create a key.
+2. Paste it into **Your Groq API key** and tap **Verify & save**.
 
-  Services <-->|"HTTP(S) · Bearer device credential · LAN or VPN only"| API
-  Services -->|"captions, oEmbed, page text (HTTPS)"| Web(("YouTube · X · websites"))
-  Jobs -->|"public audio (yt-dlp)"| Web
-  Engines -->|"audio (opt-in)"| Groq(("Groq API"))
-  GW -->|"chat completions"| Groq
-```
+Qivra sends a tiny test request, then stores the key in Android's secure storage. It is sent only to Groq, and only when you ask or summarise. Tap **Later** to skip; you can add it any time under **Settings → AI models**.
 
-**Layers in the app.** `src/core` is pure TypeScript with no React Native imports, so it is unit-tested directly. `src/db` holds the schema, migrations and repository. `src/services` holds the side effects: files, network, jobs and secure storage. `src/screens` and `src/ui` are the interface. `src/sync` is the sync engine. Native code is limited to two Kotlin files under `plugins/android`, which `plugins/withQivraAndroid.js` copies into the project during `expo prebuild`.
+### 3. Run your own server (optional)
 
-## System design
-
-### Share flow: the user stays in the source app
-
-```mermaid
-sequenceDiagram
-  participant U as Instagram / X / YouTube
-  participant S as ShareActivity
-  participant F as QivraShareTaskService
-  participant J as shareTask.ts (headless JS)
-  participant Srv as Qivra server
-  U->>S: ACTION_SEND (link or files)
-  S->>S: write envelope to share_inbox (atomic rename)
-  S->>F: startForegroundService
-  S-->>U: Toast "Saved to Qivra", finish()
-  F->>J: run headless task "QivraShare"
-  J->>J: drain inbox → create item (deduplicated)
-  J->>J: run jobs: metadata → transcript → summary → index
-  J->>Srv: transcribe_url / AI gateway (when paired)
-  J->>F: write share_task/result-*.json
-  F-->>U: "Ready: title" notification (tap → qivra://item/{id}), stopSelf()
-```
-
-Why it is built this way:
-- **Foreground service.** Android freezes a plain background service about 10 s after the share screen closes.
-- **Result file.** React Native's task-finished callback does not reach headless services under the New Architecture, so the task signals the service through a file instead.
-- **Native notification.** The tap still deep-links correctly when the app was started headless.
-
-### Processing pipeline
-
-Every unit of work is a row in the **durable `jobs` table**. Jobs have idempotent ids and are claimed atomically. They retry with exponential backoff and are recovered after the process dies. They run on app start and resume, after a capture, in the headless share task, and from a WorkManager background task.
-
-```mermaid
-stateDiagram-v2
-  [*] --> CAPTURED
-  CAPTURED --> METADATA_CHECK
-  METADATA_CHECK --> TRANSCRIBING: video without transcript
-  METADATA_CHECK --> ENRICHING
-  TRANSCRIBING --> ENRICHING: transcript stored
-  TRANSCRIBING --> NEEDS_INPUT: no captions and no server
-  ENRICHING --> INDEXING
-  INDEXING --> READY
-  READY --> READY: model_enrich (AI summary, key moments)
-  METADATA_CHECK --> FAILED_RETRYABLE
-  FAILED_RETRYABLE --> METADATA_CHECK: retry
-```
-
-- **Server jobs** (`server_transcribe_url` and others) start a job on the server and poll it without using up attempts. If the laptop is asleep, the job waits (`SERVER_UNREACHABLE`) and is resumed as soon as the server answers again.
-- **AI enrichment** sends the transcript with `[mm:ss]` markers. The model returns a TL;DR, key moments, concepts and tags. Timestamps are snapped to real segment starts (±2 s) or dropped, and any concept that does not occur in the source is discarded.
-
-### Data and sync
-- **On the phone:** `items`, `transcripts` and `transcript_segments`, `chunks` with the `chunks_fts` FTS5 index and optional `embeddings`, plus `media`, `jobs`, `collections`, `reports`, `conversations` and `message_citations`, `conflicts` and `usage_events`. Schema versions use `PRAGMA user_version`.
-- **Sync** is revision-based. The phone pushes changes since a cursor and pulls the server's sequence. Edits made on two devices become conflicts, with keep-local, keep-server or keep-both options. Revisions made by the server, such as metadata or a transcript it added, are rebased instead of raised as conflicts. Deletes travel as tombstones.
-
-### Security model
-- **Pairing:** one-time 40-bit codes with a 5-minute TTL, consumed atomically and rate-limited per IP and globally. Device tokens (`qv1_…`) are stored only as SHA-256 hashes on the server and in Keystore-backed storage on the phone.
-- **Server:** admin routes answer only on loopback. Host and Origin headers are checked against DNS rebinding. Payload and upload sizes are capped. Server-side fetches are guarded against SSRF, uploads cannot traverse paths, and no secret is ever logged.
-- **Network:** cleartext HTTP is refused unless the host is on a private, LAN or VPN address, and hosted AI providers must use HTTPS.
-- **Content:** imported text is treated as untrusted. Commands are never executed, and the Agent's write tools need your confirmation.
-- **Permissions:** each one is requested when you first use the feature that needs it: camera for QR scanning, microphone for recording, notifications on the first share or when you turn on the digest. The clipboard is read only when you tap "Paste copied link".
-- **Backups:** Android cloud and device-transfer backup are disabled.
-
-See [Security and privacy](docs/SECURITY_AND_PRIVACY.md) for the full threat notes.
-
-## Run your own server
+The server, on your laptop, transcribes Instagram and X videos, reads on-screen text, adds search by meaning and syncs between devices.
 
 ```bash
 cd server
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-qivra.txt -r requirements-media.txt
-# optional: search by meaning, and on-screen text in reels
-.venv/bin/pip install -r requirements-embeddings.txt -r requirements-ocr.txt
-.venv/bin/pip install -U "pillow>=13.0.0"   # security fixes; fastembed still asks for <12
-cp qivra.env.example qivra.env
+cp qivra.env.example qivra.env      # add your Groq key here for server-side AI and Whisper
 .venv/bin/python -m qivra serve --lan
 ```
 
-In `qivra.env`, set `QIVRA_AI_API_KEY` (for example a Groq key) and keep `QIVRA_TRANSCRIBER=groq` for fast cloud transcription. Remove that line to keep all audio on your laptop. The server prints its LAN address, a one-time Access ID and a QR code. In Qivra, open **Settings → Connect to My Server → Scan QR code**.
+The server prints a QR code. In Qivra, open **Settings → Your Qivra server → Scan QR code**. Optional extras:
 
-**Away from home:** install Tailscale on the Mac and the phone, sign in with the same account, start the server with `--remote` instead of `--lan`, and pair again. The phone then switches between the home Wi-Fi and the private Tailscale address on its own; nothing is exposed to the internet. Details: [docs/LOCAL_SERVER_AND_QR_PAIRING.md](docs/LOCAL_SERVER_AND_QR_PAIRING.md#away-from-home-tailscale--wireguard).
+```bash
+.venv/bin/pip install -r requirements-embeddings.txt -r requirements-ocr.txt   # search by meaning, text in reels
+.venv/bin/pip install -r requirements-transcribe-anything.txt                  # MLX Whisper on Apple Silicon
+```
 
-Optional: `pip install -r requirements-transcribe-anything.txt` adds MLX-accelerated Whisper on Apple Silicon as the local engine. See [Local server and QR pairing](docs/LOCAL_SERVER_AND_QR_PAIRING.md) and [Voice and transcription](docs/VOICE_AND_TRANSCRIPTION.md).
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph Phone["Android phone · Qivra app"]
+    Share["Share sheet"] --> Jobs["Durable job queue"]
+    UI["Home · Glance · Library · Ask · Dev"] --> Jobs
+    Jobs --> DB[("SQLite + FTS5<br/>items · transcripts · chunks")]
+    Jobs --> Whisper["On-device Whisper<br/>voice notes"]
+    Key[("Keystore<br/>device credential · AI key")]
+  end
+
+  subgraph Laptop["Your laptop · Qivra server (optional)"]
+    API["FastAPI /api/v1<br/>pairing · sync · jobs · search"]
+    Media["yt-dlp · Whisper · OCR · embeddings"]
+    GW["AI gateway<br/>key in qivra.env"]
+    API --> Media
+    API --> GW
+  end
+
+  Jobs <-->|"LAN or VPN · per-device token"| API
+  Jobs -->|"captions · page text"| Web(("YouTube · X · web"))
+  Jobs -->|"your own key"| Groq(("Groq API"))
+  GW --> Groq
+  Media -->|"opt-in"| Groq
+```
+
+1. **Capture.** A share writes an envelope to disk, starts a foreground service and returns you to the app you were in.
+2. **Process.** Each step (metadata, transcript, summary, index) is a row in a durable `jobs` table. Steps retry with backoff, recover after a crash and wait for the server when the laptop sleeps.
+3. **Enrich.** The model gets the transcript with `[mm:ss]` markers. Timestamps are snapped to real segments, and keywords that are not in the source are dropped.
+4. **Use.** Search, Ask, flashcards and reports read the local database. Ask answers only from your saved items and cites them.
+
+Read more in [Architecture](docs/ARCHITECTURE.md), [AI providers and transcripts](docs/AI_PROVIDERS_AND_TRANSCRIPTS.md), [Local server and QR pairing](docs/LOCAL_SERVER_AND_QR_PAIRING.md) and [Voice and transcription](docs/VOICE_AND_TRANSCRIPTION.md).
+
+## Configuration
+
+Server settings live in `server/qivra.env` (git-ignored). Copy it from [`qivra.env.example`](server/qivra.env.example).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `QIVRA_AI_BASE_URL` | `https://api.groq.com/openai/v1` | Any OpenAI-compatible provider (HTTPS only for hosted ones). |
+| `QIVRA_AI_API_KEY` | *(empty)* | Your provider key. Stays on the laptop; paired phones use it through the gateway. |
+| `QIVRA_AI_MODEL` | `openai/gpt-oss-120b` | Chat model for summaries and Ask. |
+| `QIVRA_AI_EMBEDDING_MODEL` | *(empty)* | Optional hosted embedding model. |
+| `QIVRA_TRANSCRIBER` | `auto` | `groq` sends audio to Groq Whisper; `auto` keeps audio on the laptop. |
+| `QIVRA_AI_REASONING_EFFORT` | `low` | `low`, `medium` or `high` for reasoning models. |
+
+| Flag | Purpose |
+|---|---|
+| `--lan` | Listen on your Wi-Fi so phones can pair. |
+| `--remote` | Like `--lan`, but the QR prefers your Tailscale / WireGuard address, for use away from home. Nothing is exposed to the internet. |
+| `--no-qr` | Do not print the pairing QR code. |
+
+## Privacy & security
+
+- **Your key, your account.** The app ships no API key. Each user's key is stored in Android's Keystore and is never logged, synced, exported or put in a QR code.
+- **Pairing:** one-time codes that expire after 5 minutes, rate-limited, and a separate revocable token per device, stored only as a SHA-256 hash on the server.
+- **Server hardening:** admin routes answer only on loopback; Host and Origin checks against DNS rebinding; SSRF guards on server fetches; size limits; no API docs served; security headers.
+- **Network:** cleartext HTTP only to private, LAN or VPN addresses.
+- **Content:** saved text is untrusted data. It cannot instruct the AI, and commands in it are never executed.
+
+Full details: [Security and privacy](docs/SECURITY_AND_PRIVACY.md). To report a vulnerability, please open a private [security advisory](https://github.com/deekshith-b48/Qivra/security/advisories/new) rather than a public issue.
 
 ## Development
 
-Requirements: Node.js 20+, JDK 17–21, Android SDK 36 with NDK 28, and Python 3.11+.
+**Requirements:** Node.js 20+, JDK 17–21, Android SDK 36 with NDK 28, Python 3.11+. Expo Go is not supported (the app has native code).
 
 ```bash
 npm ci
-npx tsc --noEmit
-npx biome lint src App.tsx index.ts __tests__ plugins
-npx jest
-cd server && .venv/bin/python -m pytest -q tests
+npx tsc --noEmit                                   # type check
+npx jest                                           # app tests (logic + UI)
+cd server && .venv/bin/python -m pytest -q tests   # server tests
 ```
 
-Build the release APK:
+**Build the release APK:**
 
 ```bash
 QIVRA_ANDROID_ABIS=arm64-v8a,x86_64 npx expo prebuild --platform android --clean --no-install
@@ -215,21 +172,53 @@ echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 cd android && ./gradlew assembleRelease
 ```
 
-The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Expo Go is not supported because the app includes native code. An emulator reaches a server on the same machine at `http://10.0.2.2:<port>`.
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. An emulator reaches a server on the same machine at `http://10.0.2.2:<port>`.
 
-## Project map
+### Project structure
 
-| Path | Purpose |
-|---|---|
-| `App.tsx`, `src/screens/`, `src/ui/` | Navigation, screens and shared components |
-| `src/core/` | Pure logic: URL normalisation, metadata and readable text, YouTube captions, enrichment, highlights, agent, reports |
-| `src/db/`, `src/sync/` | SQLite schema, migrations, repository and the sync engine |
-| `src/services/` | Capture, processing jobs, headless share task, AI provider, voice, pairing, background work |
-| `plugins/` | Expo config plugin and the native Kotlin share target and headless service |
-| `server/qivra/` | Qivra server: API, pairing, security, jobs, media, transcribers, AI gateway |
-| `server/core/`, `server/analyzers/` | SuperBrain backend components |
-| `docs/` | [Architecture](docs/ARCHITECTURE.md), [AI providers and transcripts](docs/AI_PROVIDERS_AND_TRANSCRIPTS.md), [security](docs/SECURITY_AND_PRIVACY.md), [migration](docs/SUPERBRAIN_TO_QIVRA_MIGRATION.md), [test results](docs/TEST_RESULTS.md) |
+```
+├── App.tsx                 navigation, deep links, notification taps
+├── src/
+│   ├── core/               pure TypeScript: URLs, metadata, captions, highlights, search, reports
+│   ├── db/                 SQLite schema, migrations and repository
+│   ├── services/           side effects: capture, jobs, share task, AI, voice, reminders
+│   ├── sync/               revision-based sync and conflicts
+│   ├── screens/            Home, Glance, Library, Ask, Dev, item page, settings
+│   └── ui/                 design tokens, theme and shared components
+├── plugins/                Expo config plugin + native Kotlin share target and service
+├── server/
+│   ├── qivra/              FastAPI server: pairing, sync, jobs, media, AI gateway
+│   └── tests/              pytest suite
+├── __tests__/              Jest suites (core, db, ui)
+└── docs/                   architecture, security, test results
+```
 
-## Lineage and license
+`src/core` has no React Native imports, so it is tested directly. Native code is limited to two Kotlin files in `plugins/android`.
 
-Qivra is built on [SuperBrain](https://github.com/sidinsearch/superbrain). The migration and licensing context is in [SuperBrain to Qivra migration](docs/SUPERBRAIN_TO_QIVRA_MIGRATION.md). Licensed under **AGPL-3.0**; see [LICENSE](LICENSE).
+## Roadmap
+
+- [ ] Signed release builds and an F-Droid listing
+- [ ] iOS share extension
+- [ ] Encrypted export and restore
+- [ ] On-device embeddings, so search by meaning works without a server
+
+Ideas and votes are welcome in [Issues](https://github.com/deekshith-b48/Qivra/issues).
+
+## Contributing
+
+Contributions are welcome.
+
+1. Open an issue first for larger changes, so we can agree on the approach.
+2. Fork, create a branch, and keep the change focused.
+3. Add a test for any new logic or bug fix, and run `npx tsc --noEmit`, `npx jest` and the server tests.
+4. Open a pull request that explains what changed and why, with screenshots for UI changes.
+
+Match the existing style: small functions, shared components from `src/ui`, and no secrets in code or commits.
+
+## License
+
+Qivra is free software under the [GNU Affero General Public License v3.0](LICENSE). If you run a modified version for others, you must share its source.
+
+## Acknowledgements
+
+Qivra began as a fork of [SuperBrain](https://github.com/sidinsearch/superbrain) by sidinsearch, also under the AGPL-3.0. Copyright notices and the list of changes are in [NOTICE.md](NOTICE.md). Thanks to the authors of React Native, Expo, whisper.cpp, Groq, FastAPI and the other open-source projects Qivra builds on.

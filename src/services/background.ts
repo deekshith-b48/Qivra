@@ -13,6 +13,7 @@ import { drainShareInbox } from './capture';
 import { getRepo } from './db';
 import { requestSync, runDueJobs } from './processing';
 import { maybeGenerateWeeklyReport } from './weeklyReport';
+import { notifyFollowUps } from './devFeeds';
 
 export const BACKGROUND_TASK = 'qivra-background-work';
 
@@ -27,6 +28,7 @@ export function defineBackgroundTask(): void {
       await runDueJobs(20_000);
       await refreshDailyDigest();
       await maybeGenerateWeeklyReport();
+      await notifyFollowUps().catch(() => false);
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch {
       return BackgroundTask.BackgroundTaskResult.Failed;
