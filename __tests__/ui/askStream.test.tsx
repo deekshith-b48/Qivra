@@ -12,7 +12,7 @@ jest.mock('../../src/services/agentService', () => {
   return { ...actual, ask: jest.fn(), askAboutItem: jest.fn() };
 });
 
-const nav = () => ({ navigate: jest.fn(), goBack: jest.fn() }) as never;
+const nav = () => ({ navigate: jest.fn(), goBack: jest.fn(), setOptions: jest.fn(), isFocused: () => true }) as never;
 let release: () => void = () => undefined;
 
 beforeEach(() => {
@@ -80,4 +80,12 @@ test('the Library / General switch changes the placeholder and is sent with the 
   fireEvent.press(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() => expect(jest.mocked(ask).mock.calls.at(-1)?.[2]).toMatchObject({ mode: 'general' }));
   await act(async () => { release(); });
+});
+
+test('the nav bar is hidden while a chat is open and shown on the empty Ask screen', async () => {
+  const n = nav() as unknown as { setOptions: jest.Mock };
+  render(<ThemeProvider><AgentScreen navigation={n as never} route={{ key: 'a', name: 'Agent', params: { itemId: 'it_x' } } as never} /></ThemeProvider>);
+  await waitFor(() => expect(n.setOptions).toHaveBeenLastCalledWith({ tabBarStyle: { display: 'none' } }));
+  fireEvent.press(screen.getByRole('button', { name: 'Back to Ask' }));
+  await waitFor(() => expect(n.setOptions).toHaveBeenLastCalledWith({ tabBarStyle: undefined }));
 });

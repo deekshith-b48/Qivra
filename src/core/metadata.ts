@@ -16,6 +16,8 @@ export interface FetchedMetadata {
   siteName: string;
   imageUrl: string;
   bodyText: string; // e.g. GitHub README text, used for local extraction
+  /** The README as tidy Markdown, for display (GitHub only). */
+  markdown?: string;
   provider: string;
 }
 
@@ -112,8 +114,35 @@ export function extractReadableText(html: string, maxChars = 60_000): string {
   return out.length > maxChars ? `${out.slice(0, maxChars)}…` : out;
 }
 
-export function stripMarkdown(md: string): string {
+/**
+ * A README as clean Markdown for display: badges, images, raw HTML and comments
+ * removed, indented headings fixed. Code (fenced or inline) is left untouched.
+ */
+export function cleanMarkdown(md: string): string {
   return md
+    .split(/(```[\s\S]*?```|`[^`\n]+`)/)
+    .map((part, i) => (i % 2 ? part : part
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, '') // linked badges
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?[a-zA-Z][^>]*>/g, '') // HTML tags (their text stays)
+      .replace(/\[\s*\]\([^)]*\)/g, '') // links left empty
+      .replace(/^[ \t]+(#{1,6}\s)/gm, '$1')
+      .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, (e) => decodeEntities(e))
+      .replace(/[ \t]+$/gm, '')))
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Only the prose of Markdown: code blocks and inline code removed, then plain text. For keywords. */
+export function markdownProse(md: string): string {
+  return stripMarkdown(md.replace(/```[\s\S]*?```/g, '\n').replace(/`[^`\n]+`/g, ' '));
+}
+
+export function stripMarkdown(md: string): string {
+  return cleanMarkdown(md)
     .replace(/```[\s\S]*?```/g, (block) => block.replace(/```\w*/g, '')) // keep code (commands) but drop fences
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
@@ -140,13 +169,13 @@ export async function fetchMetadata(info: UrlInfo, fetchText: FetchText): Promis
     const r = await fetchText(`https://api.github.com/repos/${info.githubRepo}`, { accept: 'application/vnd.github+json', timeoutMs: 8000 });
     if (!r.ok) return null;
     const j = JSON.parse(r.text) as { full_name?: string; description?: string; topics?: string[]; language?: string; stargazers_count?: number; owner?: { login?: string } };
-    let readme = '';
     const rr = await fetchText(`https://api.github.com/repos/${info.githubRepo}/readme`, { accept: 'application/vnd.github.raw', timeoutMs: 8000 }).catch(() => null);
-    if (rr?.ok) readme = stripMarkdown(rr.text).slice(0, 60_000);
+    const markdown = rr?.ok ? cleanMarkdown(rr.text).slice(0, 60_000) : '';
+    const readme = stripMarkdown(markdown);
     const facts = [j.language ? `Language: ${j.language}` : '', j.topics?.length ? `Topics: ${j.topics.join(', ')}` : '', typeof j.stargazers_count === 'number' ? `Stars: ${j.stargazers_count}` : ''].filter(Boolean).join('. ');
     return {
       ...empty, title: j.full_name ?? info.githubRepo, description: [j.description ?? '', facts].filter(Boolean).join(' — '),
-      author: j.owner?.login ?? '', siteName: 'GitHub', bodyText: readme, provider: 'github-api',
+      author: j.owner?.login ?? '', siteName: 'GitHub', bodyText: readme, markdown, provider: 'github-api',
       // GitHub's own social preview card for the repository.
       imageUrl: `https://opengraph.githubassets.com/1/${info.githubRepo}`,
     };

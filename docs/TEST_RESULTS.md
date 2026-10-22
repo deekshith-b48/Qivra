@@ -1,5 +1,17 @@
 # Test results
 
+## 1.9.3 (2026-10-22): colourful Home and Glance, compact item page, modern Ask
+
+- Release APK: `dist/Qivra-1.9.3-release.apk`, version code 16.
+- `tsc` passes. Jest: 321 passed, 4 live tests skipped. Server pytest unchanged (131 passed).
+- New tests: Home feature tiles and quick-capture navigation; Glance due count and Start review; nav bar hidden during an Ask chat; item page tabs; README Markdown cleaning; URL-free and code-free keywords; tool keyword cap; text contrast on every colourful tile in both themes.
+- Emulator (release APK, light and dark):
+  - Home: greeting with Fluent 3D emoji, colourful stat tiles, quick capture, 12 feature tiles with counts and a server status dot; warnings near the top.
+  - Glance: review card, this week's stats, colourful topics, latest report; `qivra://glance` and the old `qivra://study` open it.
+  - Ask: the answer fills the screen, the composer sits right above the keyboard, the nav bar hides during a chat and Android back returns to the start screen.
+  - Item page: compact header and Summary / Transcript (README) / Details tabs; YouTube timestamps play in place; GitHub READMEs render as Markdown, and an old plain-text README upgraded itself on start.
+- Not verified on devices: a phone with a real review history (no streak yet), the conflict screen for a deleted item (needs two phones; covered by tests).
+
 ## 1.9.2 (2026-10-22): security hardening and code cleanup
 
 - Release APK: `dist/Qivra-1.9.2-release.apk`, version code 15.

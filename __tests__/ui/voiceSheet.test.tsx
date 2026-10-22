@@ -78,7 +78,7 @@ test('note dictation appends to existing writing in the capture screen', async (
 });
 
 test('Agent dictation fills the message for review before sending', async () => {
-  render(<ThemeProvider><AgentScreen navigation={{ navigate: jest.fn() } as never} route={{ key: 'agent', name: 'Agent' } as never} /></ThemeProvider>);
+  render(<ThemeProvider><AgentScreen navigation={{ navigate: jest.fn(), setOptions: jest.fn(), isFocused: () => true } as never} route={{ key: 'agent', name: 'Agent' } as never} /></ThemeProvider>);
   fireEvent.press(await screen.findByRole('button', { name: 'Ask by voice' }));
   fireEvent.press(await screen.findByRole('button', { name: 'Start recording' }));
   fireEvent.press(await screen.findByRole('button', { name: 'Stop recording' }));

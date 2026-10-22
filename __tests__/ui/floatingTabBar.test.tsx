@@ -4,7 +4,7 @@ import { ThemeProvider } from '../../src/ui/theme';
 
 const tabs: Record<string, TabSpec> = {
   Today: { label: 'Home', icon: ['home', 'home-outline'] },
-  Study: { label: 'Study', icon: ['checkbox', 'checkbox-outline'], badge: 3 },
+  Glance: { label: 'Glance', icon: ['grid', 'grid-outline'], badge: 3 },
   Library: { label: 'Library', icon: ['folder', 'folder-outline'] },
   Agent: { label: 'Ask', icon: ['chatbubble-ellipses', 'chatbubble-ellipses-outline'] },
 };
@@ -24,7 +24,7 @@ function setup(index = 0) {
 test('four tabs; only the active one shows its label; the + action is separate', () => {
   const { navigation, onAdd } = setup(0);
   const all = screen.getAllByRole('tab');
-  expect(all.map((t) => t.props.accessibilityLabel)).toEqual(['Home', 'Study, 3 due', 'Library', 'Ask']);
+  expect(all.map((t) => t.props.accessibilityLabel)).toEqual(['Home', 'Glance, 3 due', 'Library', 'Ask']);
   expect(all[0].props.accessibilityState).toEqual({ selected: true });
   expect(screen.getByText('Home')).toBeTruthy();
   expect(screen.queryByText('Library')).toBeNull(); // inactive tabs are icon-only
@@ -39,4 +39,15 @@ test('pressing the active tab does not navigate again', () => {
   expect(screen.getByText('Ask')).toBeTruthy();
   fireEvent.press(screen.getAllByRole('tab')[3]);
   expect(navigation.navigate).not.toHaveBeenCalled();
+});
+
+test('hidden when the focused screen asks for it (Ask during a chat)', () => {
+  const routes = Object.keys(tabs).map((name) => ({ key: `${name}-k`, name, params: undefined }));
+  const descriptors = { 'Agent-k': { options: { tabBarStyle: { display: 'none' } } } };
+  render(
+    <ThemeProvider>
+      <FloatingTabBar state={{ index: 3, routes } as never} navigation={{ emit: jest.fn(), navigate: jest.fn() } as never} descriptors={descriptors as never} insets={{ top: 0, bottom: 0, left: 0, right: 0 }} tabs={tabs} onAdd={jest.fn()} />
+    </ThemeProvider>,
+  );
+  expect(screen.queryAllByRole('tab')).toHaveLength(0);
 });

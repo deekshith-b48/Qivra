@@ -54,7 +54,9 @@ export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, ad
     };
   }, []);
 
-  if (keyboard) return null;
+  // A screen hides the bar with React Navigation's own option: tabBarStyle: { display: 'none' }.
+  const focusedStyle = descriptors[state.routes[state.index]?.key]?.options.tabBarStyle as { display?: string } | undefined;
+  if (keyboard || focusedStyle?.display === 'none') return null;
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 8) + BAR_GAP }]}>

@@ -157,7 +157,15 @@ export function extractRepos(text: string): string[] {
   return [...repos].slice(0, 50);
 }
 
-export function extractTools(text: string): string[] {
+const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+|\b(?:[a-z0-9-]+\.)+(?:com|org|io|dev|net|app|ai|co|so|sh)(?:\/\S*)?/gi;
+
+/** Text without web addresses: "github.com/x/y" is a link, not a mention of GitHub. */
+export function stripUrls(text: string): string {
+  return text.replace(URL_RE, ' ');
+}
+
+export function extractTools(raw: string): string[] {
+  const text = stripUrls(raw);
   const found: string[] = [];
   for (const tool of TOOL_DICTIONARY) {
     const esc = tool.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

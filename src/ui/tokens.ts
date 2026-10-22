@@ -57,7 +57,14 @@ export interface Palette {
   /** Keyword highlighter background. */
   highlight: string;
   onHighlight: string;
+  /** Apple-style system colours for feature tiles, stats and topic chips (icons and soft backgrounds, not body text). */
+  tint: Record<TintName, string>;
 }
+
+export type TintName = 'blue' | 'green' | 'orange' | 'pink' | 'purple' | 'teal' | 'indigo' | 'yellow' | 'red' | 'gray';
+
+/** A tint at ~14% opacity, for soft card and chip backgrounds. */
+export const soft = (hex: string) => `${hex}24`;
 
 export const light: Palette = {
   scheme: 'light',
@@ -72,9 +79,10 @@ export const light: Palette = {
   primary: '#0E0F11',
   onPrimary: '#FFFFFF',
   primaryGradient: ['#24262B', '#0E0F11'],
-  accent: '#0E0F11',
-  accentSoft: '#E9EBEF',
-  onAccentSoft: '#0E0F11',
+  // iOS blue, deepened for text contrast (system #007AFF is 4.0:1 on white).
+  accent: '#0060DF',
+  accentSoft: '#E8F1FF',
+  onAccentSoft: '#0050B8',
   positive: '#15803D',
   danger: '#C8282F',
   dangerSoft: '#FDECEC',
@@ -95,6 +103,7 @@ export const light: Palette = {
   onMedia: '#FFFFFF',
   highlight: '#FFEFA8',
   onHighlight: '#0E0F11',
+  tint: { blue: '#007AFF', green: '#34C759', orange: '#FF9500', pink: '#FF2D55', purple: '#AF52DE', teal: '#30B0C7', indigo: '#5856D6', yellow: '#FFCC00', red: '#FF3B30', gray: '#8E8E93' },
 };
 
 export const dark: Palette = {
@@ -133,6 +142,7 @@ export const dark: Palette = {
   onMedia: '#F5F5F1',
   highlight: '#5A1A1E',
   onHighlight: '#FFE3E5',
+  tint: { blue: '#0A84FF', green: '#30D158', orange: '#FF9F0A', pink: '#FF375F', purple: '#BF5AF2', teal: '#64D2FF', indigo: '#5E5CE6', yellow: '#FFD60A', red: '#FF453A', gray: '#8E8E93' },
 };
 
 export const palettes = { light, dark } as const;

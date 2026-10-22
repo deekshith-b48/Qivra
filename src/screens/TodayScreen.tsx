@@ -12,11 +12,14 @@ import type { Item } from '../db/types';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { requestSync, runDueJobs } from '../services/processing';
 import { generateReport } from '../services/reports';
-import { Backdrop, Banner, Button, Card, Chip, CircleButton, elevation, EmptyState, Loading, Section, SectionLink, StatStrip, T } from '../ui/components';
+import { Backdrop, Banner, Button, Card, CircleButton, elevation, EmptyState, Loading, Section, SectionLink, T } from '../ui/components';
 import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 import { useAction, useQuery } from '../ui/hooks';
 import { PlatformBadge, PLATFORM_ICONS } from '../ui/media';
+import { Emoji, type EmojiName } from '../ui/Emoji';
 import { radius, space, useTheme } from '../ui/theme';
+import { FeatureTile, StatTile, TINT_CYCLE } from '../ui/tiles';
+import { soft, type TintName } from '../ui/tokens';
 import { useAiInfo, useConnection, useSettings } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Today'>, NativeStackScreenProps<RootStackParamList>>;
@@ -65,6 +68,19 @@ function Row({ item, tone, onPress }: { item: Item; tone: 'warning' | 'danger' |
   );
 }
 
+const CAPTURE: { mode: 'link' | 'note' | 'voice' | 'media'; label: string; a11y: string; emoji: EmojiName; tint: TintName }[] = [
+  { mode: 'link', label: 'Link', a11y: 'Save a link', emoji: 'link', tint: 'blue' },
+  { mode: 'note', label: 'Note', a11y: 'Write a note', emoji: 'memo', tint: 'orange' },
+  { mode: 'voice', label: 'Voice', a11y: 'Record a voice note', emoji: 'mic', tint: 'pink' },
+  { mode: 'media', label: 'File', a11y: 'Import a file', emoji: 'paperclip', tint: 'purple' },
+];
+
+function chunk<T>(xs: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+}
+
 export default function TodayScreen({ navigation }: Props) {
   const { c } = useTheme();
   const settings = useSettings();
@@ -82,6 +98,8 @@ export default function TodayScreen({ navigation }: Props) {
         feed: await repo.homeFeed(r.startIso.slice(0, 10)),
         clusters: await repo.tagCountsInRange(r.startIso, r.endIso),
         conflicts: (await repo.openConflicts()).length,
+        collections: (await repo.listCollections()).length,
+        reports: (await repo.listReports(1000)).length,
         total: await repo.countWhere('1 = 1'),
       };
     },
@@ -100,6 +118,20 @@ export default function TodayScreen({ navigation }: Props) {
       await q.reload();
     });
 
+  const features: React.ComponentProps<typeof FeatureTile>[] = [
+    { icon: 'folder', tint: 'blue', label: 'Library', count: d?.total || undefined, onPress: () => navigation.navigate('Main', { screen: 'Library' }) },
+    { icon: 'albums', tint: 'orange', label: 'Collections', count: d?.collections || undefined, onPress: () => navigation.navigate('Collections') },
+    { icon: 'sparkles', tint: 'purple', label: 'Ask', onPress: () => navigation.navigate('Main', { screen: 'Agent' }) },
+    { icon: 'grid', tint: 'green', label: 'Glance', onPress: () => navigation.navigate('Main', { screen: 'Glance' }) },
+    { icon: 'layers', tint: 'yellow', label: 'Review cards', count: due.data || undefined, onPress: () => navigation.navigate('Review') },
+    { icon: 'document-text', tint: 'teal', label: 'Reports', count: d?.reports || undefined, onPress: () => navigation.navigate('Reports') },
+    { icon: 'time', tint: 'gray', label: 'Queue', count: d ? d.feed.processing.length + d.feed.needsYou.length || undefined : undefined, onPress: () => navigation.navigate('Jobs') },
+    { icon: 'server', tint: 'indigo', label: 'Server', dot: connection ? (connection.lastError ? 'bad' : 'ok') : undefined, onPress: () => navigation.navigate('ConnectServer') },
+    { icon: 'hardware-chip', tint: 'pink', label: 'AI models', onPress: () => navigation.navigate('AiProviders') },
+    { icon: 'mic', tint: 'red', label: 'Voice settings', onPress: () => navigation.navigate('VoiceSettings') },
+    { icon: 'lock-closed', tint: 'green', label: 'Privacy', onPress: () => navigation.navigate('PrivacyStorage') },
+    { icon: 'settings', tint: 'gray', label: 'Settings', onPress: () => navigation.navigate('Settings') },
+  ];
   const hour = Number(formatLocal(new Date().toISOString(), tz, { hour: 'numeric', hourCycle: 'h23' }));
   const stats = d ? [
     `${d.savedToday} saved today`,
@@ -113,29 +145,51 @@ export default function TodayScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: inset + space.lg }} refreshControl={<RefreshControl refreshing={busy} onRefresh={() => void refresh()} />}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm }}>
           <View style={{ flex: 1 }}>
-            <T v="display" accessibilityRole="header">{Number.isFinite(hour) ? greeting(hour) : 'Hello'}</T>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+              <T v="display" accessibilityRole="header">{Number.isFinite(hour) ? greeting(hour) : 'Hello'}</T>
+              <Emoji name="wave" size={30} />
+            </View>
             <T color="textMuted" style={{ marginTop: 2 }}>{d ? formatLocal(d.range.startIso, tz, { weekday: 'long', month: 'long', day: 'numeric' }) : ' '}</T>
           </View>
-          <View style={{ flexDirection: 'row', gap: space.sm }}>
-            <CircleButton icon="albums-outline" label="Collections" onPress={() => navigation.navigate('Collections')} />
-            <CircleButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
-          </View>
+          <CircleButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
         </View>
         {d ? (
-          <View style={{ marginTop: space.lg }}>
-            <StatStrip items={[
-              { value: d.savedToday, label: 'saved today', onPress: () => navigation.navigate('Main', { screen: 'Library' }) },
-              { value: due.data ?? 0, label: 'cards due', onPress: () => navigation.navigate('Main', { screen: 'Study' }) },
-              { value: d.feed.processing.length + d.feed.needsYou.length, label: 'in queue', onPress: () => navigation.navigate('Jobs') },
-            ]} />
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.lg }}>
+            <StatTile icon="bookmark" tint="blue" value={d.savedToday} label="saved today" onPress={() => navigation.navigate('Main', { screen: 'Library' })} />
+            <StatTile icon="layers" tint="green" value={due.data ?? 0} label="cards due" onPress={() => navigation.navigate('Main', { screen: 'Glance' })} />
+            <StatTile icon="time" tint="orange" value={d.feed.processing.length + d.feed.needsYou.length} label="in queue" onPress={() => navigation.navigate('Jobs')} />
           </View>
         ) : null}
+
+        {/* Things that need attention come first. */}
+        {d?.conflicts ? <Banner tone="warning" title={`${d.conflicts} sync conflict(s)`} body="An item was edited on two devices. Choose which version to keep." action={<Button kind="outline" title="Review" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
+        {d && connection?.lastError ? <Banner tone="warning" title="Server unreachable" body={connection.lastError.message} action={<Button kind="outline" title="Connection" onPress={() => navigation.navigate('ConnectServer')} />} /> : null}
+
+        {/* Quick capture: the same modes as the + button. */}
+        <Section title="Save something">
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
+            {CAPTURE.map((x) => (
+              <Pressable key={x.mode} onPress={() => navigation.navigate('Capture', { mode: x.mode })} accessibilityRole="button" accessibilityLabel={x.a11y}
+                style={({ pressed }) => [{ flex: 1, alignItems: 'center', paddingVertical: space.md, borderRadius: radius.lg, backgroundColor: soft(c.tint[x.tint]), opacity: pressed ? 0.75 : 1 }]}>
+                <Emoji name={x.emoji} size={30} />
+                <T v="caption" style={{ marginTop: 6, fontWeight: '600' }}>{x.label}</T>
+              </Pressable>
+            ))}
+          </View>
+        </Section>
+
+        {/* Every feature, one tap away. */}
+        <Section title="Everything in Qivra">
+          {chunk(features, 3).map((row, i) => (
+            <View key={i} style={{ flexDirection: 'row', gap: space.sm, marginBottom: space.sm }}>
+              {row.map((f) => <FeatureTile key={f.label} {...f} />)}
+            </View>
+          ))}
+        </Section>
         {q.loading && !d ? <Loading /> : null}
         {q.error ? <Banner tone="danger" title="Couldn't load your home feed" body={q.error} /> : null}
         {d ? (
           <>
-            {d.conflicts ? <Banner tone="warning" title={`${d.conflicts} sync conflict(s)`} body="An item was edited on two devices. Choose which version to keep." action={<Button kind="outline" title="Review" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
-            {connection?.lastError ? <Banner tone="warning" title="Server unreachable" body={connection.lastError.message} action={<Button kind="outline" title="Connection" onPress={() => navigation.navigate('ConnectServer')} />} /> : null}
 
 
             {d.feed.ready.length ? (
@@ -171,8 +225,11 @@ export default function TodayScreen({ navigation }: Props) {
               </Section>
             ) : null}
 
-            <Card style={{ marginTop: space.lg }}>
-              <T v="subtitle">Today's digest</T>
+            <View style={{ marginTop: space.lg, padding: space.lg, borderRadius: radius.card, backgroundColor: soft(c.tint.teal) }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+                <Emoji name="chart" size={28} />
+                <T v="subtitle" style={{ flex: 1 }}>Today's digest</T>
+              </View>
               <T v="small" color="textMuted" style={{ marginVertical: space.xs }}>A report of what you saved today, with sources, tools and open questions.</T>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.sm }}>
                 <Button title="Create" icon="document-text-outline" loading={busy} onPress={() => run(async () => {
@@ -181,14 +238,22 @@ export default function TodayScreen({ navigation }: Props) {
                 }, 'Report failed')} />
                 <Button kind="outline" title="All reports" onPress={() => navigation.navigate('Reports')} />
               </View>
-            </Card>
+            </View>
 
             {d.clusters.length ? (
               <Section title="Topics today">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                  {d.clusters.map((t) => (
-                    <Chip key={t.tag} label={`${t.tag} · ${t.count}`} onPress={() => navigation.navigate('Main', { screen: 'Library', params: { q: t.tag } })} />
-                  ))}
+                  {d.clusters.map((t, i) => {
+                    const tint = c.tint[TINT_CYCLE[i % TINT_CYCLE.length]];
+                    return (
+                      <Pressable key={t.tag} onPress={() => navigation.navigate('Main', { screen: 'Library', params: { q: t.tag } })} accessibilityRole="button" accessibilityLabel={`${t.tag} · ${t.count}`}
+                        style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, marginRight: 6, marginBottom: 6, borderRadius: radius.pill, backgroundColor: soft(tint), opacity: pressed ? 0.7 : 1 })}>
+                        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: tint }} />
+                        <T v="caption" style={{ fontWeight: '600' }}>{t.tag}</T>
+                        <T v="caption" color="textMuted">{t.count}</T>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </Section>
             ) : null}

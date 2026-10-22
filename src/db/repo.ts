@@ -322,6 +322,15 @@ export class Repo {
     return rows.map((r) => r.language);
   }
 
+  /** Items whose GitHub README was saved as plain text (before 1.9.3 kept Markdown). */
+  async oldReadmeItemIds(): Promise<string[]> {
+    const rows = await this.db.all<{ item_id: string }>(
+      `SELECT DISTINCT t.item_id FROM transcripts t JOIN items i ON i.id = t.item_id
+       WHERE t.source = 'github_readme' AND (t.format IS NULL OR t.format != 'md') AND i.deleted = 0`,
+    );
+    return rows.map((r) => r.item_id);
+  }
+
   async transcriptCount(): Promise<number> {
     return Number((await this.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM transcripts'))?.n ?? 0);
   }
@@ -547,6 +556,15 @@ export class Repo {
       [...params, limit],
     );
     return rows.map(cardFromRow);
+  }
+
+  /** All cards, and those "learned" (next review three weeks or more away). */
+  async cardStats(): Promise<{ total: number; learned: number }> {
+    const r = await this.db.get<{ total: number; learned: number }>(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN c.interval_days >= 21 THEN 1 ELSE 0 END), 0) AS learned
+       FROM cards c JOIN items i ON i.id = c.item_id WHERE i.deleted = 0`,
+    );
+    return { total: Number(r?.total ?? 0), learned: Number(r?.learned ?? 0) };
   }
 
   async countDueCards(nowIso: string, collectionId?: string): Promise<number> {

@@ -64,18 +64,19 @@ export function CircleButton({ icon, label, onPress, color, size = 20 }: { icon:
 export function Header({ title, subtitle, onBack, actions }: { title: string; subtitle?: string; onBack?: () => void; actions?: React.ReactNode }) {
   return (
     <View style={styles.header}>
-      {onBack ? <View style={{ flexDirection: 'row', marginBottom: space.md }}>
+      {onBack ? <View style={{ flexDirection: 'row', marginBottom: title || subtitle ? space.md : 0 }}>
         <CircleButton icon="arrow-back" label="Back" onPress={onBack} />
         <View style={{ flex: 1 }} />
         {actions ? <View style={{ flexDirection: 'row', gap: space.sm }}>{actions}</View> : null}
       </View> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {/* No empty title line under a back button (the item page puts its title below the media). */}
+      {onBack && !title && !subtitle ? null : <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <View style={{ flex: 1 }}>
           <T v="display" accessibilityRole="header" numberOfLines={2}>{title}</T>
           {subtitle ? <T v="small" color="textMuted" numberOfLines={2} style={{ marginTop: 2 }}>{subtitle}</T> : null}
         </View>
         {!onBack && actions ? <View style={{ flexDirection: 'row', gap: space.sm }}>{actions}</View> : null}
-      </View>
+      </View>}
     </View>
   );
 }
@@ -163,6 +164,22 @@ export function Chip({ label, selected, onPress, icon, tone = 'neutral' }: { lab
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: !!selected }} style={styles.chipTouch}>
       {body}
+    </Pressable>
+  );
+}
+
+/** A compact action (icon, short label, optional count) for rows of actions that should not take much space. */
+export function ActionPill({ icon, label, onPress, count, a11yLabel, loading, primary }: {
+  icon: IconName; label: string; onPress: () => void; count?: number; a11yLabel?: string; loading?: boolean; primary?: boolean;
+}) {
+  const { c } = useTheme();
+  const fg = primary ? c.onPrimary : c.text;
+  return (
+    <Pressable onPress={onPress} disabled={loading} accessibilityRole="button" accessibilityLabel={a11yLabel ?? label} accessibilityState={{ busy: !!loading }}
+      style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: primary ? c.primary : c.surface, opacity: pressed ? 0.8 : 1 }, primary ? null : elevation(c, 'card')]}>
+      {loading ? <ActivityIndicator size="small" color={fg} /> : <Ionicons name={icon} size={16} color={fg} />}
+      <Text style={[type.caption, { color: fg, fontWeight: '600' }]}>{label}</Text>
+      {count ? <Text style={[type.caption, { color: primary ? c.onPrimary : c.textMuted }]}>{count}</Text> : null}
     </Pressable>
   );
 }

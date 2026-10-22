@@ -4,7 +4,7 @@
  * the transcript itself, so every highlight is backed by source text.
  */
 
-import { tokenize } from './enrich';
+import { stripUrls, tokenize } from './enrich';
 import type { Segment } from './transcripts';
 
 export interface KeywordMoment {
@@ -56,6 +56,8 @@ export function extractKeywords(
   opts: { tools?: string[]; title?: string; max?: number; concepts?: string[] } = {},
 ): Keyword[] {
   const max = opts.max ?? 8;
+  // Web addresses are not words of the content ("github" in every link is not a topic).
+  segments = segments.map((s) => ({ ...s, text: stripUrls(s.text) }));
   const full = segments.map((s) => s.text).join(' ');
   if (!full.trim()) return [];
   const candidates = new Map<string, { count: number; isTool: boolean }>();
@@ -63,13 +65,13 @@ export function extractKeywords(
   const within = (outer: string, inner: string) => ` ${outer.toLowerCase()} `.includes(` ${inner.toLowerCase()} `);
   const related = (term: string) => [...candidates.entries()].filter(([k]) => within(k, term) || within(term, k));
   const overlaps = (term: string) => related(term).length > 0;
-  for (const tool of opts.tools ?? []) {
-    const n = countTerm(full, tool);
-    if (n > 0) candidates.set(tool, { count: n, isTool: true });
-  }
+  // Tools take at most half the slots, most-mentioned first, so the item's own topics still show.
+  const tools = (opts.tools ?? []).map((t) => ({ t, n: countTerm(full, t) })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
+  for (const { t, n } of tools.slice(0, Math.ceil(max / 2))) candidates.set(t, { count: n, isTool: true });
   // Model concepts are copied from the source; keep only those that really occur here.
   for (const concept of opts.concepts ?? []) {
     if (candidates.size >= max) break;
+    if (/[./\\]|--/.test(concept)) continue; // file names, paths and flags ("video.mp4", "--device") are not topics
     const n = countTerm(full, concept);
     if (n > 0 && !overlaps(concept)) candidates.set(concept, { count: n, isTool: false });
   }

@@ -19,6 +19,7 @@ import CaptureScreen from './src/screens/CaptureScreen';
 import CollectionsScreen from './src/screens/CollectionsScreen';
 import ConflictsScreen from './src/screens/ConflictsScreen';
 import ConnectServerScreen from './src/screens/ConnectServerScreen';
+import GlanceScreen from './src/screens/GlanceScreen';
 import ItemDetailScreen from './src/screens/ItemDetailScreen';
 import JobsScreen from './src/screens/JobsScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
@@ -46,7 +47,7 @@ const nav = createNavigationContainerRef<RootStackParamList>();
 
 const TABS: Record<keyof TabParamList, TabSpec> = {
   Today: { label: 'Home', icon: ['home', 'home-outline'] },
-  Study: { label: 'Study', icon: ['checkbox', 'checkbox-outline'] },
+  Glance: { label: 'Glance', icon: ['grid', 'grid-outline'] },
   Library: { label: 'Library', icon: ['folder', 'folder-outline'] },
   Agent: { label: 'Ask', icon: ['chatbubble-ellipses', 'chatbubble-ellipses-outline'] },
 };
@@ -54,7 +55,7 @@ const TABS: Record<keyof TabParamList, TabSpec> = {
 function MainTabs() {
   const [captureOpen, setCaptureOpen] = useState(false);
   const due = useQuery(() => dueCount(), ['cards', 'items']).data ?? 0;
-  const tabs = { ...TABS, Study: { ...TABS.Study, badge: due || undefined } };
+  const tabs = { ...TABS, Glance: { ...TABS.Glance, badge: due || undefined } };
   return (
     <>
       <Tabs.Navigator
@@ -62,7 +63,7 @@ function MainTabs() {
         tabBar={(props) => <FloatingTabBar {...props} tabs={tabs} onAdd={() => setCaptureOpen(true)} />}
       >
         <Tabs.Screen name="Today" component={TodayScreen} options={{ title: 'Home', tabBarAccessibilityLabel: 'Home' }} />
-        <Tabs.Screen name="Study" component={ReviewScreen as never} options={{ title: 'Study', tabBarAccessibilityLabel: 'Study flashcards' }} />
+        <Tabs.Screen name="Glance" component={GlanceScreen} options={{ title: 'Glance', tabBarAccessibilityLabel: 'Glance' }} />
         <Tabs.Screen name="Library" component={LibraryScreen} />
         <Tabs.Screen name="Agent" component={AgentScreen} options={{ title: 'Ask', tabBarAccessibilityLabel: 'Ask your library' }} />
       </Tabs.Navigator>
@@ -124,7 +125,7 @@ function Root() {
     <NavigationContainer
       ref={nav}
       theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
-      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Study: 'study', Library: 'library', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
+      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Glance: { path: 'glance', alias: ['study'] }, Library: 'library', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
     >
       <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>

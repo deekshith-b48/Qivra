@@ -19,7 +19,7 @@ import * as Clipboard from 'expo-clipboard';
 import { generateReport } from '../../src/services/reports';
 
 function nav() {
-  return { navigate: jest.fn(), goBack: jest.fn(), reset: jest.fn(), replace: jest.fn(), push: jest.fn(), setParams: jest.fn() } as never;
+  return { navigate: jest.fn(), goBack: jest.fn(), reset: jest.fn(), replace: jest.fn(), push: jest.fn(), setParams: jest.fn(), setOptions: jest.fn(), isFocused: () => true } as never;
 }
 const wrap = (el: React.ReactElement) => render(<ThemeProvider>{el}</ThemeProvider>);
 
@@ -72,7 +72,7 @@ test('connect screen validates manual pairing input before any network call', as
   expect(screen.getByRole('button', { name: 'Scan QR code' })).toBeTruthy();
 });
 
-test('video page: one scroll with TL;DR, key moments, keyword chips filtering a collapsible transcript, details', async () => {
+test('video page: compact header, then Summary / Transcript / Details tabs; keyword chips open the filtered transcript', async () => {
   const repo = await getRepo();
   const { item } = await repo.createItem({ sourceType: 'youtube', title: 'Hooks tutorial', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
   await repo.upsertTranscript({ itemId: item.id, language: 'en', languageMethod: 'provider', source: 'youtube_captions', provider: 'youtube-captions', segments: [
@@ -85,7 +85,7 @@ test('video page: one scroll with TL;DR, key moments, keyword chips filtering a 
   });
   wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
   expect(await screen.findByText('Hooks tutorial')).toBeTruthy();
-  expect(screen.queryByRole('tab')).toBeNull(); // no tabs any more
+  expect(screen.getAllByRole('tab').map((t) => t.props.accessibilityLabel)).toEqual(['Summary', 'Transcript, 2', 'Details']);
   expect(screen.getByText('TL;DR')).toBeTruthy();
   expect(screen.getByText('Extracted on device')).toBeTruthy();
   expect(screen.queryByText('AI summary · generating…')).toBeNull();
@@ -99,15 +99,15 @@ test('video page: one scroll with TL;DR, key moments, keyword chips filtering a 
   expect(linking).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Ask about this' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Enrich on server' })).toBeNull();
-  // Transcript is collapsed until a keyword chip is tapped, which also filters it.
+  // The transcript is on its own tab; a keyword chip opens it filtered to that word.
   expect(screen.queryByText('1:10')).toBeNull();
   fireEvent.press(await screen.findByRole('button', { name: 'hooks' }));
   expect(await screen.findByText('Showing lines with “hooks” ✕')).toBeTruthy();
   expect(screen.getByText('1:10')).toBeTruthy();
-  expect(screen.getByLabelText(/^Transcript, 2 lines$/)).toBeTruthy();
-  // Details (note, tags, commands…) are collapsed by default.
+  expect(screen.getByRole('tab', { name: 'Transcript, 2' }).props.accessibilityState).toEqual({ selected: true });
+  // Details (note, tags, commands…) are on the Details tab.
   expect(screen.queryByText(/Potentially destructive/)).toBeNull();
-  fireEvent.press(screen.getByRole('button', { name: 'Details' }));
+  fireEvent.press(screen.getByRole('tab', { name: 'Details' }));
   expect(await screen.findByText(/Potentially destructive/)).toBeTruthy();
   expect(screen.getByText('Your note')).toBeTruthy();
 });
@@ -214,7 +214,7 @@ test('ask can be scoped to one item and answers from it with timestamps', async 
   const n = nav() as { navigate: jest.Mock };
   wrap(<AgentScreen navigation={n as never} route={{ key: 'a', name: 'Agent', params: { itemId: item.id } } as never} />);
   expect(await screen.findByText('Postgres indexing')).toBeTruthy();
-  expect(screen.getByText(/Asking about:/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Ask the whole library instead' })).toBeTruthy();
   fireEvent.changeText(screen.getByLabelText('Message'), 'Which index for JSONB?');
   fireEvent.press(screen.getByRole('button', { name: 'Send' }));
   // The answer's [01:02] marker is a tappable "play from" pill that opens the video at that moment.

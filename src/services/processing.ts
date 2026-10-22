@@ -11,7 +11,7 @@ import { ApiError } from '../core/api';
 import { localEnrich, type Enrichment } from '../core/enrich';
 import { enrichmentPrompt, mergeModelEnrichment, parseModelEnrichment } from '../core/enrichModel';
 import { detectLanguage } from '../core/language';
-import { fetchMetadata } from '../core/metadata';
+import { fetchMetadata, stripMarkdown } from '../core/metadata';
 import { ProviderError } from '../core/ai/provider';
 import { isFailed, type ItemStatus } from '../core/status';
 import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
@@ -64,6 +64,13 @@ async function moveTo(repo: Repo, item: Item, to: ItemStatus, error?: { code: st
   return next ?? item;
 }
 
+/** Re-process GitHub items saved before READMEs were kept as Markdown (runs once per item). */
+export async function upgradeOldReadmes(): Promise<number> {
+  const ids = await (await getRepo()).oldReadmeItemIds();
+  for (const id of ids) await schedulePipeline(id);
+  return ids.length;
+}
+
 /** Schedule (or re-run) local processing for an item. */
 export async function schedulePipeline(itemId: string, opts: { force?: boolean } = {}): Promise<void> {
   const repo = await getRepo();
@@ -76,8 +83,10 @@ export async function schedulePipeline(itemId: string, opts: { force?: boolean }
 async function sourceText(repo: Repo, item: Item): Promise<{ body: string; timed: { startMs: number | null; text: string }[]; hasSpeech: boolean }> {
   const transcripts = (await repo.listTranscripts(item.id)).filter((t) => t.kind === 'original');
   const timed: { startMs: number | null; text: string }[] = [];
-  for (const t of transcripts.slice(0, 2)) for (const s of await repo.getSegments(t.id)) timed.push({ startMs: s.startMs, text: s.text });
-  const parts = [...transcripts.map((t) => t.text), item.metadata?.description ?? ''];
+  // Markdown (GitHub READMEs) is read as plain text for summaries and keywords.
+  const plain = (t: { format: string | null }, text: string) => (t.format === 'md' ? stripMarkdown(text) : text);
+  for (const t of transcripts.slice(0, 2)) for (const s of await repo.getSegments(t.id)) timed.push({ startMs: s.startMs, text: plain(t, s.text) });
+  const parts = [...transcripts.map((t) => plain(t, t.text)), item.metadata?.description ?? ''];
   const meta = item.metadata as (Item['metadata'] & { bodyText?: string }) | null;
   if (meta?.bodyText) parts.push(meta.bodyText);
   return { body: parts.filter(Boolean).join('\n\n'), timed, hasSpeech: transcripts.some((t) => !ARTICLE_SOURCES.has(t.source)) };
@@ -91,7 +100,9 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
   if (item.status === 'CAPTURED') item = await moveTo(repo, item, 'METADATA_CHECK');
 
   // 1. Metadata (best effort; failure is recorded but does not fail the item).
-  if (item.url && !item.metadata) {
+  // A README saved before 1.9.3 was plain text; fetch it again once as Markdown.
+  const oldReadme = (await repo.listTranscripts(item.id)).find((t) => t.source === 'github_readme' && t.format !== 'md');
+  if (item.url && (!item.metadata || oldReadme)) {
     const info = analyzeUrl(item.url);
     if (info) {
       try {
@@ -106,11 +117,11 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
           })) ?? item;
           // Website article text / GitHub README become an "article" record: searchable, highlightable, summarised.
           if (meta.bodyText && (item.sourceType === 'web' || item.sourceType === 'github')) {
-            const lang = detectLanguage(meta.bodyText);
+            const lang = oldReadme ? { code: oldReadme.language } : detectLanguage(meta.bodyText);
             await repo.upsertTranscript({
               itemId: item.id, language: lang.code, languageMethod: 'heuristic', kind: 'original',
-              source: item.sourceType === 'github' ? 'github_readme' : 'web_article', provider: meta.provider, format: 'txt',
-              segments: [{ startMs: null, endMs: null, text: meta.bodyText }],
+              source: item.sourceType === 'github' ? 'github_readme' : 'web_article', provider: meta.provider, format: meta.markdown ? 'md' : 'txt',
+              segments: [{ startMs: null, endMs: null, text: meta.markdown || meta.bodyText }],
             });
           }
         } else {

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Image, Linking, Pressable, type ScrollView, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, View } from 'react-native';
 import { formatLocal } from '../core/dates';
 import { keyMomentsOf } from '../core/enrich';
 import { extractKeywords, type Keyword } from '../core/highlights';
@@ -17,10 +17,12 @@ import { emit } from '../services/events';
 import { similarItems } from '../services/semantic';
 import { makeCards } from '../services/flashcards';
 import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
-import { Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
+import { ActionPill, Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Screen, Section, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
-import { ItemCard, SyncChip } from '../ui/ItemCard';
-import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, TimestampPill, type StepState } from '../ui/media';
+import { ItemCard } from '../ui/ItemCard';
+import { Markdown } from '../ui/Markdown';
+import { markdownProse } from '../core/metadata';
+import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, Segmented, TimestampPill, type StepState } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
 import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
 import { YouTubeHero, type YouTubeHeroHandle } from '../ui/YouTubeHero';
@@ -58,14 +60,16 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const { connection } = useConnection();
   const tz = settings?.timezone ?? 'UTC';
   const { busy, run } = useAction();
-  const [contentOpen, setContentOpen] = useState(false);
+  const [tab, setTab] = useState<'summary' | 'text' | 'details'>(route.params.at !== undefined ? 'text' : 'summary');
+  const [titleOpen, setTitleOpen] = useState(false);
+  const [allMoments, setAllMoments] = useState(false);
+  const [captionOpen, setCaptionOpen] = useState(false);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [edit, setEdit] = useState<null | 'title' | 'note' | 'summary' | 'tags'>(null);
   const [draft, setDraft] = useState('');
   const [langOpen, setLangOpen] = useState(false);
   const [correcting, setCorrecting] = useState<{ ordinal: number; text: string } | null>(null);
-  const [details, setDetails] = useState(false);
   const heroRef = useRef<YouTubeHeroHandle>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [nowMs, setNowMs] = useState<number | null>(null);
@@ -110,9 +114,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   const keywords: Keyword[] = useMemo(() => {
     if (!d) return [];
-    const base: Segment[] = segs.data?.length ? segs.data : [{ startMs: null, endMs: null, text: [d.item.summary, d.item.note, d.item.metadata?.description ?? ''].join(' ') }];
+    const base: Segment[] = segs.data?.length ? segs.data.map((s) => (activeT?.format === 'md' ? { ...s, text: markdownProse(s.text) } : s)) : [{ startMs: null, endMs: null, text: [d.item.summary, d.item.note, d.item.metadata?.description ?? ''].join(' ') }];
     return extractKeywords(base, { tools: d.item.enrichment?.tools ?? [], concepts: d.item.enrichment?.concepts ?? [], title: d.item.title, max: 8 });
-  }, [d, segs.data]);
+  }, [d, segs.data, activeT?.format]);
   const terms = keywords.map((k) => k.term);
 
   if (q.loading && !d) return <Screen><Loading /></Screen>;
@@ -193,13 +197,223 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         : isFailed(item.status) || item.status === 'CANCELLED' ? { primary: retryA, secondary: importT }
           : { primary: importT, secondary: connection && isVideo ? { ...retryA, title: 'Try server again' } : undefined };
 
+  const textTab = ordered.length > 0;
+  const syncLabel = item.syncStatus === 'pending' ? 'Not synced yet' : item.syncStatus === 'conflicted' ? 'Sync conflict' : item.syncStatus === 'failed' ? 'Sync failed' : null;
+  const meta = [item.author, formatLocal(item.capturedAt, tz, { dateStyle: 'medium', timeStyle: 'short' }), item.language !== 'und' ? languageName(item.language) : '', item.origin === 'superbrain' ? 'From SuperBrain' : ''].filter(Boolean).join(' · ');
+  const showFocus = (term: string | null) => {
+    setFocus(term);
+    if (term) setTab('text');
+  };
+  const shownMoments = allMoments ? moments : moments.slice(0, 4);
+
+  const noText = (
+    <Section title="Transcript">
+      <Card>
+        <T v="subtitle">No transcript yet</T>
+        <T v="small" color="textMuted" style={{ marginTop: 4 }}>
+          {item.status === 'TRANSCRIBING' ? 'Your server is transcribing this video.' : 'Qivra never invents a transcript. Import captions or a transcript, or let your server transcribe it.'}
+        </T>
+        {item.metadata?.description && isVideo ? <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: space.sm }} selectable /> : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
+          <Button kind="outline" title="Import transcript" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
+          {connection && isVideo ? <Button kind="outline" title="Transcribe on server" onPress={() => void serverAction('transcribe_url')} /> : null}
+          {!isVideo ? <Button kind="outline" title="Attach audio/video" onPress={() => void run(() => pickMediaFile(id))} /> : null}
+          {d.media.length && connection ? <Button kind="outline" title="Transcribe attached file" onPress={() => void serverAction('transcribe')} /> : null}
+        </View>
+      </Card>
+    </Section>
+  );
+
+  const summaryTab = (
+    <>
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <T v="subtitle" style={{ flex: 1 }}>TL;DR</T>
+          {item.summary || ai?.enabled ? (
+            <IconButton icon="sparkles-outline" size={18} label="Regenerate" onPress={() => void run(async () => {
+              if (!ai?.enabled) return Alert.alert('No AI model configured', 'Add a model in Settings → AI models. The current summary was extracted from the source on this phone.');
+              if (generating) return;
+              await requestModelEnrichment(id);
+            })} />
+          ) : null}
+          <IconButton icon="create-outline" size={18} label="Correct summary" onPress={() => startEdit('summary')} />
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          {item.summary ? <Provenance origin={item.summaryOrigin} /> : null}
+          {generating ? <Provenance origin="generating" /> : null}
+        </View>
+        {item.summary ? (
+          <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} selectable />
+        ) : (
+          <T color="textFaint" style={{ marginTop: space.sm }}>{isPending(item.status) || item.status === 'TRANSCRIBING' ? 'The summary appears once the transcript is ready.' : 'No summary yet — there is no text to summarise.'}</T>
+        )}
+      </Card>
+
+      {moments.length ? (
+        <Section title="Key moments">
+          {shownMoments.map((k, i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, marginBottom: space.sm }}>
+              {k.startMs !== null ? (
+                <TimestampPill label={formatTimestamp(k.startMs)} onPress={ytId ? () => openAt(k.startMs) : undefined} />
+              ) : (
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent, marginTop: 8, marginRight: 4 }} />
+              )}
+              <HighlightedText text={k.text} terms={terms} style={{ flex: 1, fontSize: 14 }} />
+            </View>
+          ))}
+          {moments.length > 4 ? <Button kind="text" title={allMoments ? 'Show fewer' : `Show all (${moments.length})`} onPress={() => setAllMoments(!allMoments)} style={{ alignSelf: 'flex-start' }} /> : null}
+        </Section>
+      ) : null}
+
+      {/* Keywords: tapping one opens the text filtered to it */}
+      {keywords.length && textTab ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: space.md, marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg }}>
+          {keywords.map((k) => (
+            <Chip key={k.term} label={k.term} tone={k.isTool ? 'accent' : 'neutral'} selected={focus === k.term} onPress={() => showFocus(focus === k.term ? null : k.term)} />
+          ))}
+        </ScrollView>
+      ) : null}
+
+      {!textTab ? noText : null}
+
+      {/* Related by meaning (local embeddings); falls back to shared tags when no embedding model is available. */}
+      {similar.data?.length ? (
+        <Section title="Related">
+          {similar.data.some((r) => r.nearDuplicate) ? (
+            <Banner tone="info" icon="copy-outline" title="You may have saved this already" body="A very similar item is in your library (marked below)." />
+          ) : null}
+          {similar.data.map((r) => (
+            <View key={r.item.id}>
+              {r.nearDuplicate ? <Chip label="Very similar" tone="info" icon="copy-outline" /> : null}
+              <ItemCard item={r.item} timezone={tz} onPress={() => navigation.push('ItemDetail', { id: r.item.id })} />
+            </View>
+          ))}
+        </Section>
+      ) : d.related.length ? (
+        <Section title="Related">
+          {d.related.map((r) => <ItemCard key={r.id} item={r} timezone={tz} onPress={() => navigation.push('ItemDetail', { id: r.id })} />)}
+        </Section>
+      ) : null}
+    </>
+  );
+
+  const transcriptTab = activeT ? (
+    <>
+      {ordered.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg }}>
+          {ordered.map((t) => (
+            <Chip key={t.id} label={textKindLabel(t.source) ?? `${languageName(t.language)}${t.kind === 'translation' ? ' · translation' : ''}`} selected={activeT.id === t.id} onPress={() => setTranscriptId(t.id)} />
+          ))}
+        </ScrollView>
+      ) : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xs }}>
+        <T v="caption" color="textFaint" style={{ flex: 1 }} numberOfLines={2}>
+          {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps'}{activeT.corrected ? ' · corrected' : ''}
+        </T>
+        <IconButton icon="language-outline" size={19} label="Language" onPress={() => setLangOpen(true)} />
+        <IconButton icon="copy-outline" size={19} label="Copy" onPress={() => void Clipboard.setStringAsync(activeT.text).then(() => Alert.alert('Copied', 'Transcript copied.'))} />
+        <IconButton icon="add" size={20} label="Add translation" onPress={() => navigation.navigate('TranscriptImport', { itemId: id, kind: 'translation' })} />
+      </View>
+      {item.metadata?.description && isVideo ? (
+        <Pressable onPress={() => setCaptionOpen(!captionOpen)} accessibilityRole="button" accessibilityHint={captionOpen ? 'Shows less' : 'Shows the whole caption'}>
+          <Card style={{ padding: space.md, marginTop: space.sm }}>
+            <T v="caption" color="textMuted">CAPTION</T>
+            <HighlightedText text={item.metadata.description} terms={terms} numberOfLines={captionOpen ? undefined : 3} style={{ fontSize: 14, marginTop: 4 }} />
+          </Card>
+        </Pressable>
+      ) : null}
+      {focus ? <View style={{ flexDirection: 'row', marginTop: space.sm }}><Chip label={`Showing lines with “${focus}” ✕`} selected onPress={() => setFocus(null)} /></View> : null}
+      {/* A GitHub README is Markdown: show it formatted (a keyword filter still lists matching lines). */}
+      {activeT.format === 'md' && !focus ? (
+        <Card style={{ padding: space.md, marginTop: space.sm }}><Markdown source={activeT.text} /></Card>
+      ) : (
+        <>
+          <Card style={{ padding: space.md, marginTop: space.sm }}>
+            {shownSegs.slice(0, 500).map((s) => (
+              <View key={s.i} style={{ flexDirection: 'row', gap: space.md, paddingVertical: 6, paddingHorizontal: 4, borderRadius: radius.sm, backgroundColor: s.i === playingIndex ? c.accentSoft : 'transparent' }}
+                accessibilityState={{ selected: s.i === playingIndex }}>
+                {s.startMs !== null ? <TimestampPill label={formatTimestamp(s.startMs)} onPress={ytId ? () => openAt(s.startMs) : undefined} /> : null}
+                <Pressable style={{ flex: 1 }} onLongPress={() => setCorrecting({ ordinal: s.i, text: s.text })} accessibilityHint="Long press to correct this line">
+                  <HighlightedText text={s.text} terms={focus ? [focus] : terms} style={{ fontSize: 15, lineHeight: 23 }} />
+                </Pressable>
+              </View>
+            ))}
+            {!shownSegs.length ? <T color="textMuted">No lines match.</T> : null}
+          </Card>
+          {shownSegs.length > 500 ? <T v="small" color="textMuted">Showing the first 500 lines.</T> : null}
+          <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>{ytId ? 'Tap a timestamp to play it here · ' : ''}Long-press a line to correct it.</T>
+        </>
+      )}
+    </>
+  ) : null;
+
+  const detailsTab = (
+    <View>
+      <Section title="Your note" action={<IconButton icon="create-outline" label="Edit note" onPress={() => startEdit('note')} />}>
+        {item.note ? <T selectable>{item.note}</T> : <T color="textFaint" onPress={() => startEdit('note')}>Add a note — why did you save this?</T>}
+      </Section>
+
+      <Section title="Tags & collections" action={<IconButton icon="pricetags-outline" label="Edit tags" onPress={() => startEdit('tags')} />}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          {item.tags.length ? item.tags.map((t) => <Chip key={t} label={`#${t}`} />) : <T color="textFaint">No tags.</T>}
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm }}>
+          {d.collections.map((col) => {
+            const on = d.memberOf.includes(col.id);
+            return <Chip key={col.id} label={col.name} selected={on} onPress={() => void run(() => repoOp((r) => (on ? r.removeFromCollection(col.id, [id]) : r.addToCollection(col.id, [id]))))} />;
+          })}
+          <Chip label="New collection" icon="add" onPress={() => navigation.navigate('Collections')} />
+        </View>
+      </Section>
+
+      {e && (e.tools.length || e.repos.length || e.commands.length) ? (
+        <Section title="Tools, repos & commands">
+          {e.tools.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{e.tools.map((t) => <Chip key={t} label={t} tone="accent" onPress={textTab ? () => showFocus(t) : undefined} />)}</View> : null}
+          {e.repos.map((r) => (
+            <T key={r} v="small" color="accent" style={{ marginTop: 6, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(`https://github.com/${r}`)}>github.com/{r}</T>
+          ))}
+          {e.commands.map((cmd) => (
+            <Card key={cmd.command} style={{ marginTop: space.sm, padding: space.md, backgroundColor: cmd.destructive ? c.dangerSoft : c.surface }}>
+              <T v="mono" selectable>{cmd.command}</T>
+              {cmd.destructive ? <T v="small" color="danger" style={{ marginTop: 4 }}>⚠ Potentially destructive: {cmd.reason}</T> : null}
+              <Button kind="text" title="Copy" icon="copy-outline" onPress={() => void Clipboard.setStringAsync(cmd.command)} style={{ alignSelf: 'flex-start' }} />
+            </Card>
+          ))}
+          <T v="caption" color="textFaint" style={{ marginTop: 4 }}>Copied verbatim from the source. Qivra never runs commands.</T>
+        </Section>
+      ) : null}
+
+      {e?.actionItems.length ? (
+        <Section title="Action items">{e.actionItems.map((a, i) => <T key={i} v="small" style={{ marginBottom: 4 }}>☐ {a}</T>)}</Section>
+      ) : null}
+
+      <Section title="Processing">
+        {d.jobs.length ? d.jobs.map((j) => (
+          <View key={j.id} style={{ paddingVertical: 4 }}>
+            <T v="small">{j.kind.replace(/_/g, ' ')} — {j.status.replace(/_/g, ' ')}{j.attempts ? ` (attempt ${j.attempts})` : ''}</T>
+            {j.lastError ? <T v="caption" color={j.status === 'failed_permanent' ? 'danger' : 'textMuted'}>{j.lastError}</T> : null}
+          </View>
+        )) : <T v="small" color="textMuted">No processing jobs.</T>}
+        {e ? <T v="caption" color="textFaint">Summary source: {e.origin === 'local' ? 'extracted on this phone' : e.origin === 'model' ? 'AI model' : 'your server'} · {e.provider}</T> : null}
+        {d.media.length ? <T v="caption" color="textFaint">Attached media: {d.media.map((m) => `${m.name} (${(m.size / 1048576).toFixed(1)} MB)`).join(', ')}</T> : null}
+        <Button kind="text" title="Reprocess" icon="refresh" onPress={() => void retry()} style={{ alignSelf: 'flex-start' }} />
+      </Section>
+    </View>
+  );
+
+  const tabs: { key: 'summary' | 'text' | 'details'; label: string; count?: number }[] = [
+    { key: 'summary', label: 'Summary' },
+    ...(textTab ? [{ key: 'text' as const, label: contentLabel, count: activeT?.format === 'md' ? undefined : segs.data?.length || undefined }] : []),
+    { key: 'details', label: 'Details' },
+  ];
+  const current = tab === 'text' && !textTab ? 'summary' : tab;
+
   return (
     <Screen padded={false} scrollRef={scrollRef}>
       <Header
         title=""
         onBack={() => navigation.goBack()}
         actions={<>
-          {item.url ? <IconButton icon="open-outline" label="Open original" onPress={() => void Linking.openURL(item.url!)} /> : null}
           <IconButton icon={item.archived ? 'arrow-undo-outline' : 'archive-outline'} label={item.archived ? 'Restore from archive' : 'Archive'} onPress={() => void run(() => repoOp((r) => r.setArchived([id], !item.archived)))} />
           <IconButton icon="trash-outline" label="Delete item" color={c.danger} onPress={() => void del()} />
         </>}
@@ -212,41 +426,42 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           <ImageHero uris={d.media.filter((m) => m.mime.startsWith('image/')).reverse().map((m) => m.uri)} badge={<PlatformBadge source={item.sourceType} onMedia />} />
         ) : (
         <Pressable onPress={() => openAt(null)} disabled={!item.url} accessibilityRole="button" accessibilityLabel={isVideo ? 'Play on the original app' : 'Open original page'}
-          style={{ borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.surfaceAlt, aspectRatio: item.thumbnailUrl ? 16 / 9 : undefined, minHeight: item.thumbnailUrl ? undefined : 120, justifyContent: 'center', alignItems: 'center' }}>
+          style={{ borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.surfaceAlt, aspectRatio: item.thumbnailUrl ? 16 / 9 : undefined, minHeight: item.thumbnailUrl ? undefined : 96, justifyContent: 'center', alignItems: 'center' }}>
           {item.thumbnailUrl ? <Image source={{ uri: item.thumbnailUrl }} accessibilityIgnoresInvertColors style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" /> : (
-            <Ionicons name={PLATFORM_ICONS[item.sourceType] ?? 'document-outline'} size={44} color={c.textMuted} />
+            <Ionicons name={PLATFORM_ICONS[item.sourceType] ?? 'document-outline'} size={40} color={c.textMuted} />
           )}
           {isVideo && item.url ? (
-            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="play" size={30} color="#fff" style={{ marginLeft: 4 }} />
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="play" size={28} color="#fff" style={{ marginLeft: 4 }} />
             </View>
           ) : null}
           <View style={{ position: 'absolute', top: space.sm, left: space.sm }}><PlatformBadge source={item.sourceType} onMedia={!!item.thumbnailUrl} /></View>
         </Pressable>
         )}
 
-        <T v="display" style={{ marginTop: space.md }} onLongPress={() => startEdit('title')} accessibilityHint="Long press to edit the title">{item.title || item.url || 'Untitled'}</T>
-        <T v="small" color="textMuted" style={{ marginTop: 4 }}>
-          {[item.author, formatLocal(item.capturedAt, tz, { dateStyle: 'medium', timeStyle: 'short' }), item.language !== 'und' ? languageName(item.language) : ''].filter(Boolean).join(' · ')}
-        </T>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm }}>
-          <SyncChip status={item.syncStatus} />
-          {item.origin === 'superbrain' ? <Chip label="From SuperBrain" tone="info" /> : null}
+        {/* Compact header: title, one meta line, one row of actions */}
+        <T v="title" style={{ marginTop: space.md }} numberOfLines={titleOpen ? undefined : 3} onPress={() => setTitleOpen(!titleOpen)} onLongPress={() => startEdit('title')} accessibilityHint="Tap to show the whole title; long press to edit it">{item.title || item.url || 'Untitled'}</T>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+          <T v="caption" color="textMuted" style={{ flexShrink: 1 }}>{meta}</T>
+          {syncLabel ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: meta ? 8 : 0 }} accessibilityLabel={syncLabel}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: item.syncStatus === 'pending' ? c.textFaint : c.danger }} />
+              <T v="caption" color={item.syncStatus === 'pending' ? 'textMuted' : 'danger'}>{syncLabel}</T>
+            </View>
+          ) : null}
         </View>
-        <Button kind="tonal" title="Ask about this" icon="sparkles-outline" style={{ alignSelf: 'flex-start', marginTop: space.sm }}
-          accessibilityHint="Opens Ask with questions scoped to this item"
-          onPress={() => navigation.navigate('Main', { screen: 'Agent', params: { itemId: id } })} />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, marginTop: space.sm }}>
-          <Button kind="outline" title="Make flashcards" icon="layers-outline" loading={cardAction.busy}
-            accessibilityHint="Turns the summary and key moments into question-and-answer cards"
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: space.md, marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.sm, paddingVertical: 2 }}>
+          <ActionPill primary icon="sparkles-outline" label="Ask" a11yLabel="Ask about this" onPress={() => navigation.navigate('Main', { screen: 'Agent', params: { itemId: id } })} />
+          <ActionPill icon="layers-outline" label="Flashcards" a11yLabel="Make flashcards" count={cardCount.data || undefined} loading={cardAction.busy}
             onPress={() => void cardAction.run(async () => {
               const r = await makeCards(id);
               setCardsMsg(r.added
                 ? `${r.added} card${r.added === 1 ? '' : 's'} made${r.origin === 'local' ? ' on this phone' : ''} · ${r.total} in total`
                 : r.total ? `No new cards · ${r.total} already made` : (r.note ?? 'No cards could be made.'));
             }, 'Could not make flashcards')} />
-          {cardCount.data ? <Button kind="text" title="Review" icon="school-outline" onPress={() => navigation.navigate('Review')} /> : null}
-        </View>
+          {cardCount.data ? <ActionPill icon="school-outline" label="Review" onPress={() => navigation.navigate('Review')} /> : null}
+          {item.url ? <ActionPill icon="open-outline" label="Open" a11yLabel="Open original" onPress={() => void Linking.openURL(item.url!)} /> : null}
+        </ScrollView>
         {cardsMsg ? <T v="caption" color="textMuted" accessibilityLiveRegion="polite" style={{ marginTop: space.xs }}>{cardsMsg}</T> : null}
 
         {item.status !== 'READY' ? <ProgressSteps steps={stepsFor(item, speech.length > 0, articles.length > 0, isVideo)} /> : null}
@@ -270,203 +485,10 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         ) : null}
         {item.syncStatus === 'conflicted' ? <Banner tone="warning" title="Edited on another device" action={<Button kind="outline" title="Resolve" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
 
-        {/* TL;DR */}
-        <Section title="TL;DR" action={<IconButton icon="create-outline" label="Correct summary" onPress={() => startEdit('summary')} />}>
-          <Card>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              {item.summary ? <Provenance origin={item.summaryOrigin} /> : null}
-              {generating ? <Provenance origin="generating" /> : null}
-            </View>
-            {item.summary ? (
-              <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} selectable />
-            ) : (
-              <T color="textFaint" style={{ marginTop: space.sm }}>{isPending(item.status) || item.status === 'TRANSCRIBING' ? 'The summary appears once the transcript is ready.' : 'No summary yet — there is no text to summarise.'}</T>
-            )}
-            {item.summary || ai?.enabled ? (
-              <Button kind="text" title="Regenerate" icon="sparkles-outline" disabled={generating} loading={busy} style={{ alignSelf: 'flex-start', marginTop: space.xs }} accessibilityHint="Writes a new AI summary and key moments" onPress={() => void run(async () => {
-                if (!ai?.enabled) return Alert.alert('No AI model configured', 'Add a model in Settings → AI models. The current summary was extracted from the source on this phone.');
-                await requestModelEnrichment(id);
-              })} />
-            ) : null}
-          </Card>
-        </Section>
-
-        {/* Key moments */}
-        {moments.length ? (
-          <Section title="Key moments">
-            {moments.map((k, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, marginBottom: space.sm }}>
-                {k.startMs !== null ? (
-                  <TimestampPill label={formatTimestamp(k.startMs)} onPress={ytId ? () => openAt(k.startMs) : undefined} />
-                ) : (
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent, marginTop: 8, marginRight: 4 }} />
-                )}
-                <HighlightedText text={k.text} terms={terms} style={{ flex: 1, fontSize: 14 }} />
-              </View>
-            ))}
-          </Section>
-        ) : null}
-
-        {/* Keywords: tapping one filters the transcript */}
-        {keywords.length ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.lg }}>
-            {keywords.map((k) => (
-              <Chip key={k.term} label={k.term} tone={k.isTool ? 'accent' : 'neutral'} selected={focus === k.term} onPress={() => {
-                const next = focus === k.term ? null : k.term;
-                setFocus(next);
-                if (next) setContentOpen(true);
-              }} />
-            ))}
-          </View>
-        ) : null}
-
-        {/* Transcript / article */}
-        {ordered.length ? (
-          <View style={{ marginTop: space.lg }}>
-            <Pressable onPress={() => setContentOpen(!contentOpen)} accessibilityRole="button" accessibilityLabel={`${contentLabel}${segs.data?.length ? `, ${segs.data.length} lines` : ''}`} accessibilityState={{ expanded: contentOpen }} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48 }}>
-              <T v="subtitle" style={{ flex: 1 }}>{contentLabel}{segs.data?.length ? <T v="caption" color="textMuted">  {segs.data.length}</T> : null}</T>
-              <Ionicons name={contentOpen ? 'chevron-up' : 'chevron-down'} size={18} color={c.textMuted} />
-            </Pressable>
-            {contentOpen ? (
-              <>
-                {item.metadata?.description && isVideo ? (
-                  <Card style={{ padding: space.md, marginBottom: space.sm }}>
-                    <T v="caption" color="textMuted">CAPTION</T>
-                    <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: 4 }} selectable />
-                  </Card>
-                ) : null}
-                {ordered.length > 1 ? (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                    {ordered.map((t) => (
-                      <Chip key={t.id} label={textKindLabel(t.source) ?? `${languageName(t.language)}${t.kind === 'translation' ? ' · translation' : ''}`} selected={activeT?.id === t.id} onPress={() => setTranscriptId(t.id)} />
-                    ))}
-                  </View>
-                ) : null}
-                {activeT ? (
-                  <>
-                    <T v="caption" color="textFaint">
-                      {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps in source'}{activeT.corrected ? ' · corrected' : ''}
-                    </T>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginVertical: space.sm }}>
-                      <Button kind="outline" title="Language" icon="language-outline" onPress={() => setLangOpen(true)} />
-                      <Button kind="outline" title="Copy" icon="copy-outline" onPress={() => void Clipboard.setStringAsync(activeT.text).then(() => Alert.alert('Copied', 'Transcript copied.'))} />
-                      <Button kind="outline" title="Add translation" icon="add" onPress={() => navigation.navigate('TranscriptImport', { itemId: id, kind: 'translation' })} />
-                    </View>
-                    {focus ? <Chip label={`Showing lines with “${focus}” ✕`} selected onPress={() => setFocus(null)} /> : null}
-                    <Card style={{ padding: space.md }}>
-                      {shownSegs.slice(0, 500).map((s) => (
-                        <View key={s.i} style={{ flexDirection: 'row', gap: space.md, paddingVertical: 6, paddingHorizontal: 4, borderRadius: radius.sm, backgroundColor: s.i === playingIndex ? c.accentSoft : 'transparent' }}
-                          accessibilityState={{ selected: s.i === playingIndex }}>
-                          {s.startMs !== null ? <TimestampPill label={formatTimestamp(s.startMs)} onPress={ytId ? () => openAt(s.startMs) : undefined} /> : null}
-                          <Pressable style={{ flex: 1 }} onLongPress={() => setCorrecting({ ordinal: s.i, text: s.text })} accessibilityHint="Long press to correct this line">
-                            <HighlightedText text={s.text} terms={focus ? [focus] : terms} style={{ fontSize: 15, lineHeight: 23 }} />
-                          </Pressable>
-                        </View>
-                      ))}
-                      {!shownSegs.length ? <T color="textMuted">No lines match.</T> : null}
-                    </Card>
-                    {shownSegs.length > 500 ? <T v="small" color="textMuted">Showing the first 500 lines.</T> : null}
-                    <T v="caption" color="textFaint" style={{ marginTop: space.sm }}>{ytId ? 'Tap a timestamp to play it here · ' : ''}Long-press a line to correct it.</T>
-                  </>
-                ) : null}
-              </>
-            ) : null}
-          </View>
-        ) : (
-          <Section title="Transcript">
-            <Card>
-              <T v="subtitle">No transcript yet</T>
-              <T v="small" color="textMuted" style={{ marginTop: 4 }}>
-                {item.status === 'TRANSCRIBING' ? 'Your server is transcribing this video.' : 'Qivra never invents a transcript. Import captions or a transcript, or let your server transcribe it.'}
-              </T>
-              {item.metadata?.description && isVideo ? <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: space.sm }} selectable /> : null}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
-                <Button kind="outline" title="Import transcript" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
-                {connection && isVideo ? <Button kind="outline" title="Transcribe on server" onPress={() => void serverAction('transcribe_url')} /> : null}
-                {!isVideo ? <Button kind="outline" title="Attach audio/video" onPress={() => void run(() => pickMediaFile(id))} /> : null}
-                {d.media.length && connection ? <Button kind="outline" title="Transcribe attached file" onPress={() => void serverAction('transcribe')} /> : null}
-              </View>
-            </Card>
-          </Section>
-        )}
-
-        {/* Details: note, tags, collections, tools, repos, commands, processing */}
-        <Pressable onPress={() => setDetails(!details)} accessibilityRole="button" accessibilityLabel="Details" accessibilityHint="Note, tags, collections, tools, repos and commands" accessibilityState={{ expanded: details }} style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xl, minHeight: 48 }}>
-          <T v="subtitle" style={{ flex: 1 }}>Details</T>
-          <Ionicons name={details ? 'chevron-up' : 'chevron-down'} size={18} color={c.textMuted} />
-        </Pressable>
-        {details ? (
-          <View>
-            <Section title="Your note" action={<IconButton icon="create-outline" label="Edit note" onPress={() => startEdit('note')} />}>
-              {item.note ? <T selectable>{item.note}</T> : <T color="textFaint" onPress={() => startEdit('note')}>Add a note — why did you save this?</T>}
-            </Section>
-
-            <Section title="Tags & collections" action={<IconButton icon="pricetags-outline" label="Edit tags" onPress={() => startEdit('tags')} />}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {item.tags.length ? item.tags.map((t) => <Chip key={t} label={`#${t}`} />) : <T color="textFaint">No tags.</T>}
-              </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm }}>
-                {d.collections.map((col) => {
-                  const on = d.memberOf.includes(col.id);
-                  return <Chip key={col.id} label={col.name} selected={on} onPress={() => void run(() => repoOp((r) => (on ? r.removeFromCollection(col.id, [id]) : r.addToCollection(col.id, [id]))))} />;
-                })}
-                <Chip label="New collection" icon="add" onPress={() => navigation.navigate('Collections')} />
-              </View>
-            </Section>
-
-            {e && (e.tools.length || e.repos.length || e.commands.length) ? (
-              <Section title="Tools, repos & commands">
-                {e.tools.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{e.tools.map((t) => <Chip key={t} label={t} tone="accent" onPress={() => { setFocus(t); setContentOpen(true); }} />)}</View> : null}
-                {e.repos.map((r) => (
-                  <T key={r} v="small" color="accent" style={{ marginTop: 6, textDecorationLine: 'underline' }} onPress={() => void Linking.openURL(`https://github.com/${r}`)}>github.com/{r}</T>
-                ))}
-                {e.commands.map((cmd) => (
-                  <Card key={cmd.command} style={{ marginTop: space.sm, padding: space.md, backgroundColor: cmd.destructive ? c.dangerSoft : c.surface }}>
-                    <T v="mono" selectable>{cmd.command}</T>
-                    {cmd.destructive ? <T v="small" color="danger" style={{ marginTop: 4 }}>⚠ Potentially destructive: {cmd.reason}</T> : null}
-                    <Button kind="text" title="Copy" icon="copy-outline" onPress={() => void Clipboard.setStringAsync(cmd.command)} style={{ alignSelf: 'flex-start' }} />
-                  </Card>
-                ))}
-                <T v="caption" color="textFaint" style={{ marginTop: 4 }}>Copied verbatim from the source. Qivra never runs commands.</T>
-              </Section>
-            ) : null}
-
-            {e?.actionItems.length ? (
-              <Section title="Action items">{e.actionItems.map((a, i) => <T key={i} v="small" style={{ marginBottom: 4 }}>☐ {a}</T>)}</Section>
-            ) : null}
-
-            <Section title="Processing">
-              {d.jobs.length ? d.jobs.map((j) => (
-                <View key={j.id} style={{ paddingVertical: 4 }}>
-                  <T v="small">{j.kind.replace(/_/g, ' ')} — {j.status.replace(/_/g, ' ')}{j.attempts ? ` (attempt ${j.attempts})` : ''}</T>
-                  {j.lastError ? <T v="caption" color={j.status === 'failed_permanent' ? 'danger' : 'textMuted'}>{j.lastError}</T> : null}
-                </View>
-              )) : <T v="small" color="textMuted">No processing jobs.</T>}
-              {e ? <T v="caption" color="textFaint">Summary source: {e.origin === 'local' ? 'extracted on this phone' : e.origin === 'model' ? 'AI model' : 'your server'} · {e.provider}</T> : null}
-              {d.media.length ? <T v="caption" color="textFaint">Attached media: {d.media.map((m) => `${m.name} (${(m.size / 1048576).toFixed(1)} MB)`).join(', ')}</T> : null}
-              <Button kind="text" title="Reprocess" icon="refresh" onPress={() => void retry()} style={{ alignSelf: 'flex-start' }} />
-            </Section>
-          </View>
-        ) : null}
-
-        {/* Related by meaning (local embeddings); falls back to shared tags when no embedding model is available. */}
-        {similar.data?.length ? (
-          <Section title="Related">
-            {similar.data.some((r) => r.nearDuplicate) ? (
-              <Banner tone="info" icon="copy-outline" title="You may have saved this already" body="A very similar item is in your library (marked below)." />
-            ) : null}
-            {similar.data.map((r) => (
-              <View key={r.item.id}>
-                {r.nearDuplicate ? <Chip label="Very similar" tone="info" icon="copy-outline" /> : null}
-                <ItemCard item={r.item} timezone={tz} onPress={() => navigation.push('ItemDetail', { id: r.item.id })} />
-              </View>
-            ))}
-          </Section>
-        ) : d.related.length ? (
-          <Section title="Related">
-            {d.related.map((r) => <ItemCard key={r.id} item={r} timezone={tz} onPress={() => navigation.push('ItemDetail', { id: r.id })} />)}
-          </Section>
-        ) : null}
+        <View style={{ marginTop: space.lg, marginBottom: space.md }}>
+          <Segmented options={tabs} value={current} onChange={setTab} />
+        </View>
+        {current === 'summary' ? summaryTab : current === 'text' ? transcriptTab : detailsTab}
       </View>
 
       <Sheet visible={!!edit} onClose={() => setEdit(null)} title={edit === 'tags' ? 'Edit tags' : `Edit ${edit}`}>

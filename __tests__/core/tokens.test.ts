@@ -29,3 +29,18 @@ test('the dark palette uses the crimson system colours', () => {
   expect(dark.text).toBe('#F5F5F1');
   expect(dark.primaryGradient).toEqual(['#E50914', '#B81D24']);
 });
+
+// Soft tiles: a tint at 0x24/255 opacity over the screen background, with normal and muted text on top.
+function blend(hex: string, alpha: number, over: string): string {
+  const p = (h: string) => [0, 2, 4].map((i) => Number.parseInt(h.replace('#', '').slice(i, i + 2), 16));
+  const [a, b] = [p(hex), p(over)];
+  return `#${a.map((v, i) => Math.round(v * alpha + b[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+describe.each([['light', light], ['dark', dark]] as [string, Palette][])('%s colourful tiles', (_name, c) => {
+  test.each(Object.keys(c.tint))('text on soft %s stays readable', (name) => {
+    const bg = blend(c.tint[name as keyof Palette['tint']], 0x24 / 255, c.bg);
+    expect(ratio(c.text, bg)).toBeGreaterThanOrEqual(7);
+    expect(ratio(c.textMuted, bg)).toBeGreaterThanOrEqual(4.5);
+  });
+});

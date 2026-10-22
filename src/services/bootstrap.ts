@@ -6,7 +6,7 @@ import { registerBackgroundWork } from './background';
 import { drainShareInbox, type CaptureResult } from './capture';
 import { getRepo } from './db';
 import { runLegacyImport } from './legacyImport';
-import { requestSync, runDueJobs, wakeServerJobs } from './processing';
+import { requestSync, runDueJobs, upgradeOldReadmes, wakeServerJobs } from './processing';
 import { refreshDailyDigest } from './reminders';
 import { ensureEmbeddings } from './semantic';
 import { checkConnection, getConnection } from './server';
@@ -37,6 +37,7 @@ export async function boot(): Promise<BootResult> {
     await refreshDailyDigest();
     // Backfill meaning-based search for anything not embedded yet (new items, or a newly available model).
     if (await ensureEmbeddings().catch(() => false)) await runDueJobs();
+    await upgradeOldReadmes().catch(() => 0);
     await maybeGenerateWeeklyReport();
   })();
   return { onboarded, legacyImported: legacy?.posts ?? 0, shared };

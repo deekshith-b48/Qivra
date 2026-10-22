@@ -3,8 +3,8 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Keyboard, KeyboardAvoidingView, type NativeScrollEvent, type NativeSyntheticEvent, Pressable, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { BackHandler, Dimensions, FlatList, Keyboard, KeyboardAvoidingView, type NativeScrollEvent, type NativeSyntheticEvent, Platform, Pressable, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ActionProposal } from '../core/agent/agent';
 import { ITEM_SUGGESTIONS } from '../core/agent/itemQa';
 import { formatLocal } from '../core/dates';
@@ -14,7 +14,7 @@ import { ask, askAboutItem, dropLastExchange } from '../services/agentService';
 import { getRepo } from '../services/db';
 import { generateReport } from '../services/reports';
 import { type AskMode, AssistantMessage, Composer, SourcesSheet, StreamingMessage, UserBubble } from '../ui/chat/ChatParts';
-import { Backdrop, Banner, Button, IconButton, Sheet, T } from '../ui/components';
+import { Backdrop, Banner, Button, elevation, IconButton, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { radius, space, useTheme } from '../ui/theme';
 import { useAiInfo, useSettings } from '../ui/useSettings';
@@ -58,11 +58,15 @@ export default function AgentScreen({ navigation, route }: Props) {
   const [live, setLive] = useState<Live | null>(null);
   const [mode, setMode] = useState<AskMode>('library');
   const inset = useTabBarInset();
+  const safeBottom = useSafeAreaInsets().bottom;
   // The floating tab bar hides while typing, so the composer only needs to clear it when the keyboard is down.
-  const [keyboard, setKeyboard] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
+  const keyboard = kbHeight > 0;
+  const [showJump, setShowJump] = useState(false);
   useEffect(() => {
-    const a = Keyboard.addListener('keyboardDidShow', () => setKeyboard(true));
-    const b = Keyboard.addListener('keyboardDidHide', () => setKeyboard(false));
+    // Measured from the keyboard's top edge: the reported height leaves out the gesture bar below it.
+    const a = Keyboard.addListener('keyboardDidShow', (e) => setKbHeight(Math.max(e.endCoordinates.height, Dimensions.get('screen').height - e.endCoordinates.screenY)));
+    const b = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
     return () => { a.remove(); b.remove(); };
   }, []);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +169,21 @@ export default function AgentScreen({ navigation, route }: Props) {
   // While streaming, the stored question already shows; the live answer goes below it.
   const showLive = !!live && (data.length === 0 || data[data.length - 1].role === 'user');
   const empty = !data.length && !live;
+  // During a chat the screen is full-height: no tab bar, a back arrow instead.
+  const inChat = !!scopeId || !!convId || !empty;
+  useEffect(() => {
+    navigation.setOptions({ tabBarStyle: inChat ? { display: 'none' } : undefined });
+  }, [inChat, navigation]);
+  // Android back leaves the chat (like the back arrow) instead of jumping to another tab.
+  useEffect(() => {
+    if (!inChat) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!navigation.isFocused()) return false;
+      newChat();
+      return true;
+    });
+    return () => sub.remove();
+  }, [inChat, navigation]);
   const subtitle = !ai?.enabled ? 'No AI model · answers quote your saved items'
     : `${mode === 'general' && !scopeId ? 'General chat' : 'Your library'} · ${ai.model}${ai.source === 'server' ? ' via your server' : ''}`;
 
@@ -172,21 +191,30 @@ export default function AgentScreen({ navigation, route }: Props) {
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
       <Backdrop />
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xs, borderBottomWidth: empty ? 0 : 1, borderColor: c.border }}>
-        <IconButton icon="menu-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} />
+        {inChat
+          ? <IconButton icon="arrow-back" label="Back to Ask" onPress={newChat} />
+          : <IconButton icon="menu-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} />}
         <View style={{ flex: 1, alignItems: 'center' }}>
           <T v="subtitle" accessibilityRole="header" numberOfLines={1}>{scopeId ? 'Ask about this' : 'Ask'}</T>
           <T v="caption" color="textMuted" numberOfLines={1}>{subtitle}</T>
         </View>
+        {inChat ? <IconButton icon="time-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} /> : null}
         <IconButton icon="create-outline" label="New chat" onPress={newChat} />
       </View>
       {scopeId ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: space.lg, marginTop: space.sm, padding: space.sm, paddingLeft: space.md, borderRadius: radius.lg, backgroundColor: c.accentSoft }}>
-          <Ionicons name="play-circle-outline" size={18} color={c.accent} />
-          <T v="small" style={{ flex: 1, marginLeft: space.sm }} numberOfLines={2} accessibilityLiveRegion="polite">Asking about: <T v="small" style={{ fontWeight: '700' }}>{scopeItem.data?.title || scopeItem.data?.url || 'this item'}</T></T>
-          <IconButton icon="close" label="Ask the whole library instead" onPress={() => { setScopeId(null); setConvId(null); }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'center', maxWidth: '90%', marginTop: space.sm, paddingLeft: space.md, paddingRight: 4, height: 34, borderRadius: radius.pill, backgroundColor: c.surface, ...elevation(c, 'card') }}>
+          <Ionicons name="document-text-outline" size={15} color={c.accent} />
+          <T v="caption" style={{ flexShrink: 1, marginLeft: 6 }} numberOfLines={1} accessibilityLiveRegion="polite">
+            <T v="caption" color="textMuted">About </T><T v="caption" style={{ fontWeight: '700' }}>{scopeItem.data?.title || scopeItem.data?.url || 'this item'}</T>
+          </T>
+          <Pressable onPress={() => { setScopeId(null); setConvId(null); }} accessibilityRole="button" accessibilityLabel="Ask the whole library instead" hitSlop={8}
+            style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginLeft: 4 }}>
+            <Ionicons name="close" size={15} color={c.textMuted} />
+          </Pressable>
         </View>
       ) : null}
-      <KeyboardAvoidingView behavior="height" style={{ flex: 1 }}>
+      {/* Edge-to-edge Android does not resize the window for the keyboard, so the chat column makes room itself. */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, paddingBottom: Platform.OS === 'android' ? kbHeight : 0 }}>
         <FlatList
           ref={listRef}
           data={data}
@@ -196,6 +224,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             atBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+            setShowJump(!atBottom.current);
           }}
           scrollEventThrottle={100}
           ListEmptyComponent={empty ? (
@@ -252,6 +281,13 @@ export default function AgentScreen({ navigation, route }: Props) {
             </>
           }
         />
+        {showJump && !empty ? (
+          <Pressable onPress={() => { atBottom.current = true; setShowJump(false); listRef.current?.scrollToEnd({ animated: true }); }}
+            accessibilityRole="button" accessibilityLabel="Scroll to the latest message"
+            style={{ position: 'absolute', alignSelf: 'center', bottom: 96 + (keyboard ? 0 : inChat ? safeBottom : inset), width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, ...elevation(c, 'float') }}>
+            <Ionicons name="arrow-down" size={18} color={c.text} />
+          </Pressable>
+        ) : null}
         <Composer
           value={input}
           onChange={setInput}
@@ -261,7 +297,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           streaming={!!live}
           placeholder={scopeId ? 'Ask about this item…' : mode === 'general' ? 'Ask anything…' : 'Ask about your library…'}
           mode={scopeId ? undefined : mode}
-          bottomInset={keyboard ? 0 : inset}
+          bottomInset={keyboard ? 0 : inChat ? safeBottom : inset}
           onToggleMode={() => setMode((m) => (m === 'library' ? 'general' : 'library'))}
         />
       </KeyboardAvoidingView>

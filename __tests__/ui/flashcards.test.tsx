@@ -6,6 +6,7 @@ import { ThemeProvider } from '../../src/ui/theme';
 import type { Enrichment } from '../../src/core/enrich';
 import { dueCount, makeCards } from '../../src/services/flashcards';
 import ReviewScreen from '../../src/screens/ReviewScreen';
+import GlanceScreen from '../../src/screens/GlanceScreen';
 import TodayScreen from '../../src/screens/TodayScreen';
 import CollectionsScreen from '../../src/screens/CollectionsScreen';
 import ItemDetailScreen from '../../src/screens/ItemDetailScreen';
@@ -77,7 +78,7 @@ test('review: reveal, jump to the moment, grade, done for today', async () => {
   expect(cards.map((c) => c.reps)).toEqual([1, 1]);
 });
 
-test('home stat strip shows cards due and opens the Study tab', async () => {
+test('home stat tiles show cards due and open Glance', async () => {
   const item = await itemWithEnrichment();
   const n = nav() as { navigate: jest.Mock };
   const first = wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
@@ -87,10 +88,10 @@ test('home stat strip shows cards due and opens the Study tab', async () => {
   await makeCards(item.id);
   wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
   fireEvent.press(await screen.findByRole('button', { name: '2 cards due' }));
-  expect(n.navigate).toHaveBeenCalledWith('Main', { screen: 'Study' });
+  expect(n.navigate).toHaveBeenCalledWith('Main', { screen: 'Glance' });
 });
 
-test('collections: suggested smart collection with ✨ badge, live count and Study', async () => {
+test('collections: suggested smart collection with ✨ badge, live count and Review', async () => {
   const repo = await getRepo();
   for (const t of ['A', 'B', 'C']) await itemWithEnrichment(t);
   const n = nav() as { navigate: jest.Mock };
@@ -103,7 +104,7 @@ test('collections: suggested smart collection with ✨ badge, live count and Stu
   await waitFor(() => expect(screen.queryByText('✨ b-tree index')).toBeTruthy());
   const col = (await repo.listCollections())[0];
   expect(col.rules).toEqual({ concepts: ['b-tree index'] });
-  fireEvent.press(screen.getAllByRole('button', { name: 'Study b-tree index' }).at(-1)!);
+  fireEvent.press(screen.getAllByRole('button', { name: 'Review b-tree index' }).at(-1)!);
   expect(n.navigate).toHaveBeenCalledWith('Review', { collectionId: col.id });
 });
 
@@ -124,4 +125,32 @@ test('collections: rule builder sheet shows a live count and creates a smart col
   fireEvent.press(screen.getByRole('button', { name: 'Create' }));
   await waitFor(async () => expect((await repo.listCollections()).map((c) => c.name)).toEqual(['Videos']));
   expect((await repo.listCollections())[0].rules).toEqual({ sourceTypes: ['youtube'], concepts: ['gin index'], savedWithinDays: 7, unread: true });
+});
+
+test('home shows every feature as a tile, and quick-capture tiles open the right mode', async () => {
+  const n = nav() as { navigate: jest.Mock };
+  wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
+  await screen.findByText('Everything in Qivra');
+  const expected: [string, unknown[]][] = [
+    ['Library', ['Main', { screen: 'Library' }]], ['Collections', ['Collections']], ['Ask', ['Main', { screen: 'Agent' }]],
+    ['Glance', ['Main', { screen: 'Glance' }]], ['Review cards', ['Review']], ['Reports', ['Reports']], ['Queue', ['Jobs']],
+    ['Server', ['ConnectServer']], ['AI models', ['AiProviders']], ['Voice settings', ['VoiceSettings']], ['Privacy', ['PrivacyStorage']],
+  ];
+  for (const [label, args] of expected) {
+    fireEvent.press(screen.getByRole('button', { name: label }));
+    expect(n.navigate).toHaveBeenLastCalledWith(...args);
+  }
+  fireEvent.press(screen.getByRole('button', { name: 'Record a voice note' }));
+  expect(n.navigate).toHaveBeenLastCalledWith('Capture', { mode: 'voice' });
+});
+
+test('Glance shows cards due and starts a review', async () => {
+  const item = await itemWithEnrichment();
+  await makeCards(item.id);
+  const n = nav() as { navigate: jest.Mock };
+  wrap(<GlanceScreen navigation={n as never} route={{ key: 'g', name: 'Glance' } as never} />);
+  expect(await screen.findByLabelText('2 cards due')).toBeTruthy();
+  expect(screen.getByText('0 of 2 cards learned')).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Start review' }));
+  expect(n.navigate).toHaveBeenCalledWith('Review');
 });

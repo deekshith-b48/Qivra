@@ -5,8 +5,8 @@ import type { CaptureResult } from '../services/capture';
 export type TabParamList = {
   Today: undefined;
   Library: { collectionId?: string; q?: string } | undefined;
-  /** Flashcard review as a tab (the same screen as the `Review` stack route). */
-  Study: undefined;
+  /** Glance: an at-a-glance dashboard (cards due, this week, topics, latest report). */
+  Glance: undefined;
   /** `itemId` scopes the conversation to one saved item ("Ask this item"). */
   Agent: { conversationId?: string; prompt?: string; itemId?: string } | undefined;
 };

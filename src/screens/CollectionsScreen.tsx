@@ -114,7 +114,7 @@ export default function CollectionsScreen({ navigation }: RootProps<'Collections
                 {col.itemCount} item(s){col.rules ? ` · ${describeRules(col.rules)}` : ''}{col.syncStatus === 'pending' ? ' · not synced yet' : ''}
               </T>
             </View>
-            <IconButton icon="school-outline" label={`Study ${col.name}`} onPress={() => navigation.navigate('Review', { collectionId: col.id })} />
+            <IconButton icon="school-outline" label={`Review ${col.name}`} onPress={() => navigation.navigate('Review', { collectionId: col.id })} />
             <IconButton icon="pencil-outline" label={`Rename ${col.name}`} onPress={() => setEditing({ id: col.id, name: col.name })} />
             <IconButton icon="trash-outline" label={`Delete ${col.name}`} color={c.danger} onPress={() => void run(async () => {
               if (!(await confirm(`Delete “${col.name}”?`, 'Items stay in your library; only the collection is removed.', 'Delete', true))) return;
