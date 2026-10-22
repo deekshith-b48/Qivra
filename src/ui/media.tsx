@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { splitHighlights } from '../core/highlights';
 import { SOURCE_LABELS, type SourceType } from '../core/url';
 import type { IconName } from './components';
-import { radius, space, type, useTheme } from './theme';
+import { fonts, radius, space, type, useTheme } from './theme';
 
 export const PLATFORM_ICONS: Record<string, IconName> = {
   youtube: 'logo-youtube', instagram: 'logo-instagram', x: 'logo-twitter', github: 'logo-github', podcast: 'mic-outline',
@@ -19,10 +19,10 @@ export function PlatformBadge({ source, onMedia }: { source: SourceType; onMedia
     <View
       accessible
       accessibilityLabel={SOURCE_LABELS[source]}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: onMedia ? 'rgba(0,0,0,0.65)' : c.surfaceAlt }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: onMedia ? c.scrim : c.surfaceAlt }}
     >
-      <Ionicons name={PLATFORM_ICONS[source] ?? 'link-outline'} size={14} color={onMedia ? '#fff' : c.text} />
-      <Text style={[type.caption, { color: onMedia ? '#fff' : c.text }]}>{SOURCE_LABELS[source]}</Text>
+      <Ionicons name={PLATFORM_ICONS[source] ?? 'link-outline'} size={14} color={onMedia ? c.onMedia : c.text} />
+      <Text style={[type.caption, { color: onMedia ? c.onMedia : c.text }]}>{SOURCE_LABELS[source]}</Text>
     </View>
   );
 }
@@ -30,7 +30,7 @@ export function PlatformBadge({ source, onMedia }: { source: SourceType; onMedia
 export function Segmented<K extends string>({ options, value, onChange }: { options: { key: K; label: string; count?: number }[]; value: K; onChange: (k: K) => void }) {
   const { c } = useTheme();
   return (
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: c.surfaceAlt, borderRadius: radius.pill, padding: 4 }}>
+    <View accessibilityRole="tablist" style={[{ flexDirection: 'row', backgroundColor: c.surface, borderRadius: radius.pill, padding: 4 }, c.cardShadow ? { shadowColor: '#1A1D23', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 } : { borderWidth: 1, borderColor: c.border }]}>
       {options.map((o) => {
         const on = o.key === value;
         return (
@@ -40,10 +40,10 @@ export function Segmented<K extends string>({ options, value, onChange }: { opti
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             accessibilityLabel={`${o.label}${o.count !== undefined ? `, ${o.count}` : ''}`}
-            style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.bg : 'transparent', flexDirection: 'row', gap: 6, elevation: on ? 1 : 0 }}
+            style={{ flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.primary : 'transparent', flexDirection: 'row', gap: 6 }}
           >
-            <Text style={[type.subtitle, { fontSize: 14, color: on ? c.text : c.textMuted }]}>{o.label}</Text>
-            {o.count !== undefined ? <Text style={[type.caption, { color: on ? c.accent : c.textFaint }]}>{o.count}</Text> : null}
+            <Text style={[type.subtitle, { fontSize: 14, color: on ? c.onPrimary : c.textMuted }]}>{o.label}</Text>
+            {o.count !== undefined ? <Text style={[type.caption, { color: on ? c.onPrimary : c.textFaint, opacity: on ? 0.75 : 1 }]}>{o.count}</Text> : null}
           </Pressable>
         );
       })}
@@ -59,7 +59,7 @@ export function HighlightedText({ text, terms, style, numberOfLines, selectable 
     <Text style={[type.body, { color: c.text }, style]} numberOfLines={numberOfLines} selectable={selectable}>
       {spans.map((s, i) =>
         s.hit ? (
-          <Text key={i} style={{ backgroundColor: c.accentSoft, color: c.onAccentSoft, fontWeight: '700' }}>{s.text}</Text>
+          <Text key={i} style={{ backgroundColor: c.highlight, color: c.onHighlight, fontFamily: fonts.bold }}>{s.text}</Text>
         ) : (
           <Text key={i}>{s.text}</Text>
         ),

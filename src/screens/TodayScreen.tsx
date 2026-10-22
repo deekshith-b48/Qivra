@@ -12,7 +12,8 @@ import type { Item } from '../db/types';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { requestSync, runDueJobs } from '../services/processing';
 import { generateReport } from '../services/reports';
-import { Banner, Button, Card, Chip, EmptyState, IconButton, Loading, Section, T, Wordmark } from '../ui/components';
+import { Backdrop, Banner, Button, Card, Chip, CircleButton, elevation, EmptyState, Loading, Section, SectionLink, StatStrip, T } from '../ui/components';
+import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 import { useAction, useQuery } from '../ui/hooks';
 import { PlatformBadge, PLATFORM_ICONS } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
@@ -34,15 +35,15 @@ function ReadyCard({ item, onPress, width }: { item: Item; onPress: () => void; 
   const tldr = item.summary ? firstSentence(item.summary) : '';
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${item.title || item.url || 'Saved item'}. ${tldr}`}
-      style={({ pressed }) => ({ width, borderRadius: radius.lg, backgroundColor: c.surface, overflow: 'hidden', opacity: pressed ? 0.85 : 1 })}>
-      <View style={{ aspectRatio: 16 / 9, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+      style={({ pressed }) => [{ width, borderRadius: radius.card, backgroundColor: c.surface, padding: 6, transform: [{ scale: pressed ? 0.98 : 1 }] }, elevation(c)]}>
+      <View style={{ aspectRatio: 4 / 3, borderRadius: radius.tile, overflow: 'hidden', backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
         {item.thumbnailUrl ? <Image source={{ uri: item.thumbnailUrl }} style={{ width: '100%', height: '100%' }} accessibilityIgnoresInvertColors /> : <Ionicons name={PLATFORM_ICONS[item.sourceType] ?? 'document-outline'} size={36} color={c.textFaint} />}
         <View style={{ position: 'absolute', top: 8, left: 8 }}><PlatformBadge source={item.sourceType} onMedia={!!item.thumbnailUrl} /></View>
+        <View style={{ position: 'absolute', left: 8, right: 8, bottom: 8, backgroundColor: c.surface, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: 6 }}>
+          <T v="small" numberOfLines={1} style={{ fontWeight: '700', textAlign: 'center' }}>{item.title || item.url || 'Untitled'}</T>
+        </View>
       </View>
-      <View style={{ padding: space.md }}>
-        <T v="subtitle" numberOfLines={2}>{item.title || item.url || 'Untitled'}</T>
-        {tldr ? <T v="small" color="textMuted" numberOfLines={3} style={{ marginTop: 4 }}>{tldr}</T> : null}
-      </View>
+      {tldr ? <T v="small" color="textMuted" numberOfLines={2} style={{ marginTop: space.sm, marginHorizontal: 6, marginBottom: 4 }}>{tldr}</T> : null}
     </Pressable>
   );
 }
@@ -88,6 +89,7 @@ export default function TodayScreen({ navigation }: Props) {
     [tz],
   );
   const d = q.data;
+  const inset = useTabBarInset();
   const due = useQuery((repo) => repo.countDueCards(new Date().toISOString()), ['cards', 'items']);
   const open = (id: string) => navigation.navigate('ItemDetail', { id });
 
@@ -107,16 +109,27 @@ export default function TodayScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.lg, paddingTop: space.sm }}>
-        <View style={{ flex: 1 }}>
-          <Wordmark />
+      <Backdrop />
+      <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: inset + space.lg }} refreshControl={<RefreshControl refreshing={busy} onRefresh={() => void refresh()} />}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm }}>
+          <View style={{ flex: 1 }}>
+            <T v="display" accessibilityRole="header">{Number.isFinite(hour) ? greeting(hour) : 'Hello'}</T>
+            <T color="textMuted" style={{ marginTop: 2 }}>{d ? formatLocal(d.range.startIso, tz, { weekday: 'long', month: 'long', day: 'numeric' }) : ' '}</T>
+          </View>
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
+            <CircleButton icon="albums-outline" label="Collections" onPress={() => navigation.navigate('Collections')} />
+            <CircleButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
+          </View>
         </View>
-        <IconButton icon="folder-open-outline" label="Collections" onPress={() => navigation.navigate('Collections')} />
-        <IconButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
-      </View>
-      <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: 48 }} refreshControl={<RefreshControl refreshing={busy} onRefresh={() => void refresh()} />}>
-        <T v="display" accessibilityRole="header">{Number.isFinite(hour) ? greeting(hour) : 'Hello'}</T>
-        <T color="textMuted">{d ? `${formatLocal(d.range.startIso, tz, { weekday: 'long', month: 'long', day: 'numeric' })} · ${stats}` : ' '}</T>
+        {d ? (
+          <View style={{ marginTop: space.lg }}>
+            <StatStrip items={[
+              { value: d.savedToday, label: 'saved today', onPress: () => navigation.navigate('Main', { screen: 'Library' }) },
+              { value: due.data ?? 0, label: 'cards due', onPress: () => navigation.navigate('Main', { screen: 'Study' }) },
+              { value: d.feed.processing.length + d.feed.needsYou.length, label: 'in queue', onPress: () => navigation.navigate('Jobs') },
+            ]} />
+          </View>
+        ) : null}
         {q.loading && !d ? <Loading /> : null}
         {q.error ? <Banner tone="danger" title="Couldn't load your home feed" body={q.error} /> : null}
         {d ? (
@@ -124,20 +137,11 @@ export default function TodayScreen({ navigation }: Props) {
             {d.conflicts ? <Banner tone="warning" title={`${d.conflicts} sync conflict(s)`} body="An item was edited on two devices. Choose which version to keep." action={<Button kind="outline" title="Review" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
             {connection?.lastError ? <Banner tone="warning" title="Server unreachable" body={connection.lastError.message} action={<Button kind="outline" title="Connection" onPress={() => navigation.navigate('ConnectServer')} />} /> : null}
 
-            {due.data ? (
-              <Card onPress={() => navigation.navigate('Review')} label={`${due.data} flashcard${due.data === 1 ? '' : 's'} due. Review`} style={{ marginTop: space.lg }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-                  <Ionicons name="school-outline" size={22} color={c.accent} />
-                  <T v="subtitle" style={{ flex: 1 }}>{due.data} card{due.data === 1 ? '' : 's'} due · Review</T>
-                  <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
-                </View>
-              </Card>
-            ) : null}
 
             {d.feed.ready.length ? (
-              <Section title="Ready to review" action={<T v="small" color="accent" onPress={() => navigation.navigate('Main', { screen: 'Library' })}>Library</T>}>
+              <Section title="Ready to review" action={<SectionLink onPress={() => navigation.navigate('Main', { screen: 'Library' })} />}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.md }}>
-                  {d.feed.ready.map((it) => <ReadyCard key={it.id} item={it} width={260} onPress={() => open(it.id)} />)}
+                  {d.feed.ready.map((it) => <ReadyCard key={it.id} item={it} width={240} onPress={() => open(it.id)} />)}
                 </ScrollView>
               </Section>
             ) : null}

@@ -201,7 +201,7 @@ test('home shows what is ready, what needs you and what is in progress', async (
   expect(screen.getByText('Needs you')).toBeTruthy();
   expect(screen.getByText('Reel without captions')).toBeTruthy();
   expect(screen.getByText('In progress')).toBeTruthy();
-  expect(screen.getByText(/1 need you/)).toBeTruthy();
+  expect(screen.getByLabelText('2 in queue')).toBeTruthy(); // stat strip: 1 needs you + 1 in progress
 });
 
 test('ask can be scoped to one item and answers from it with timestamps', async () => {

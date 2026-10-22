@@ -202,7 +202,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
             <Ionicons name={PLATFORM_ICONS[item.sourceType] ?? 'document-outline'} size={44} color={c.textMuted} />
           )}
           {isVideo && item.url ? (
-            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center' }}>
               <Ionicons name="play" size={30} color="#fff" style={{ marginLeft: 4 }} />
             </View>
           ) : null}

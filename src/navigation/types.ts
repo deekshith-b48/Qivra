@@ -5,8 +5,8 @@ import type { CaptureResult } from '../services/capture';
 export type TabParamList = {
   Today: undefined;
   Library: { collectionId?: string; q?: string } | undefined;
-  /** Placeholder route for the centre "+" button; it opens the capture sheet. */
-  Save: undefined;
+  /** Flashcard review as a tab (the same screen as the `Review` stack route). */
+  Study: undefined;
   /** `itemId` scopes the conversation to one saved item ("Ask this item"). */
   Agent: { conversationId?: string; prompt?: string; itemId?: string } | undefined;
 };

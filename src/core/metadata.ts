@@ -32,6 +32,9 @@ export function decodeEntities(s: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&(middot|bull);/g, '·')
+    .replace(/&(mdash|ndash);/g, (_m, n: string) => (n === 'mdash' ? '—' : '–'))
+    .replace(/&(hellip|rarr|larr|copy|reg|trade);/g, (_m, n: string) => ({ hellip: '…', rarr: '→', larr: '←', copy: '©', reg: '®', trade: '™' })[n] ?? '')
     .replace(/&amp;/g, '&');
 }
 
@@ -120,6 +123,7 @@ export function stripMarkdown(md: string): string {
     .replace(/^\s*>\s?(\[![A-Z]+\]\s*)?/gm, '')
     .replace(/\[![A-Z]+\]\s*/g, '')
     .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:)!?]|$)/g, '$1$2')
+    .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, (e) => decodeEntities(e))
     .trim();
 }
 
@@ -143,6 +147,8 @@ export async function fetchMetadata(info: UrlInfo, fetchText: FetchText): Promis
     return {
       ...empty, title: j.full_name ?? info.githubRepo, description: [j.description ?? '', facts].filter(Boolean).join(' — '),
       author: j.owner?.login ?? '', siteName: 'GitHub', bodyText: readme, provider: 'github-api',
+      // GitHub's own social preview card for the repository.
+      imageUrl: `https://opengraph.githubassets.com/1/${info.githubRepo}`,
     };
   }
   if (info.sourceType === 'x') {

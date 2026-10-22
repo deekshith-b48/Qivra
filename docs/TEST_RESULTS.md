@@ -1,5 +1,18 @@
 # Test results
 
+## 1.8.0 (2026-10-22): UI theme revamp
+
+- Release APK: `dist/Qivra-1.8.0-release.apk`, version code 12. New native module: `expo-linear-gradient`. New font: Plus Jakarta Sans.
+- `tsc` and Biome pass. Jest: 266 passed, 4 live tests skipped. New tests:
+  - WCAG contrast for every token pairing in both palettes
+  - `FloatingTabBar` roles, labels, active pill, navigation and the separate "+"
+- Emulator screenshots (release APK):
+  - **Light:** Home (stat strip, image cards, round header buttons), Library (black segmented control), Settings (grouped cards).
+  - **Dark:** Home, Library, Ask, Study and the item page (crimson glow, Rich Black cards, Soft White active pill, crimson "+").
+- Found and fixed while testing:
+  - Background gradients did not repaint when the theme changed in place (dark gradient behind light content). Gradients are now keyed by scheme and always use three stops.
+  - GitHub README summaries showed `&middot;`-style entities; they are now decoded. GitHub repositories now get GitHub's preview image as their thumbnail.
+
 ## 1.7.1 (2026-10-22): conversational Ask and layout
 
 - Release APK: `dist/Qivra-1.7.1-release.apk`, version code 11. Jest: 254 passed, 4 live tests skipped. Server pytest: 96 passed.

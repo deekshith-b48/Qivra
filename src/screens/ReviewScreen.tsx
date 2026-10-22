@@ -7,6 +7,7 @@ import type { RootProps } from '../navigation/types';
 import { gradeCard } from '../services/flashcards';
 import { Button, Card, EmptyState, Header, Loading, Screen, T } from '../ui/components';
 import { useAction, useQuery } from '../ui/hooks';
+import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 import { radius, space, useTheme } from '../ui/theme';
 
 const GRADES: { grade: Grade; label: string; kind: 'danger' | 'outline' | 'tonal' | 'filled' }[] = [
@@ -31,13 +32,28 @@ export default function ReviewScreen({ navigation, route }: RootProps<'Review'>)
   const [queue, setQueue] = useState<Flashcard[] | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [reviewed, setReviewed] = useState(0);
+  // Shown as the Study tab (no back button, refreshed each time the tab is opened) or pushed for one collection.
+  const inTab = route.name === ('Study' as never);
+  const inset = useTabBarInset();
+  const reload = q.reload;
+  useEffect(() => {
+    if (!inTab) return;
+    // Each visit to the Study tab starts a fresh session with whatever is due now.
+    return navigation.addListener?.('focus', () => {
+      setQueue(null);
+      setReviewed(0);
+      setRevealed(false);
+      void reload();
+    });
+  }, [inTab, navigation, reload]);
 
   useEffect(() => {
     if (q.data && queue === null) setQueue(q.data.cards);
   }, [q.data, queue]);
 
-  const title = q.data?.collection ? `Study · ${q.data.collection.name}` : 'Review';
-  if (!queue) return <Screen><Header title={title} onBack={() => navigation.goBack()} /><Loading /></Screen>;
+  const title = q.data?.collection ? `Study · ${q.data.collection.name}` : inTab ? 'Study' : 'Review';
+  const back = inTab ? undefined : () => navigation.goBack();
+  if (!queue) return <Screen bottomInset={inTab ? inset : 0}><Header title={title} onBack={back} /><Loading /></Screen>;
   const card = queue[0];
 
   const grade = (g: Grade) => run(async () => {
@@ -51,12 +67,14 @@ export default function ReviewScreen({ navigation, route }: RootProps<'Review'>)
   }, 'Could not save the review');
 
   return (
-    <Screen>
-      <Header title={title} onBack={() => navigation.goBack()} />
+    <Screen bottomInset={inTab ? inset : 0}>
+      <Header title={title} subtitle={inTab ? 'Flashcards from what you saved, spaced so you remember them.' : undefined} onBack={back} />
       {!card ? (
         <EmptyState icon="checkmark-done-outline" title="Done for today"
           body={reviewed ? `You reviewed ${reviewed} card${reviewed === 1 ? '' : 's'}. New cards come due as you learn them.` : 'No cards are due. Make flashcards from an item page.'}
-          action={<Button kind="outline" title="Back" onPress={() => navigation.goBack()} />} />
+          action={inTab
+            ? <Button kind="outline" title="Open your library" icon="folder-outline" onPress={() => navigation.navigate('Main', { screen: 'Library' })} />
+            : <Button kind="outline" title="Back" onPress={() => navigation.goBack()} />} />
       ) : (
         <>
           <T v="caption" color="textMuted" accessibilityLabel={`${reviewed} reviewed, ${queue.length} left`}>{reviewed} reviewed · {queue.length} left</T>

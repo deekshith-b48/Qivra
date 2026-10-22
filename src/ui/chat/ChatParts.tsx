@@ -122,7 +122,7 @@ function ModeChip({ mode, onToggle }: { mode: AskMode; onToggle: () => void }) {
   );
 }
 
-export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, placeholder, mode, onToggleMode }: {
+export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, placeholder, mode, onToggleMode, bottomInset = 0 }: {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
@@ -132,12 +132,14 @@ export function Composer({ value, onChange, onSend, onStop, onVoice, streaming, 
   placeholder: string;
   mode?: AskMode;
   onToggleMode?: () => void;
+  /** Space kept free below the composer (the floating tab bar). */
+  bottomInset?: number;
 }) {
   const { c } = useTheme();
   const canSend = !!value.trim() && !streaming;
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.md, backgroundColor: c.bg, borderTopWidth: 1, borderColor: c.border }}>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 24, borderWidth: 1, borderColor: c.border, paddingLeft: space.lg, paddingRight: 6, paddingVertical: 6 }}>
+    <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.md + bottomInset }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 28, borderWidth: 1, borderColor: c.border, paddingLeft: space.lg, paddingRight: 6, paddingVertical: 6, shadowColor: '#1A1D23', shadowOpacity: c.cardShadow ? 0.06 : 0, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: c.cardShadow ? 3 : 0 }}>
         <TextInput
           value={value}
           onChangeText={onChange}

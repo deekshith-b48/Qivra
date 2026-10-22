@@ -1,11 +1,13 @@
-import { Ionicons } from '@expo/vector-icons';
+import {
+  PlusJakartaSans_400Regular, PlusJakartaSans_500Medium, PlusJakartaSans_600SemiBold, PlusJakartaSans_700Bold, PlusJakartaSans_800ExtraBold, useFonts,
+} from '@expo-google-fonts/plus-jakarta-sans';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { DarkTheme, DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { AppState, Pressable, View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { RootStackParamList, TabParamList } from './src/navigation/types';
@@ -32,6 +34,9 @@ import TodayScreen from './src/screens/TodayScreen';
 import TranscriptImportScreen from './src/screens/TranscriptImportScreen';
 import { boot, onResume, type BootResult } from './src/services/bootstrap';
 import { CaptureSheet } from './src/ui/CaptureSheet';
+import { useQuery } from './src/ui/hooks';
+import { FloatingTabBar, type TabSpec } from './src/ui/nav/FloatingTabBar';
+import { dueCount } from './src/services/flashcards';
 import { Banner, Loading, Screen } from './src/ui/components';
 import { ThemeProvider, useTheme } from './src/ui/theme';
 
@@ -39,51 +44,27 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator<TabParamList>();
 const nav = createNavigationContainerRef<RootStackParamList>();
 
-const TAB_ICONS: Record<Exclude<keyof TabParamList, 'Save'>, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
-  Today: ['home', 'home-outline'],
-  Library: ['library', 'library-outline'],
-  Agent: ['sparkles', 'sparkles-outline'],
+const TABS: Record<keyof TabParamList, TabSpec> = {
+  Today: { label: 'Home', icon: ['home', 'home-outline'] },
+  Study: { label: 'Study', icon: ['checkbox', 'checkbox-outline'] },
+  Library: { label: 'Library', icon: ['folder', 'folder-outline'] },
+  Agent: { label: 'Ask', icon: ['chatbubble-ellipses', 'chatbubble-ellipses-outline'] },
 };
-const TAB_LABELS: Record<Exclude<keyof TabParamList, 'Save'>, string> = { Today: 'Home', Library: 'Library', Agent: 'Ask' };
-
-function Empty() {
-  return null;
-}
 
 function MainTabs() {
-  const { c } = useTheme();
   const [captureOpen, setCaptureOpen] = useState(false);
+  const due = useQuery(() => dueCount(), ['cards', 'items']).data ?? 0;
+  const tabs = { ...TABS, Study: { ...TABS.Study, badge: due || undefined } };
   return (
     <>
       <Tabs.Navigator
-        screenOptions={({ route }) => ({
-          headerShown: false,
-          tabBarActiveTintColor: c.text,
-          tabBarInactiveTintColor: c.textFaint,
-          tabBarStyle: { backgroundColor: c.bg, borderTopColor: c.border, minHeight: 64 },
-          tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
-          tabBarLabel: route.name === 'Save' ? () => null : TAB_LABELS[route.name as Exclude<keyof TabParamList, 'Save'>],
-          tabBarIcon: ({ focused, color, size }) => route.name === 'Save' ? null : <Ionicons name={TAB_ICONS[route.name as Exclude<keyof TabParamList, 'Save'>][focused ? 0 : 1]} size={size} color={color} />,
-          tabBarAccessibilityLabel: route.name === 'Agent' ? 'Ask your library' : route.name === 'Today' ? 'Home' : route.name,
-        })}
+        screenOptions={{ headerShown: false }}
+        tabBar={(props) => <FloatingTabBar {...props} tabs={tabs} onAdd={() => setCaptureOpen(true)} />}
       >
-        <Tabs.Screen name="Today" component={TodayScreen} options={{ title: 'Home' }} />
+        <Tabs.Screen name="Today" component={TodayScreen} options={{ title: 'Home', tabBarAccessibilityLabel: 'Home' }} />
+        <Tabs.Screen name="Study" component={ReviewScreen as never} options={{ title: 'Study', tabBarAccessibilityLabel: 'Study flashcards' }} />
         <Tabs.Screen name="Library" component={LibraryScreen} />
-        <Tabs.Screen
-          name="Save"
-          component={Empty}
-          options={{
-            tabBarButton: () => (
-              <Pressable onPress={() => setCaptureOpen(true)} accessibilityRole="button" accessibilityLabel="Save something" accessibilityHint="Paste a link, write a note, record a voice note or import a file"
-                style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="add" size={28} color={c.onPrimary} />
-                </View>
-              </Pressable>
-            ),
-          }}
-        />
-        <Tabs.Screen name="Agent" component={AgentScreen} options={{ title: 'Ask' }} />
+        <Tabs.Screen name="Agent" component={AgentScreen} options={{ title: 'Ask', tabBarAccessibilityLabel: 'Ask your library' }} />
       </Tabs.Navigator>
       <CaptureSheet
         visible={captureOpen}
@@ -105,6 +86,9 @@ function showShare(shared: BootResult['shared']) {
 
 function Root() {
   const { c } = useTheme();
+  // Plus Jakarta Sans is bundled with the app; if it ever fails to load, the system font is used.
+  const [fontsLoaded, fontError] = useFonts({ PlusJakartaSans_400Regular, PlusJakartaSans_500Medium, PlusJakartaSans_600SemiBold, PlusJakartaSans_700Bold, PlusJakartaSans_800ExtraBold });
+  const fontsReady = fontsLoaded || !!fontError;
   const [state, setState] = useState<{ ready: boolean; boot?: BootResult; error?: string }>({ ready: false });
 
   useEffect(() => {
@@ -127,7 +111,7 @@ function Root() {
     };
   }, []);
 
-  if (!state.ready) return <View style={{ flex: 1, backgroundColor: c.bg, justifyContent: 'center' }}><Loading label="Opening your library" /></View>;
+  if (!state.ready || !fontsReady) return <View style={{ flex: 1, backgroundColor: c.bg, justifyContent: 'center' }}><Loading label="Opening your library" /></View>;
   if (state.error) {
     return (
       <Screen>
@@ -140,7 +124,7 @@ function Root() {
     <NavigationContainer
       ref={nav}
       theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
-      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Library: 'library', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
+      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Study: 'study', Library: 'library', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
     >
       <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>

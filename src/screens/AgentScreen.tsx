@@ -3,7 +3,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, type NativeScrollEvent, type NativeSyntheticEvent, Pressable, View } from 'react-native';
+import { FlatList, Keyboard, KeyboardAvoidingView, type NativeScrollEvent, type NativeSyntheticEvent, Pressable, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ActionProposal } from '../core/agent/agent';
 import { ITEM_SUGGESTIONS } from '../core/agent/itemQa';
@@ -14,11 +14,12 @@ import { ask, askAboutItem, dropLastExchange } from '../services/agentService';
 import { getRepo } from '../services/db';
 import { generateReport } from '../services/reports';
 import { type AskMode, AssistantMessage, Composer, SourcesSheet, StreamingMessage, UserBubble } from '../ui/chat/ChatParts';
-import { Banner, Button, IconButton, Sheet, T } from '../ui/components';
+import { Backdrop, Banner, Button, IconButton, Sheet, T } from '../ui/components';
 import { confirm, useQuery } from '../ui/hooks';
 import { radius, space, useTheme } from '../ui/theme';
 import { useAiInfo, useSettings } from '../ui/useSettings';
 import { VoiceSheet } from '../ui/VoiceSheet';
+import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Agent'>, NativeStackScreenProps<RootStackParamList>>;
 
@@ -55,6 +56,14 @@ export default function AgentScreen({ navigation, route }: Props) {
   const [sourcesFor, setSourcesFor] = useState<Message | null>(null);
   const [live, setLive] = useState<Live | null>(null);
   const [mode, setMode] = useState<AskMode>('library');
+  const inset = useTabBarInset();
+  // The floating tab bar hides while typing, so the composer only needs to clear it when the keyboard is down.
+  const [keyboard, setKeyboard] = useState(false);
+  useEffect(() => {
+    const a = Keyboard.addListener('keyboardDidShow', () => setKeyboard(true));
+    const b = Keyboard.addListener('keyboardDidHide', () => setKeyboard(false));
+    return () => { a.remove(); b.remove(); };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
@@ -160,6 +169,7 @@ export default function AgentScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
+      <Backdrop />
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xs, borderBottomWidth: empty ? 0 : 1, borderColor: c.border }}>
         <IconButton icon="menu-outline" label="Conversation history" onPress={() => setHistoryOpen(true)} />
         <View style={{ flex: 1, alignItems: 'center' }}>
@@ -250,6 +260,7 @@ export default function AgentScreen({ navigation, route }: Props) {
           streaming={!!live}
           placeholder={scopeId ? 'Ask about this item…' : mode === 'general' ? 'Ask anything…' : 'Ask about your library…'}
           mode={scopeId ? undefined : mode}
+          bottomInset={keyboard ? 0 : inset}
           onToggleMode={() => setMode((m) => (m === 'library' ? 'general' : 'library'))}
         />
       </KeyboardAvoidingView>

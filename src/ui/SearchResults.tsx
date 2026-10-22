@@ -46,7 +46,7 @@ export async function searchLibrary(term: string, scope: Scope = 'all'): Promise
     .map((it) => ({ itemId: it.id, title: it.title || it.url || 'Untitled', sourceType: it.sourceType, passages: by.get(it.id) ?? [] }));
 }
 
-export function SearchResults({ query, onOpen }: { query: string; onOpen: (itemId: string) => void }) {
+export function SearchResults({ query, onOpen, bottomInset = 120 }: { query: string; onOpen: (itemId: string) => void; bottomInset?: number }) {
   const { c } = useTheme();
   const [scope, setScope] = useState<Scope>('all');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -67,7 +67,7 @@ export function SearchResults({ query, onOpen }: { query: string; onOpen: (itemI
       data={hits ?? []}
       keyExtractor={(h) => h.itemId}
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: 120 }}
+      contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: bottomInset + space.lg }}
       ListHeaderComponent={
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: space.sm }}>
           {(['all', 'transcripts', 'notes'] as const).map((s) => (

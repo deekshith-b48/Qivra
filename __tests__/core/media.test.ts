@@ -138,3 +138,8 @@ test('keyword moments in untimed text are the sentences that mention the term', 
   const agents = k.find((x) => x.term === 'agents');
   expect(agents?.moments.map((m) => m.text)).toEqual(['Agents call tools often.', 'Agents stop when done.']);
 });
+
+test('README text decodes HTML entities like &middot; (seen in GitHub summaries)', () => {
+  const { stripMarkdown } = require('../../src/core/metadata');
+  expect(stripMarkdown('Website &middot; Docs &middot; API &mdash; fast &amp; small')).toBe('Website · Docs · API — fast & small');
+});

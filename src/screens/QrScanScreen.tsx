@@ -44,7 +44,7 @@ export default function QrScanScreen({ navigation }: RootProps<'QrScan'>) {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
+    <View style={{ flex: 1, backgroundColor: c.scrim }}>
       {cameraError ? (
         <Screen>
           <Header title="Camera unavailable" onBack={() => navigation.goBack()} />

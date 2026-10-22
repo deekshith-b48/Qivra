@@ -66,7 +66,7 @@ export const YouTubeHero = forwardRef<YouTubeHeroHandle, Props>(function YouTube
   const openApp = () => void Linking.openURL(`https://www.youtube.com/watch?v=${videoId}`);
 
   return (
-    <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ borderRadius: radius.lg, overflow: 'hidden', backgroundColor: '#000', aspectRatio: 16 / 9 }}>
+    <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.scrim, aspectRatio: 16 / 9 }}>
       {active && !failed ? (
         <YoutubePlayer
           ref={player}
@@ -97,7 +97,7 @@ export const YouTubeHero = forwardRef<YouTubeHeroHandle, Props>(function YouTube
       ) : (
         <Pressable onPress={() => { setActive(true); setPlaying(true); }} accessibilityRole="button" accessibilityLabel="Play video here" style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           {thumbnailUrl ? <Image source={{ uri: thumbnailUrl }} accessibilityIgnoresInvertColors style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" /> : null}
-          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center' }}>
             <Ionicons name="play" size={32} color="#fff" style={{ marginLeft: 4 }} />
           </View>
         </Pressable>

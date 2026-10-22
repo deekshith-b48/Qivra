@@ -77,17 +77,17 @@ test('review: reveal, jump to the moment, grade, done for today', async () => {
   expect(cards.map((c) => c.reps)).toEqual([1, 1]);
 });
 
-test('home shows the due-cards card only when cards are due', async () => {
+test('home stat strip shows cards due and opens the Study tab', async () => {
   const item = await itemWithEnrichment();
   const n = nav() as { navigate: jest.Mock };
   const first = wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
   expect(await screen.findByText("Today's digest")).toBeTruthy();
-  expect(screen.queryByText(/cards? due/)).toBeNull();
+  expect(screen.getByLabelText('0 cards due')).toBeTruthy();
   first.unmount();
   await makeCards(item.id);
   wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
-  fireEvent.press(await screen.findByRole('button', { name: '2 flashcards due. Review' }));
-  expect(n.navigate).toHaveBeenCalledWith('Review');
+  fireEvent.press(await screen.findByRole('button', { name: '2 cards due' }));
+  expect(n.navigate).toHaveBeenCalledWith('Main', { screen: 'Study' });
 });
 
 test('collections: suggested smart collection with ✨ badge, live count and Study', async () => {

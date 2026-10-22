@@ -125,7 +125,7 @@ export function VideoCard({ item, onPress, onLongPress, selected, timezone, acti
         )}
         <View style={{ position: 'absolute', top: space.sm, left: space.sm }}><PlatformBadge source={item.sourceType} onMedia /></View>
         {working ? (
-          <View style={{ position: 'absolute', bottom: space.sm, left: space.sm, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 }}>
+          <View style={{ position: 'absolute', bottom: space.sm, left: space.sm, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.scrim, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 }}>
             <ActivityIndicator size="small" color="#fff" />
             <T v="caption" color="#fff">{STATUS_LABELS[item.status]}</T>
           </View>
@@ -167,7 +167,7 @@ export function VideoTile({ item, onPress, onLongPress, selected, actions }: { i
         )}
         <View style={{ position: 'absolute', top: 6, left: 6 }}><PlatformBadge source={item.sourceType} onMedia /></View>
         {item.status !== 'READY' ? (
-          <View style={{ position: 'absolute', bottom: 6, left: 6, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}>
+          <View style={{ position: 'absolute', bottom: 6, left: 6, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.scrim, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}>
             {isPending(item.status) ? <ActivityIndicator size="small" color="#fff" /> : <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: c[dot.tone] }} />}
             <T v="caption" color="#fff">{dot.label}</T>
           </View>

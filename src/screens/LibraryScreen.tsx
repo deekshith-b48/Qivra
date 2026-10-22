@@ -16,10 +16,11 @@ import { getRepo } from '../services/db';
 import { emit, subscribe } from '../services/events';
 import { generateReport } from '../services/reports';
 import { updateSettings } from '../services/settings';
-import { Banner, Button, Chip, EmptyState, IconButton, Loading, Sheet, Snackbar, T } from '../ui/components';
+import { Backdrop, Banner, Button, Chip, CircleButton, EmptyState, IconButton, Loading, Sheet, Snackbar, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard, VideoCard, VideoTile } from '../ui/ItemCard';
 import { SwipeRow, type SwipeAction } from '../ui/SwipeRow';
+import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 import { Segmented } from '../ui/media';
 import { SearchResults } from '../ui/SearchResults';
 import { VoiceSheet } from '../ui/VoiceSheet';
@@ -61,6 +62,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [collectOpen, setCollectOpen] = useState(false);
   const { busy, run } = useAction();
+  const inset = useTabBarInset();
   // Single-item quick actions (swipe / TalkBack): deletes wait UNDO_MS so they can be undone.
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [snack, setSnack] = useState<{ message: string; undo?: () => void } | null>(null);
@@ -218,6 +220,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
+      <Backdrop />
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.lg, paddingTop: space.sm, minHeight: 56 }}>
         {selecting ? (
           <>
@@ -234,10 +237,12 @@ export default function LibraryScreen({ navigation, route }: Props) {
           </>
         ) : (
           <>
-            <T v="title" style={{ flex: 1 }} accessibilityRole="header">{archived ? 'Archive' : collectionName ?? 'Library'}</T>
-            <IconButton icon={grid ? 'list-outline' : 'grid-outline'} label={grid ? 'List view' : 'Grid view'} onPress={() => void updateSettings({ libraryView: grid ? 'list' : 'grid' })} />
-            <IconButton icon={archived ? 'albums-outline' : 'archive-outline'} label={archived ? 'Show library' : 'Show archive'} onPress={() => setArchived(!archived)} />
-            <IconButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
+            <T v="display" style={{ flex: 1 }} accessibilityRole="header">{archived ? 'Archive' : collectionName ?? 'Library'}</T>
+            <View style={{ flexDirection: 'row', gap: space.sm }}>
+              <CircleButton icon={grid ? 'list-outline' : 'grid-outline'} label={grid ? 'List view' : 'Grid view'} onPress={() => void updateSettings({ libraryView: grid ? 'list' : 'grid' })} />
+              <CircleButton icon={archived ? 'albums-outline' : 'archive-outline'} label={archived ? 'Show library' : 'Show archive'} onPress={() => setArchived(!archived)} />
+              <CircleButton icon="settings-outline" label="Settings" onPress={() => navigation.navigate('Settings')} />
+            </View>
           </>
         )}
       </View>
@@ -273,12 +278,12 @@ export default function LibraryScreen({ navigation, route }: Props) {
         </View>}
       </View>
       {error ? <View style={{ paddingHorizontal: space.lg }}><Banner tone="danger" title="Couldn't load library" body={error} action={<Button kind="outline" title="Retry" onPress={() => void load(true)} />} /></View> : null}
-      {searching ? <SearchResults query={debounced} onOpen={(id) => navigation.navigate('ItemDetail', { id })} /> : <FlatList
+      {searching ? <SearchResults query={debounced} bottomInset={inset} onOpen={(id) => navigation.navigate('ItemDetail', { id })} /> : <FlatList
         key={grid ? 'grid' : 'list'}
         data={visible}
         numColumns={grid ? 2 : 1}
         keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: grid ? space.lg - space.xs : space.lg, paddingBottom: 96 }}
+        contentContainerStyle={{ padding: grid ? space.lg - space.xs : space.lg, paddingBottom: inset + space.lg }}
         renderItem={({ item }) => {
           const onPress = () => (selecting ? setSelected((s) => { const n = new Set(s); n.has(item.id) ? n.delete(item.id) : n.add(item.id); return n; }) : navigation.navigate('ItemDetail', { id: item.id }));
           const onLongPress = () => setSelected((s) => new Set(s).add(item.id));
@@ -368,7 +373,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
         <Button kind="text" title="Manage collections" onPress={() => { setCollectOpen(false); navigation.navigate('Collections'); }} />
       </Sheet>
       {busy ? <View style={{ position: 'absolute', top: 0, left: 0, right: 0 }}><Loading label="Working" /></View> : null}
-      <Snackbar message={snack?.message ?? null} actionLabel={snack?.undo ? 'Undo' : undefined} onAction={snack?.undo} />
+      <Snackbar bottom={inset} message={snack?.message ?? null} actionLabel={snack?.undo ? 'Undo' : undefined} onAction={snack?.undo} />
     </SafeAreaView>
   );
 }
