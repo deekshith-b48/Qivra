@@ -96,11 +96,22 @@ async def verify_token(request: Request, x_api_key: str = Header(None, descripti
         )
     return actual_token
 
+
+async def require_laptop(request: Request):
+    """Qivra: destructive legacy routes only answer requests made on this machine, never a paired phone."""
+    services = getattr(request.app.state, "qivra", None)
+    if services is not None:
+        from qivra.security import is_owner_request
+        if not is_owner_request(request, services.config):
+            raise HTTPException(status_code=403, detail="This action is only allowed on the server's own machine.")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="SuperBrain",
     description="AI-powered Instagram content analysis with caching",
-    version="1.02"
+    version="1.02",
+    # Qivra: no public API docs; they listed every route to anyone on the network.
+    docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 # CORS configuration
@@ -1348,7 +1359,7 @@ async def delete_queue_item(shortcode: str, token: str = Depends(verify_token)):
 # Reset endpoints (admin only)
 # ─────────────────────────────────────────────────────────────────
 
-@app.post("/reset/api-token")
+@app.post("/reset/api-token", dependencies=[Depends(require_laptop)])
 async def reset_api_token(token: str = Depends(verify_token)):
     """
     Reset the API token. A new token will be generated.
@@ -1378,7 +1389,7 @@ async def reset_api_token(token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/reset/database")
+@app.post("/reset/database", dependencies=[Depends(require_laptop)])
 async def reset_database(
     token: str = Depends(verify_token),
     confirm: str = Body(..., description="Must be 'DELETE_ALL' to confirm")
@@ -1993,7 +2004,5 @@ async def delete_instagram_credentials(token: str = Depends(verify_token)):
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting SuperBrain API...")
-    print("📖 API Docs: http://localhost:5000/docs")
-    print("🔍 Interactive: http://localhost:5000/redoc")
     # Qivra: bind to loopback by default. Use `python -m qivra serve --lan` for LAN pairing.
     uvicorn.run("api:app", host="127.0.0.1", port=5000, reload=False)

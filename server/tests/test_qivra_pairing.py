@@ -192,3 +192,17 @@ def test_pairing_secrets_are_not_logged(env, capsys, caplog):
     out = capsys.readouterr()
     logs = caplog.text + out.out + out.err
     assert token not in logs and ch["pairing_id"] not in logs
+
+
+def test_security_events_are_logged_without_secrets(tmp_path, caplog):
+    caplog.set_level("INFO")
+    env = Env(tmp_path, pairing_global_fail_limit=2, pairing_ip_limit=100)
+    token, device = env.pair("Pixel")
+    env.owner.post(f"/api/v1/devices/{device['id']}/revoke")
+    ch = env.challenge()
+    for _ in range(3):
+        env.phone.post("/api/v1/pairing/complete", json={"pairing_id": "ZZZZZZZZ"})
+    log = caplog.text
+    assert "Paired device 'Pixel'" in log and f"Device {device['id']} revoked by the server owner" in log
+    assert "all open access IDs were invalidated" in log
+    assert token not in log and "qv1_" not in log and ch["pairing_id"] not in log

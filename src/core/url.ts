@@ -169,11 +169,3 @@ export function analyzeUrl(raw: string): UrlInfo | null {
   };
 }
 
-export function platformName(url: string): string {
-  const info = analyzeUrl(url);
-  if (!info) return 'Link';
-  if (info.sourceType !== 'web') return SOURCE_LABELS[info.sourceType];
-  const parts = info.host.split('.');
-  const root = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
-  return root ? root.charAt(0).toUpperCase() + root.slice(1) : 'Web';
-}

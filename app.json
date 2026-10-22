@@ -2,7 +2,7 @@
   "expo": {
     "name": "Qivra",
     "slug": "qivra",
-    "version": "1.9.1",
+    "version": "1.9.2",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -23,7 +23,7 @@
     },
     "android": {
       "package": "com.qivra.app",
-      "versionCode": 14,
+      "versionCode": 15,
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

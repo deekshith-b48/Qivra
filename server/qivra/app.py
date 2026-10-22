@@ -39,7 +39,7 @@ def create_app(config: QivraConfig | None = None, *, include_legacy: bool = True
         import api as legacy  # SuperBrain app: legacy routes + analysis queue worker
         app = legacy.app
     else:
-        app = FastAPI(title="Qivra")
+        app = FastAPI(title="Qivra", docs_url=None, redoc_url=None, openapi_url=None)
 
     services = QivraServices(cfg)
     app.state.qivra = services

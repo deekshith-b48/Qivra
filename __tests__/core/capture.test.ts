@@ -1,4 +1,4 @@
-import { analyzeUrl, extractUrls, platformName } from '../../src/core/url';
+import { analyzeUrl, extractUrls } from '../../src/core/url';
 import { normalizeShare, requestsFromText, safeFileName, type ShareEnvelope } from '../../src/core/share';
 import { checkServerUrl, isPrivateHost } from '../../src/core/net';
 
@@ -39,11 +39,6 @@ describe('URL normalisation and source detection', () => {
 
   test('extractUrls trims punctuation and dedupes', () => {
     expect(extractUrls('see https://a.dev/x, and https://a.dev/x. also (https://b.dev)')).toEqual(['https://a.dev/x', 'https://b.dev']);
-  });
-
-  test('platformName', () => {
-    expect(platformName('https://youtu.be/dQw4w9WgXcQ')).toBe('YouTube');
-    expect(platformName('https://blog.medium.com/x')).toBe('Medium');
   });
 });
 

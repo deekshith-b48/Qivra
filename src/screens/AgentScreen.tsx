@@ -15,7 +15,7 @@ import { getRepo } from '../services/db';
 import { generateReport } from '../services/reports';
 import { type AskMode, AssistantMessage, Composer, SourcesSheet, StreamingMessage, UserBubble } from '../ui/chat/ChatParts';
 import { Backdrop, Banner, Button, IconButton, Sheet, T } from '../ui/components';
-import { confirm, useQuery } from '../ui/hooks';
+import { confirm, useAction, useQuery } from '../ui/hooks';
 import { radius, space, useTheme } from '../ui/theme';
 import { useAiInfo, useSettings } from '../ui/useSettings';
 import { VoiceSheet } from '../ui/VoiceSheet';
@@ -38,6 +38,7 @@ interface Live {
 
 export default function AgentScreen({ navigation, route }: Props) {
   const { c } = useTheme();
+  const { run } = useAction();
   const ai = useAiInfo();
   const settings = useSettings();
   const [convId, setConvId] = useState<string | null>(route.params?.conversationId ?? null);
@@ -218,7 +219,7 @@ export default function AgentScreen({ navigation, route }: Props) {
               </View>
               {!scopeId ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
-                  <Button kind="text" title="Today's report" icon="document-text-outline" onPress={() => void generateReport({ kind: 'daily', useAi: ai?.enabled }).then((r) => navigation.navigate('ReportDetail', { id: r.id }))} />
+                  <Button kind="text" title="Today's report" icon="document-text-outline" onPress={() => void run(async () => { const r = await generateReport({ kind: 'daily', useAi: ai?.enabled }); navigation.navigate('ReportDetail', { id: r.id }); }, "Couldn't make the report")} />
                   <Button kind="text" title="All reports" icon="folder-open-outline" onPress={() => navigation.navigate('Reports')} />
                 </View>
               ) : null}
@@ -274,7 +275,7 @@ export default function AgentScreen({ navigation, route }: Props) {
               <T v="small" numberOfLines={1} style={{ fontWeight: '600' }}>{cv.title}</T>
               <T v="caption" color="textFaint">{formatLocal(cv.updatedAt, settings?.timezone ?? 'UTC', { dateStyle: 'medium', timeStyle: 'short' })}</T>
             </Pressable>
-            <IconButton icon="trash-outline" label={`Delete ${cv.title}`} onPress={() => void (async () => { await (await getRepo()).deleteConversation(cv.id); if (convId === cv.id) setConvId(null); await convs.reload(); })()} />
+            <IconButton icon="trash-outline" label={`Delete ${cv.title}`} onPress={() => void run(async () => { await (await getRepo()).deleteConversation(cv.id); if (convId === cv.id) setConvId(null); await convs.reload(); })} />
           </View>
         ))}
         {!convs.data?.length ? <T color="textMuted">No chats yet.</T> : null}

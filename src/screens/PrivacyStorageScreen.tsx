@@ -27,7 +27,7 @@ export default function PrivacyStorageScreen({ navigation }: RootProps<'PrivacyS
     }
     return {
       items: await repo.countWhere('1 = 1'),
-      transcripts: Number((await repo.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM transcripts'))?.n ?? 0),
+      transcripts: await repo.transcriptCount(),
       reports: (await repo.listReports(1000)).length,
       mediaMb: (mediaBytes / 1048576).toFixed(1),
     };

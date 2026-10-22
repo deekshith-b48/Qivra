@@ -118,7 +118,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
 
   const facets = useQuery(async (repo) => ({
     tags: (await repo.allTags()).slice(0, 30),
-    languages: (await repo.db.all<{ language: string }>(`SELECT DISTINCT language FROM items WHERE deleted = 0 AND language != 'und'`)).map((r) => r.language),
+    languages: await repo.itemLanguages(),
     collections: await repo.listCollections(),
     counts: {
       videos: await repo.countItems({ sourceTypes: VIDEO_SOURCES, archived, collectionId }),

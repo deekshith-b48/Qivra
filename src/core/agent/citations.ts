@@ -39,6 +39,3 @@ export function validateCitations(answer: string, validIds: string[]): CitationC
   return { text, cited, warnings };
 }
 
-export function formatCitationLabel(sid: string, title: string, timestamp?: string): string {
-  return `[${sid}] ${title}${timestamp ? ` @ ${timestamp}` : ''}`;
-}

@@ -1,3 +1,6 @@
 # Optional: local semantic search ("Related items", meaning-based search) on this machine.
 # Apache-2.0; ONNX Runtime, no GPU, no API key. The model (~240 MB) downloads once into data/models.
 fastembed>=0.5,<0.8
+# shortcut: fastembed caps pillow<13 (it only needs Pillow for image models; Qivra embeds text), but
+# pillow<13 has known CVEs. After installing, run: .venv/bin/pip install -U "pillow>=13.0.0"
+# (pip warns about the cap; text embeddings and OCR are tested on 13). Drop this once fastembed allows 13.

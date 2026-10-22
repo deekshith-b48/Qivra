@@ -45,3 +45,21 @@ def test_legacy_routes_get_host_validation(legacy_env):
     app, _, _ = legacy_env
     evil = TestClient(app, base_url="http://rebind.attacker.test:5000", client=(PHONE_IP, 3))
     assert evil.get("/ping").status_code == 421
+
+
+def test_api_docs_are_not_served(legacy_env):
+    _, owner, phone = legacy_env
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert owner.get(path).status_code == 404 and phone.get(path).status_code == 404
+    assert phone.get("/api/health").headers["x-content-type-options"] == "nosniff"
+
+
+def test_legacy_resets_only_from_the_laptop(legacy_env):
+    _, owner, phone = legacy_env
+    ch = owner.post("/api/v1/pairing/challenges").json()
+    token = phone.post("/api/v1/pairing/complete", json={"pairing_id": ch["pairing_id"]}).json()["device_token"]
+    # A wrong confirm word: even if the guard failed, nothing would be wiped.
+    assert phone.post("/reset/database", headers=auth(token), json="NO").status_code == 403
+    assert phone.post("/reset/api-token", headers=auth(token)).status_code == 403
+    # On the laptop the guard lets it through to the confirmation check.
+    assert owner.post("/reset/database", headers={"X-API-Key": legacy.API_TOKEN}, json="NO").status_code == 400

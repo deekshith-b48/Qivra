@@ -62,7 +62,7 @@ def parse_html_metadata(html: str, base_url: str) -> dict:
     try:
         p.feed(html)
     except Exception:
-        pass
+        pass  # malformed HTML: keep whatever was parsed before the error
     m = p.meta
     image = m.get("og:image") or m.get("twitter:image") or ""
     return {

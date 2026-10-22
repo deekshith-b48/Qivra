@@ -23,7 +23,15 @@
 | Data | `src/db/*` | `SqlDriver` interface; expo-sqlite on device, `node:sqlite` in tests — same SQL, same FTS5. |
 | Sync | `src/sync/engine.ts` | Depends only on `Repo` + `QivraClient`; integration-tested against the real Python server. |
 | Services | `src/services/*` | Device glue: file system, secure store, notifications, background task, job runner. |
-| UI | `src/screens/*`, `src/ui/*`, `App.tsx` | Read via `useQuery` (re-runs on change events), write via services/repo. |
+| UI | `src/screens/*`, `src/ui/*`, `App.tsx` | Read via `useQuery` (re-runs on change events), write via services/repo. No SQL in screens. |
+
+## Conventions
+
+- **State:** the SQLite database is the single source of truth. Writers call `emit('<topic>')` (`src/services/events.ts`); screens read with `useQuery(fn, [topics])` (`src/ui/hooks.ts`) and re-run when a topic fires. Settings use `useSettings` / `useAiInfo`. No separate state library: it would duplicate the database.
+- **Errors:** user actions go through `useAction().run` (shows an alert, never fails silently). A render crash is caught by `ErrorBoundary` in `App.tsx`. Background jobs record `last_error_code` and retry with backoff; network errors are `ApiError` with a `kind` (`src/core/api.ts`).
+- **Config and secrets:** server settings and keys live in `server/qivra.env` (git-ignored; see `qivra.env.example`), read by `server/qivra/config.py`. The phone never holds a server-side key; its own optional AI key is in the secure store (`src/services/secure.ts`).
+- **Naming:** React components and screens are `PascalCase.tsx` (one main component per file); modules with several exports are `camelCase.ts(x)` (`components.tsx`, `theme.tsx`); tests mirror the source path under `__tests__/core|db|ui`. Python modules are `snake_case.py`.
+- **API:** all phone ↔ server calls are versioned under `/api/v1/*` (`server/qivra/api_v1.py`), go through `QivraClient` (`src/core/api.ts`), and use one error shape: `{"error": {"code", "message"}}`. Add a route by adding it to `api_v1.py`, a method to `QivraClient`, and a test in `server/tests/`.
 
 ## Local data model (`qivra.db`, migration v1 in `src/db/schema.ts`)
 
@@ -43,7 +51,7 @@ Runners: app start/resume, after each capture, and a WorkManager periodic task (
 
 ## Agent
 
-`src/core/agent/agent.ts`: deterministic plan (date intent in the user's timezone, topic terms, compare/repos/tools/plan/gaps intents) → read-only evidence gathering (FTS chunks, items by date, optional semantic search with reciprocal-rank fusion) → numbered sources → either a model answer (OpenAI-compatible tool calling limited to read tools; write tools become proposals) or a retrieval-only answer. Citations are validated against the provided sources.
+`src/core/agent/agent.ts`: deterministic plan (date intent in the user's timezone, topic terms, compare/repos/tools/plan/gaps intents) → read-only evidence gathering (FTS chunks, items by date, optional semantic search over stored embeddings) → numbered sources → either a model answer (OpenAI-compatible tool calling limited to read tools; write tools become proposals) or a retrieval-only answer. Citations are validated against the provided sources.
 
 ## Native code added
 
@@ -51,7 +59,7 @@ Only `plugins/android/ShareActivity.kt` and `plugins/android/QivraShareTaskServi
 
 ## Server
 
-`server/qivra/`: `config` · `store` (qv_* tables, migrations, legacy mirror) · `pairing` (codes, credentials, rate limiter) · `security` (Host/Origin/size guards, auth) · `api_v1` · `jobs` · `knowledge` (retrieval, agent, reports) · `transcripts` · `metadata` · `ai` · `netinfo` · `__main__` (launcher). API contract: `docs/LOCAL_SERVER_AND_QR_PAIRING.md`.
+`server/qivra/`: `config` · `store` (qv_* tables, migrations, legacy mirror) · `pairing` (codes, credentials, rate limiter) · `security` (Host/Origin/size guards, auth, headers) · `api_v1` · `jobs` · `knowledge` (retrieval, agent, reports) · `transcripts` · `transcribers` (Groq / local Whisper) · `media` (downloads) · `video_ocr` · `embeddings` (local fastembed) · `ai_gateway` (AI proxy; the key stays on the laptop) · `metadata` · `ai` · `netinfo` · `__main__` (launcher). The old SuperBrain app (`server/api.py`, `main.py`, `core/`, `analyzers/`, `instagram/`) is still mounted for the SuperBrain Android app and its database mirror; Qivra code imports only `core.model_router`, `analyzers.audio_transcribe` and `analyzers.caption` from it. API contract: `docs/LOCAL_SERVER_AND_QR_PAIRING.md`.
 
 ## Supported Android versions
 

@@ -1,5 +1,18 @@
 # Test results
 
+## 1.9.2 (2026-10-22): security hardening and code cleanup
+
+- Release APK: `dist/Qivra-1.9.2-release.apk`, version code 15.
+- `tsc` passes. Jest: 293 passed, 4 live tests skipped. Server pytest: 131 passed, 9 live skipped; live OCR and embedding tests pass on Pillow 13.0.0.
+- New tests (each checked to fail on the old code):
+  - API docs (`/docs`, `/redoc`, `/openapi.json`) are not served; responses carry `nosniff`.
+  - Legacy `/reset/database` and `/reset/api-token` refuse a paired phone's token (403) and still work from the laptop.
+  - Pairing, revocation and the brute-force lockout are logged without codes or tokens.
+  - A render crash shows an error screen with Retry instead of closing the app.
+- Live server check (LAN address): `/docs`, `/redoc`, `/openapi.json` → 404; unauthenticated `/reset/database` → 403.
+- Dependencies: Pillow 11.3.0 → 13.0.0 (58 advisories). npm non-breaking audit fixes: 37 → 28 findings, critical removed; the rest are Expo/React Native build tools that need an SDK upgrade.
+- Emulator: the release APK with the updated npm lockfile opens to the Home screen with no crash.
+
 ## 1.9.1 (2026-10-22): privacy and safety fixes from a code audit
 
 - Release APK: `dist/Qivra-1.9.1-release.apk`, version code 14. No new dependencies.

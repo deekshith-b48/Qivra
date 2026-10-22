@@ -316,6 +316,16 @@ export class Repo {
     );
   }
 
+  /** Languages present in the library (for the Library filter), excluding "unknown". */
+  async itemLanguages(): Promise<string[]> {
+    const rows = await this.db.all<{ language: string }>(`SELECT DISTINCT language FROM items WHERE deleted = 0 AND language != 'und'`);
+    return rows.map((r) => r.language);
+  }
+
+  async transcriptCount(): Promise<number> {
+    return Number((await this.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM transcripts'))?.n ?? 0);
+  }
+
   async tagCountsInRange(startIso: string, endIso: string): Promise<{ tag: string; count: number }[]> {
     return this.db.all(
       `SELECT t.tag AS tag, COUNT(*) AS count FROM item_tags t JOIN items i ON i.id = t.item_id

@@ -106,6 +106,3 @@ export function TimestampPill({ label, onPress }: { label: string; onPress?: () 
   return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Play from ${label}`} hitSlop={8}>{body}</Pressable>;
 }
 
-export function MediaFrame({ children }: { children: React.ReactNode }) {
-  return <View style={{ borderRadius: radius.lg, overflow: 'hidden' }}>{children}</View>;
-}

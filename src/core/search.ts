@@ -96,15 +96,6 @@ export function orderBySql(sort: SortKey, alias = 'i'): string {
   }
 }
 
-/** Reciprocal-rank fusion of keyword and (optional) semantic result lists. */
-export function reciprocalRankFusion(lists: string[][], k = 60): { id: string; score: number }[] {
-  const scores = new Map<string, number>();
-  for (const list of lists) {
-    list.forEach((id, rank) => scores.set(id, (scores.get(id) ?? 0) + 1 / (k + rank + 1)));
-  }
-  return [...scores.entries()].map(([id, score]) => ({ id, score })).sort((a, b) => b.score - a.score);
-}
-
 export function cosine(a: number[], b: number[]): number {
   if (a.length !== b.length || !a.length) return 0;
   let dot = 0;

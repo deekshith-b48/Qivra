@@ -69,6 +69,9 @@ def install_security_middleware(app, get_cfg) -> None:
                     "PAYLOAD_TOO_LARGE", f"Request body exceeds {cfg.json_max_bytes} bytes."))
         response = await call_next(request)
         response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 
 

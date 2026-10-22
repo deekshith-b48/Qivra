@@ -32,7 +32,7 @@ instagrapi>=2.0.0
 
 # ── Computer Vision ───────────────────────────────────────────────────────────
 opencv-python-headless>=4.9.0.80
-Pillow>=10.0.0
+Pillow>=13.0.0
 
 # ── Remote Access (Networking) ──────────────────────────────────────────────
 pyngrok>=7.1.5

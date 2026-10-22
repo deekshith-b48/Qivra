@@ -2,7 +2,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import type React from 'react';
+import React from 'react';
 import {
   ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
   type StyleProp, type TextInputProps, type TextProps, type TextStyle, type ViewStyle,
@@ -313,6 +313,22 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return <Banner tone="danger" title="Something went wrong" body={message} action={onRetry ? <Button kind="outline" title="Retry" onPress={onRetry} /> : undefined} />;
+}
+
+/** Catches a crash while rendering a screen, so one bad item shows an error instead of closing the app. */
+export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <Screen>
+        <ErrorState message={this.state.error.message} onRetry={() => this.setState({ error: null })} />
+      </Screen>
+    );
+  }
 }
 
 /** Provenance badge: where a piece of content came from. */

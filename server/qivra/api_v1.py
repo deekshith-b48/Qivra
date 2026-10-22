@@ -7,6 +7,7 @@ owner request from loopback. Errors use {"error": {"code", "message"}}.
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from pathlib import Path
@@ -25,6 +26,7 @@ from .store import Device
 from .transcripts import TranscriptParseError, find_passages, parse_transcript, segments_to_text
 from .util import is_valid_entity_id, now_iso, sha256_hex
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MEDIA_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac", ".mp4", ".mov", ".webm", ".mkv",
@@ -166,6 +168,8 @@ def revoke_device(request: Request, device_id: str, caller: Device | None = Depe
     if svc.store.get_device(device_id) is None:
         raise ApiError(404, "NOT_FOUND", "Unknown device.")
     revoked = svc.store.revoke_device(device_id)
+    if revoked:
+        logger.warning("Device %s revoked by %s", device_id, "the server owner" if owner else "itself")
     return {"revoked": True, "already_revoked": not revoked, "device_id": device_id}
 
 

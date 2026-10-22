@@ -3,7 +3,7 @@ import { chunkSegments, detectFormat, formatTimestamp, parseTranscript, Transcri
 import { detectLanguage, isValidLanguageCode } from '../../src/core/language';
 import { backoffMs, canTransition, InvalidTransitionError, transition } from '../../src/core/status';
 import { detectDestructive, extractCommands, extractiveSummary, extractRepos, extractTools, localEnrich } from '../../src/core/enrich';
-import { buildFilterSql, buildFtsQuery, cosine, reciprocalRankFusion, snippet } from '../../src/core/search';
+import { buildFilterSql, buildFtsQuery, cosine, snippet } from '../../src/core/search';
 
 const SRT = `1
 00:00:01,000 --> 00:00:04,500
@@ -161,8 +161,7 @@ describe('search helpers', () => {
     expect(where).not.toContain('youtube');
     expect(params).toEqual([0, 'youtube', 'A', 'ai', 'c1']);
   });
-  test('RRF and cosine', () => {
-    expect(reciprocalRankFusion([['a', 'b'], ['b', 'c']])[0].id).toBe('b');
+  test('cosine', () => {
     expect(cosine([1, 0], [1, 0])).toBeCloseTo(1);
     expect(cosine([1, 0], [0, 1])).toBeCloseTo(0);
   });

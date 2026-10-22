@@ -37,7 +37,7 @@ import { CaptureSheet } from './src/ui/CaptureSheet';
 import { useQuery } from './src/ui/hooks';
 import { FloatingTabBar, type TabSpec } from './src/ui/nav/FloatingTabBar';
 import { dueCount } from './src/services/flashcards';
-import { Banner, Loading, Screen } from './src/ui/components';
+import { Banner, ErrorBoundary, Loading, Screen } from './src/ui/components';
 import { ThemeProvider, useTheme } from './src/ui/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -157,7 +157,9 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <Root />
+          <ErrorBoundary>
+            <Root />
+          </ErrorBoundary>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

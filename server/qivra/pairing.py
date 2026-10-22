@@ -14,6 +14,7 @@ invalidates every open challenge when exceeded.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
@@ -24,6 +25,8 @@ from .config import QivraConfig
 from .store import Device, QivraStore
 from .util import (format_pairing_code, iso, new_device_token, new_pairing_code, normalize_pairing_code,
                    now_iso, utc_now)
+
+logger = logging.getLogger(__name__)
 
 
 class PairingError(Exception):
@@ -125,6 +128,7 @@ class PairingService:
         device = self.store.create_device(name, (platform or "")[:20] or None, token, client_ip)
         self.store.attach_pairing_device(code, device.id)
         self.limiter.reset(ip_key)
+        logger.info("Paired device %r (%s) from %s", device.name, device.id, client_ip or "unknown")  # never the code or token
         return device, token
 
     def _record_failure(self) -> None:
@@ -132,6 +136,7 @@ class PairingService:
         ok = self.limiter.hit("pair-fail-global", cfg.pairing_global_fail_limit, cfg.pairing_global_fail_window_s)
         if not ok:
             # Too many wrong codes across all clients: burn every open challenge.
+            logger.warning("Too many failed pairing attempts; all open access IDs were invalidated")
             self.store.invalidate_active_pairings()
             self.limiter.reset("pair-fail-global")
 
