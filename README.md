@@ -26,6 +26,16 @@ A private, local-first knowledge vault for Android. Share a reel, video, web pag
   <img src="docs/screenshots/dev.jpg" width="19%" alt="Dev mode" />
 </p>
 
+## Watch the overview
+
+<p align="center">
+  <a href="https://github.com/deekshith-b48/Qivra/releases/download/v2.0.0/Qivra-2.0.0-overview.mp4">
+    <img src="docs/screenshots/overview-poster.jpg" width="260" alt="Play the 60-second Qivra overview video" />
+  </a>
+  <br />
+  <sub><b><a href="https://github.com/deekshith-b48/Qivra/releases/download/v2.0.0/Qivra-2.0.0-overview.mp4">▶ Play the 60-second overview</a></b> · 1080×1920 MP4 with voiceover and captions</sub>
+</p>
+
 ## Why Qivra
 
 Saved posts pile up and are never seen again. Qivra keeps them **useful**: every link becomes a transcript, a one-line summary, timestamped key moments and highlighted keywords, all stored in a SQLite database **on your phone**. You can search it offline and ask questions that are answered from your own library, with citations.
