@@ -12,6 +12,33 @@ export interface ChunkVector {
   vector: number[];
 }
 
+/**
+ * Search phrases from the model's reply to a query-expansion prompt: the first JSON array
+ * of strings, trimmed, 1–60 characters, without the query itself or repeats, at most 6.
+ */
+export function parseExpansion(reply: string, query: string): string[] {
+  const m = reply.match(/\[[\s\S]*?\]/);
+  if (!m) return [];
+  let arr: unknown;
+  try {
+    arr = JSON.parse(m[0]);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set([query.trim().toLowerCase()]);
+  const out: string[] = [];
+  for (const x of arr) {
+    if (typeof x !== 'string') continue;
+    const t = x.trim();
+    if (!t || t.length > 60 || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+    if (out.length === 6) break;
+  }
+  return out;
+}
+
 /** Scores at or above this mean "very likely the same thing" (re-shared or duplicate). */
 export const NEAR_DUPLICATE = 0.93;
 /** Below this, items are not shown as related. */

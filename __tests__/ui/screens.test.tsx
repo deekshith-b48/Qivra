@@ -44,7 +44,7 @@ test('onboarding setup: notifications ask for permission; Connect opens the serv
   fireEvent.press(screen.getByRole('button', { name: 'Notifications: Allow' }));
   expect(await screen.findByRole('button', { name: 'Notifications: Allowed' })).toBeTruthy();
   expect(ask).toHaveBeenCalled();
-  fireEvent.press(screen.getByRole('button', { name: 'Connect your laptop: Connect' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Optional: your own server: Set up' }));
   await waitFor(() => expect(n.reset).toHaveBeenCalledWith({ index: 1, routes: [{ name: 'Main' }, { name: 'ConnectServer' }] }));
 });
 
@@ -143,10 +143,11 @@ test('error banner offers one primary and one secondary action', async () => {
   await repo.setStatus(item.id, 'METADATA_CHECK');
   await repo.setStatus(item.id, 'NEEDS_INPUT', { code: 'SERVER_NOT_PAIRED', message: 'Pair your server.' });
   wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
-  expect(await screen.findByText('Connect your server to transcribe')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Connect server' })).toBeTruthy();
+  // Items saved before 2.1 with SERVER_NOT_PAIRED now point to the Groq key, which works without a server.
+  expect(await screen.findByText('Add your Groq key to transcribe')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Add Groq key' })).toBeTruthy();
   expect(screen.getAllByRole('button', { name: 'Import transcript' }).length).toBeGreaterThan(0);
-  for (const extra of ['Retry', 'Try server again']) expect(screen.queryByRole('button', { name: extra })).toBeNull();
+  for (const extra of ['Retry', 'Try server again', 'Try again']) expect(screen.queryByRole('button', { name: extra })).toBeNull();
 });
 
 test('ask answers from saved items without a model; sources open from the Sources sheet', async () => {

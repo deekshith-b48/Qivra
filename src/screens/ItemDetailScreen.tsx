@@ -62,6 +62,9 @@ function textKindLabel(source: string): string | null {
   return ARTICLE_SOURCES.has(source) ? 'Text' : null;
 }
 
+/** Error codes that mean "no transcriber set up" (SERVER_NOT_PAIRED is from items saved before 2.1). */
+const NEEDS_KEY = new Set(['NO_TRANSCRIBER', 'SERVER_NOT_PAIRED', 'NO_PROVIDER']);
+
 export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemDetail'>) {
   const { id } = route.params;
   const { c } = useTheme();
@@ -180,7 +183,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     const repo = await getRepo();
     if (item.status === 'CANCELLED') await repo.setStatus(id, 'METADATA_CHECK');
     for (const j of await repo.listJobs({ itemId: id, statuses: ['failed_permanent'] })) {
-      if (j.kind === 'server_transcribe_url') await repo.enqueueJob({ id: j.id, kind: j.kind, itemId: id, retry: true, maxAttempts: 4 });
+      if (j.kind === 'server_transcribe_url' || j.kind === 'cloud_transcribe') await repo.enqueueJob({ id: j.id, kind: j.kind, itemId: id, retry: true, maxAttempts: 4 });
     }
     await schedulePipeline(id);
   });
@@ -221,9 +224,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const retryA: Action = { title: 'Retry', icon: 'refresh', onPress: () => void retry() };
   const problem: { primary: Action; secondary?: Action } | null =
     item.status !== 'NEEDS_INPUT' && !isFailed(item.status) && item.status !== 'CANCELLED' ? null
-      : item.errorCode === 'SERVER_NOT_PAIRED' ? { primary: { title: 'Connect server', icon: 'qr-code-outline', onPress: () => navigation.navigate('ConnectServer') }, secondary: importT }
+      : NEEDS_KEY.has(item.errorCode ?? '') ? { primary: { title: 'Add Groq key', icon: 'key-outline', onPress: () => navigation.navigate('AiProviders') }, secondary: importT }
         : isFailed(item.status) || item.status === 'CANCELLED' ? { primary: retryA, secondary: importT }
-          : { primary: importT, secondary: connection && isVideo ? { ...retryA, title: 'Try server again' } : undefined };
+          : { primary: importT, secondary: connection && isVideo ? { ...retryA, title: 'Try server again' } : isVideo || item.sourceType === 'file' ? { ...retryA, title: 'Try again' } : undefined };
 
   const textTab = ordered.length > 0;
   const syncLabel = item.syncStatus === 'pending' ? 'Not synced yet' : item.syncStatus === 'conflicted' ? 'Sync conflict' : item.syncStatus === 'failed' ? 'Sync failed' : null;
@@ -239,7 +242,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
       <Card>
         <T v="subtitle">No transcript yet</T>
         <T v="small" color="textMuted" style={{ marginTop: 4 }}>
-          {item.status === 'TRANSCRIBING' ? 'Your server is transcribing this video.' : 'Qivra never invents a transcript. Import captions or a transcript, or let your server transcribe it.'}
+          {item.status === 'TRANSCRIBING' ? 'Transcribing this video…' : 'Qivra never invents a transcript. Import captions or a transcript, or add your Groq key to transcribe it on the phone.'}
         </T>
         {item.metadata?.description && isVideo ? <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: space.sm }} selectable /> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
@@ -523,7 +526,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         {problem ? (
           <Banner
             tone={isFailed(item.status) ? 'danger' : 'warning'}
-            title={item.errorCode === 'SERVER_NOT_PAIRED' ? 'Connect your server to transcribe' : STATUS_LABELS[item.status]}
+            title={NEEDS_KEY.has(item.errorCode ?? '') ? 'Add your Groq key to transcribe' : STATUS_LABELS[item.status]}
             body={item.errorMessage ?? undefined}
             action={<>
               <Button title={problem.primary.title} icon={problem.primary.icon} onPress={problem.primary.onPress} />

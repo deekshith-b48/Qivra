@@ -1,6 +1,21 @@
 # Test results
 
-## Unreleased (2026-10-24): Dev tab upgrades
+## 2.1.0 (2026-10-24): every feature works without a server
+
+- Release APK: `dist/Qivra-2.1.0-release.apk`, version code 18.
+
+- `tsc` passes. Jest: 363 passed, 4 live tests skipped. Server pytest unchanged (131 passed).
+- New tests:
+  - X: syndication token and URL, smallest MP4 on X's CDN picked from a real response (saved as a fixture); other hosts refused.
+  - Instagram public embed: video and caption parsed (also JSON escaped twice); other hosts refused; a blocked page gives nothing, without crashing.
+  - Groq Whisper `verbose_json`: timed segments, language names to codes, music and filler mean "no speech".
+  - Real pipeline with no server paired: an X video is transcribed through Groq with the user's key (Bearer header, the download is deleted); an Instagram reel that won't share its video finishes with its caption and sends nothing to Groq; an imported audio file is transcribed (the user's file is kept); with no key, the item asks for a Groq key instead of a server.
+  - Search by meaning without embeddings: an English query finds a Hindi reel through the rewritten query, and the rewrite is cached; expansion replies are parsed safely.
+  - Optional Gemini key: verified with a test embedding and stored on success; a rejected key stores nothing.
+- Live check (from the Mac): X's public syndication endpoint returned the post and its MP4 downloaded. Instagram could not be checked live (no public reel available to test with).
+- Fixed a flaky Library test (the Favourites list now gets 5 s to reload).
+
+## 2.1.0 (2026-10-24): Dev tab upgrades
 
 - `tsc` passes. Jest: 353 passed, 4 live tests skipped. Server pytest: 131 passed.
 - New tests:

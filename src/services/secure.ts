@@ -11,6 +11,8 @@ const OPTS: SecureStore.SecureStoreOptions = { keychainService: 'qivra' };
 export const SECRET_KEYS = {
   deviceToken: 'qivra.device_token',
   aiApiKey: 'qivra.ai_api_key',
+  /** Optional embeddings-only key (a free Gemini key) for search by meaning. */
+  embedApiKey: 'qivra.embed_api_key',
 } as const;
 
 export async function getSecret(key: (typeof SECRET_KEYS)[keyof typeof SECRET_KEYS]): Promise<string | null> {

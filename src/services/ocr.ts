@@ -85,3 +85,48 @@ export async function ocrItemImages(repo: Repo, item: Item, recognize: Recognize
   });
   return 'stored';
 }
+
+export const VIDEO_OCR_SOURCE = 'video_ocr';
+
+type Thumbnail = (uri: string, opts: { time: number; quality: number }) => Promise<{ uri: string }>;
+
+function loadThumbnailer(): Thumbnail | null {
+  try {
+    const mod = require('expo-video-thumbnails') as { getThumbnailAsync?: Thumbnail };
+    return typeof mod.getThumbnailAsync === 'function' ? mod.getThumbnailAsync : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * On-screen text of a video with no speech (captions burnt into a reel): read a frame
+ * about every 2 seconds (15 at most) with ML Kit and store the distinct lines with their
+ * timestamps as a `video_ocr` transcript. Returns false when nothing was found.
+ */
+export async function ocrVideoFrames(
+  repo: Repo, itemId: string, fileUri: string, durationMs: number,
+  recognize: Recognize | null = loadRecognizer(), thumbnail: Thumbnail | null = loadThumbnailer(),
+): Promise<boolean> {
+  if (!recognize || !thumbnail || durationMs <= 0) return false;
+  const step = Math.max(2000, Math.ceil(durationMs / 15));
+  const script = scriptForLanguage(deviceLanguage());
+  const segments: { startMs: number; endMs: number; text: string }[] = [];
+  let last = '';
+  for (let t = 500; t < durationMs; t += step) {
+    try {
+      const frame = await thumbnail(fileUri, { time: t, quality: 0.7 });
+      const text = cleanOcrText((await recognize(frame.uri, script)).text ?? '');
+      if (text && text !== last) segments.push({ startMs: t, endMs: Math.min(durationMs, t + step), text });
+      if (text) last = text;
+    } catch {
+      /* skip unreadable frames */
+    }
+  }
+  if (!segments.length) return false;
+  await repo.upsertTranscript({
+    itemId, language: detectLanguage(segments.map((s) => s.text).join(' ')).code, languageMethod: 'heuristic', kind: 'original',
+    source: VIDEO_OCR_SOURCE, provider: 'mlkit-text-recognition', format: 'txt', segments,
+  });
+  return true;
+}

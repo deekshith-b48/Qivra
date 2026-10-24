@@ -4,6 +4,7 @@ import { Alert, View } from 'react-native';
 import { LANGUAGES } from '../core/language';
 import { VOICE_MODELS, type VoiceModel } from '../core/voiceModels';
 import type { RootProps } from '../navigation/types';
+import { cloudWhisperReady } from '../services/cloudWhisper';
 import { deleteModel, downloadModel, modelPath } from '../services/voice';
 import { updateSettings } from '../services/settings';
 import { Banner, Button, Card, Chip, Header, Screen, Section, T, ToggleRow } from '../ui/components';
@@ -16,6 +17,7 @@ export default function VoiceSettingsScreen({ navigation }: RootProps<'VoiceSett
   const s = useSettings();
   const { connection } = useConnection();
   const [progress, setProgress] = useState<Record<string, number>>({});
+  const groq = useQuery(() => cloudWhisperReady(), ['settings']);
   const installed = useQuery(async () => {
     const out: Record<string, boolean> = {};
     for (const m of VOICE_MODELS) out[m.id] = !!(await modelPath(m));
@@ -104,10 +106,13 @@ export default function VoiceSettingsScreen({ navigation }: RootProps<'VoiceSett
         </View>
       </Section>
 
-      <Section title="Voice notes on your server">
+      <Section title="Long voice notes">
+        {groq.data ? (
+          <ToggleRow title="Transcribe voice notes with Groq" subtitle="Sends the recording to Groq Whisper with your key. Up to 12 minutes instead of 5, and no model download needed. Dictation uses the phone model when one is downloaded." value={!!s.voice.preferCloud} onChange={(v) => void updateSettings({ voice: { ...s.voice, preferCloud: v } })} />
+        ) : <Banner tone="info" title="Add your Groq key for longer notes" body="With your own free Groq key, voice notes of up to 12 minutes are transcribed by Groq Whisper." action={<Button kind="outline" title="Add key" onPress={() => navigation.navigate('AiProviders')} />} />}
         {connection ? (
-          <ToggleRow title="Transcribe voice notes on my server" subtitle="Uploads the recording to your paired Qivra server (transcribe-anything with MLX on Apple Silicon, or faster-whisper). Dictation always stays on the phone." value={s.voice.preferServer} onChange={(v) => void updateSettings({ voice: { ...s.voice, preferServer: v } })} />
-        ) : <Banner tone="info" title="No server connected" body="Connect your server to transcribe long recordings with transcribe-anything on your laptop." action={<Button kind="outline" title="Connect" onPress={() => navigation.navigate('ConnectServer')} />} />}
+          <ToggleRow title="Transcribe voice notes on my server" subtitle="Optional: uploads the recording to your paired Qivra server instead (keeps audio on your own computer)." value={s.voice.preferServer} onChange={(v) => void updateSettings({ voice: { ...s.voice, preferServer: v } })} />
+        ) : null}
       </Section>
     </Screen>
   );

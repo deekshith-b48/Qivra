@@ -155,6 +155,7 @@ export type JobKind =
   | 'server_transcribe'
   | 'server_transcribe_url'
   | 'server_enrich'
+  | 'cloud_transcribe'
   | 'model_enrich'
   | 'embed'
   | 'sync'

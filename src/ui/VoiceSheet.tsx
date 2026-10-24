@@ -9,7 +9,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Pressable, View } from 'react-native';
 import { formatTimestamp } from '../core/transcripts';
 import {
-  deleteRecording, ensureMicPermission, ModelMissingError, saveVoiceNote, startRecording, transcribeOnDevice, voiceModeAvailable,
+  CLOUD_MAX_RECORDING_MS, deleteRecording, ensureMicPermission, ModelMissingError, saveVoiceNote, startRecording, transcribeInCloud, transcribeOnDevice, voiceModeAvailable,
   type Recording, type VoiceMode,
 } from '../services/voice';
 import { Banner, Button, Sheet, T } from './components';
@@ -57,14 +57,16 @@ export function VoiceSheet({
       try {
         const a = await voiceModeAvailable();
         if (key !== session.current) return;
-        const mode = purpose === 'dictate' ? (a.device ? 'device' : null) : a.preferred;
+        const mode = purpose === 'dictate' ? (a.device ? 'device' : a.cloud ? 'cloud' : null) : a.preferred;
         if (!mode) {
           setStage({ k: 'error', action: 'settings', message: purpose === 'dictate'
-            ? `Download ${a.model.label} (${a.model.sizeMb} MB) in Voice & dictation to dictate on this phone.`
-            : `Download ${a.model.label} (${a.model.sizeMb} MB) for private transcription, or enable voice notes on your paired server in Voice & dictation.` });
+            ? `Download ${a.model.label} (${a.model.sizeMb} MB) in Voice & dictation, or add your Groq key in AI models, to dictate.`
+            : `Download ${a.model.label} (${a.model.sizeMb} MB) for private transcription on this phone, or add your Groq key in Settings → AI models.` });
           return;
         }
-        setHint(mode === 'device' ? `${a.model.label} on this phone. Audio stays here during transcription. Up to 5 minutes.` : 'Recording will be sent to your Qivra server for transcription. Up to 5 minutes.');
+        setHint(mode === 'device' ? `${a.model.label} on this phone. Audio stays here during transcription. Up to 5 minutes.`
+          : mode === 'cloud' ? 'Sent to Groq Whisper with your key for transcription. Up to 12 minutes.'
+            : 'Recording will be sent to your Qivra server for transcription. Up to 5 minutes.');
         setStage({ k: 'idle', mode });
       } catch (e) {
         if (key === session.current) setStage({ k: 'error', message: (e as Error).message });
@@ -95,7 +97,7 @@ export function VoiceSheet({
         levels.push(level);
         if (levels.length > 40) levels.shift();
         setStage((s) => (s.k === 'recording' ? { ...s, ms, levels: [...levels] } : s));
-      }, () => { if (key === session.current) void stop(mode); });
+      }, () => { if (key === session.current) void stop(mode); }, mode === 'cloud' ? CLOUD_MAX_RECORDING_MS : undefined);
       if (key !== session.current) { await recording.cancel(); return; }
       rec.current = recording;
       setStage({ k: 'recording', mode, ms: 0, levels: [] });
@@ -126,7 +128,7 @@ export function VoiceSheet({
         onClose();
         return;
       }
-      const t = await transcribeOnDevice(file.uri, (progress) => {
+      const t = mode === 'cloud' ? await transcribeInCloud(file.uri) : await transcribeOnDevice(file.uri, (progress) => {
         if (key === session.current) setStage({ k: 'transcribing', mode, progress });
       }, controller.signal);
       if (key !== session.current) return;
@@ -136,7 +138,7 @@ export function VoiceSheet({
         onClose();
         return;
       }
-      const id = await saveVoiceNote(file, 'device', t);
+      const id = await saveVoiceNote(file, mode, t);
       temporary = null;
       if (key !== session.current) return;
       onSaved?.(id);
@@ -187,7 +189,7 @@ export function VoiceSheet({
       {stage.k === 'transcribing' ? (
         <View style={{ paddingVertical: space.xl, alignItems: 'center' }}>
           <Ionicons name="sparkles-outline" size={28} color={c.accent} />
-          <T accessibilityLiveRegion="polite" v="subtitle" style={{ marginTop: space.sm }}>{stage.mode === 'device' ? 'Transcribing on your phone…' : 'Uploading to your server…'}</T>
+          <T accessibilityLiveRegion="polite" v="subtitle" style={{ marginTop: space.sm }}>{stage.mode === 'device' ? 'Transcribing on your phone…' : stage.mode === 'cloud' ? 'Transcribing with Groq…' : 'Uploading to your server…'}</T>
           <View style={{ width: '100%', height: 6, backgroundColor: c.surfaceAlt, borderRadius: radius.pill, marginTop: space.md, overflow: 'hidden' }}>
             <View style={{ width: `${Math.round((stage.progress || 0.05) * 100)}%`, height: 6, backgroundColor: c.accent }} />
           </View>

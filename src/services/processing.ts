@@ -12,6 +12,7 @@ import { localEnrich, type Enrichment } from '../core/enrich';
 import { enrichmentPrompt, mergeModelEnrichment, parseModelEnrichment } from '../core/enrichModel';
 import { detectLanguage } from '../core/language';
 import { fetchMetadata, stripMarkdown } from '../core/metadata';
+import { instagramEmbedUrl, parseInstagramEmbed, pickXVideo, xSyndicationUrl } from '../core/socialMedia';
 import { ProviderError } from '../core/ai/provider';
 import { isFailed, type ItemStatus } from '../core/status';
 import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
@@ -19,14 +20,15 @@ import { CaptionsUnavailable, fetchYouTubeCaptions } from '../core/youtubeCaptio
 import type { Repo } from '../db/repo';
 import type { Item, Job } from '../db/types';
 import { runSync as runSyncRaw } from '../sync/engine';
-import { aiInfo, loadProvider } from './ai';
+import { aiInfo, loadEmbedder, loadProvider } from './ai';
 import { deleteLocalFiles } from './capture';
 import { getRepo } from './db';
 import { fetchText } from './http';
 import { emit } from './events';
 import { getClient, getConnection } from './server';
 import { generateReport } from './reports';
-import { ocrItemImages } from './ocr';
+import { CloudWhisperError, cloudWhisperReady, deleteCached, downloadToCache, transcribeMedia } from './cloudWhisper';
+import { ocrItemImages, ocrVideoFrames } from './ocr';
 import { getSettings } from './settings';
 
 class JobError extends Error {
@@ -148,11 +150,17 @@ async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, u
       return { status: 'NEEDS_INPUT' };
     }
   }
-  if (item.sourceType === 'file' && !src.hasSpeech && (await repo.listMedia(item.id)).length) {
+  if (item.sourceType === 'file' && !src.hasSpeech && (await repo.listMedia(item.id)).some((m) => /^(audio|video)\//.test(m.mime))) {
     await enrichAndIndex(repo, item, src.body, src.timed, false);
+    // No server: transcribe the file on the phone with the user's Groq key.
+    const cloud = await cloudDecision(repo, item);
+    if (cloud.kind === 'waiting') {
+      await moveTo(repo, (await repo.getItem(item.id))!, 'TRANSCRIBING', { code: 'INFO_TRANSCRIBING', message: cloud.message });
+      return { status: 'TRANSCRIBING' };
+    }
     await moveTo(repo, (await repo.getItem(item.id))!, 'NEEDS_INPUT', {
-      code: 'TRANSCRIPTION_REQUIRED',
-      message: 'This media file needs a transcript. Import one, or send it to your paired server for transcription.',
+      code: cloud.kind === 'failed' ? cloud.code : 'TRANSCRIPTION_REQUIRED',
+      message: cloud.kind === 'failed' ? cloud.message : 'This media file needs a transcript. Add your Groq key in Settings → AI models to transcribe it on the phone, or import a transcript.',
     });
     return { status: 'NEEDS_INPUT' };
   }
@@ -207,17 +215,109 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
     emit('jobs');
     return { kind: 'waiting', message: 'Transcribing on your Qivra server…' };
   }
+  // No server: Instagram and X videos are transcribed from the phone with the user's Groq key.
+  if (!connected && settings.autoTranscribe && CLOUD_TRANSCRIBABLE.has(item.sourceType)) {
+    const cloud = await cloudDecision(repo, item);
+    if (cloud.kind === 'waiting') return cloud;
+    if (cloud.kind === 'failed') {
+      if (NO_SPEECH_CODES.has(cloud.code)) return { kind: 'no_speech', message: cloud.message };
+      // Instagram refused the video but the caption was kept: finish with the caption.
+      if ((item.metadata?.description ?? '').trim() || ((await repo.getItem(item.id))?.metadata?.description ?? '').trim()) {
+        return { kind: 'no_speech', message: `${cloud.message} Using the post caption.` };
+      }
+      return { kind: 'needs_input', code: cloud.code, message: `${cloud.message} You can import a transcript instead.` };
+    }
+  }
   if (item.sourceType === 'x' && (item.metadata?.description ?? '').trim()) {
-    return { kind: 'no_speech', message: connected ? 'No video to transcribe in this post.' : 'Using the post text. Pair your server to transcribe X videos.' };
+    const canTranscribe = connected || (await cloudWhisperReady());
+    return { kind: 'no_speech', message: canTranscribe ? 'Using the post text.' : 'Using the post text. Add your free Groq key in Settings → AI models to transcribe X videos too.' };
   }
   const why = item.sourceType === 'youtube' ? `${captionNote || 'No captions on YouTube.'} ` : '';
+  const groq = await cloudWhisperReady();
   return {
     kind: 'needs_input',
-    code: connected ? 'TRANSCRIPT_MISSING' : 'SERVER_NOT_PAIRED',
-    message: connected
+    code: connected || groq ? 'TRANSCRIPT_MISSING' : 'NO_TRANSCRIBER',
+    message: connected || groq || item.sourceType === 'youtube'
       ? `${why}Import a transcript (SRT, VTT, TXT) or paste one.`
-      : `${why}Instagram and X videos are transcribed automatically by your Qivra server — pair it in Settings → Connect to My Server, or import a transcript.`,
+      : `${why}Add your free Groq key in Settings → AI models and Qivra transcribes Instagram and X videos on the phone. Or import a transcript.`,
   };
+}
+
+const CLOUD_TRANSCRIBABLE = new Set(['instagram', 'x']);
+
+/** Whether a phone-side Groq transcription is running, can start now, or already failed for this item. */
+async function cloudDecision(repo: Repo, item: Item): Promise<{ kind: 'waiting'; message: string } | { kind: 'failed'; code: string; message: string } | { kind: 'unavailable' }> {
+  const id = `job_cloud_transcribe_${item.id}`;
+  const job = await repo.getJob(id);
+  if (job?.status === 'failed_permanent') return { kind: 'failed', code: job.lastErrorCode ?? 'TRANSCRIBE_FAILED', message: job.lastError ?? 'Transcription failed.' };
+  if (job && ['queued', 'running', 'failed_retryable'].includes(job.status)) return { kind: 'waiting', message: 'Transcribing with Groq Whisper…' };
+  if (job?.status === 'succeeded' || !(await cloudWhisperReady())) return { kind: 'unavailable' };
+  await repo.enqueueJob({ id, kind: 'cloud_transcribe', itemId: item.id, retry: true, maxAttempts: 3 });
+  emit('jobs');
+  return { kind: 'waiting', message: 'Transcribing with Groq Whisper…' };
+}
+
+/** The video (and caption) of a shared X or Instagram post, from the public embed sources. */
+async function findPostVideo(item: Item): Promise<{ url: string | null; durationMs: number | null; caption: string | null }> {
+  const info = item.url ? analyzeUrl(item.url) : null;
+  if (item.sourceType === 'x' && info?.xStatusId) {
+    const r = await fetchText(xSyndicationUrl(info.xStatusId), { accept: 'application/json', timeoutMs: 15_000 });
+    if (!r.ok) throw new JobError('POST_UNAVAILABLE', r.status === 404 ? 'This post is private or was deleted.' : `X did not return the post (${r.status}).`, r.status === 429 || r.status >= 500);
+    const json = JSON.parse(r.text) as { text?: string };
+    const v = pickXVideo(json);
+    return { url: v?.url ?? null, durationMs: v?.durationMs ?? null, caption: typeof json.text === 'string' ? json.text : null };
+  }
+  if (item.sourceType === 'instagram' && info?.instagramShortcode) {
+    const r = await fetchText(instagramEmbedUrl(info.instagramShortcode), { accept: 'text/html', timeoutMs: 15_000 });
+    if (!r.ok) return { url: null, durationMs: null, caption: null };
+    const p = parseInstagramEmbed(r.text);
+    return { url: p.videoUrl, durationMs: null, caption: p.caption };
+  }
+  return { url: null, durationMs: null, caption: null };
+}
+
+/** Phone-only transcription with the user's Groq key: the post's video, or an imported audio/video file. */
+async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<string, unknown>> {
+  const item = await repo.getItem(job.itemId ?? '');
+  if (!item || item.deleted) throw new JobError('ITEM_NOT_FOUND', 'Item was deleted.', false);
+  let file: { uri: string; mime: string; name: string; temp: boolean } | null = null;
+  let durationMs: number | null = null;
+  try {
+    if (item.sourceType === 'file') {
+      const m = (await repo.listMedia(item.id)).find((x) => /^(audio|video)\//.test(x.mime));
+      if (!m) throw new JobError('NO_MEDIA', 'Attach an audio or video file first.', false);
+      file = { uri: m.uri, mime: m.mime, name: m.name, temp: false };
+    } else {
+      const found = await findPostVideo(item);
+      if (found.caption && !(item.metadata?.description ?? '').trim()) {
+        await repo.updateItem(item.id, { metadata: { ...(item.metadata ?? {}), description: found.caption, fetchedAt: new Date().toISOString(), provider: item.metadata?.provider ?? 'embed' } });
+      }
+      if (!found.url) {
+        throw item.sourceType === 'instagram'
+          ? new JobError('VIDEO_UNAVAILABLE', 'Instagram did not share this video with apps.', false)
+          : new JobError('NO_MEDIA_IN_POST', 'No video in this post.', false);
+      }
+      durationMs = found.durationMs;
+      file = { uri: await downloadToCache(found.url, `${item.id}.mp4`), mime: 'video/mp4', name: 'video.mp4', temp: true };
+    }
+    const r = await transcribeMedia(file.uri, file.mime, file.name);
+    if (!r.noSpeech) {
+      const text = r.segments.map((s) => s.text).join(' ');
+      await repo.upsertTranscript({
+        itemId: item.id, language: r.language === 'und' ? detectLanguage(text).code : r.language, languageMethod: r.language === 'und' ? 'heuristic' : 'provider',
+        kind: 'original', source: 'cloud_whisper', provider: 'groq-whisper-large-v3-turbo', format: null, segments: r.segments,
+      });
+    } else if (!(/^video\//.test(file.mime) && (await ocrVideoFrames(repo, item.id, file.uri, r.durationMs ?? durationMs ?? 0)))) {
+      throw new JobError('NO_SPEECH', 'No speech in this video.', false);
+    }
+  } catch (e) {
+    if (e instanceof CloudWhisperError) throw new JobError(e.code, e.message, e.retryable);
+    throw e;
+  } finally {
+    if (file?.temp) await deleteCached(file.uri);
+  }
+  await schedulePipeline(item.id);
+  return { transcribed: true };
 }
 
 function deviceLanguage(): string {
@@ -257,7 +357,7 @@ async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { sta
   if (await repo.syncEnabled()) await repo.enqueueJob({ id: 'job_sync', kind: 'sync', retry: true, maxAttempts: 6 });
   const ai = await aiInfo();
   if (ai.enabled && ai.autoEnrich) await repo.enqueueJob({ id: `job_model_enrich_${item.id}`, kind: 'model_enrich', itemId: item.id, retry: true, maxAttempts: 3 });
-  if (ai.enabled && ai.embeddingModel) await repo.enqueueJob({ id: 'job_embed', kind: 'embed', retry: true, maxAttempts: 3 });
+  if (ai.embeddingModel) await repo.enqueueJob({ id: 'job_embed', kind: 'embed', retry: true, maxAttempts: 3 });
 }
 
 async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, unknown>> {
@@ -291,7 +391,7 @@ async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, u
 }
 
 async function handleEmbed(repo: Repo): Promise<Record<string, unknown>> {
-  const { provider, reason, embeddingModel } = await loadProvider();
+  const { provider, reason, embeddingModel } = await loadEmbedder();
   if (!provider?.embed || !embeddingModel) throw new JobError('NO_PROVIDER', reason ?? 'No embedding model configured.', false);
   let total = 0;
   for (let i = 0; i < 20; i++) {
@@ -485,6 +585,9 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
             case 'server_enrich':
               result = await handleServerJob(repo, job, 'enrich');
               break;
+            case 'cloud_transcribe':
+              result = await handleCloudTranscribe(repo, job);
+              break;
             case 'sync':
               result = await handleSync(repo);
               break;
@@ -506,7 +609,7 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
           const err = e instanceof JobError ? e : new JobError('INTERNAL', (e as Error)?.message ?? 'Unexpected error', true);
           const updated = await repo.failJob(job.id, { code: err.code, message: err.message, retryable: err.retryable });
           // A finally-failed server transcription hands the item back to the local pipeline to decide its end state.
-          if (job.kind === 'server_transcribe_url' && job.itemId && updated?.status === 'failed_permanent') await schedulePipeline(job.itemId);
+          if ((job.kind === 'server_transcribe_url' || job.kind === 'cloud_transcribe') && job.itemId && updated?.status === 'failed_permanent') await schedulePipeline(job.itemId);
           if (job.itemId && (job.kind === 'local_enrich' || job.kind === 'index')) {
             const item = await repo.getItem(job.itemId);
             if (item && !item.deleted) {

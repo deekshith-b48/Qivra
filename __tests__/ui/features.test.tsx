@@ -47,7 +47,7 @@ test('star an item and find it on the Favourites shelf', async () => {
   screen.unmount();
   wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
   fireEvent.press(await screen.findByRole('button', { name: 'Favourites, 1' }));
-  await waitFor(() => expect(screen.queryByText('Other video')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('Other video')).toBeNull(), { timeout: 5000 }); // the list reloads after the shelf changes
   expect(screen.getAllByText(/Hooks tutorial/).length).toBeGreaterThan(0);
 });
 

@@ -1,6 +1,6 @@
 /**
  * First run: four short swipeable pages about what Qivra does, then a setup
- * checklist (notifications, your laptop server, AI answers). Everything on the
+ * checklist (notifications, AI answers, an optional server). Everything on the
  * checklist is optional; "Get started" always works.
  */
 
@@ -93,11 +93,11 @@ export default function OnboardingScreen({ navigation }: RootProps<'Onboarding'>
       icon: 'notifications', tint: 'red', title: 'Notifications', body: 'So Qivra can tell you when a shared reel or page is ready.',
       action: notif === 'granted' ? 'Allowed' : notif === 'denied' ? 'Not now' : 'Allow', done: notif === 'granted', onPress: () => void askNotifications(),
     },
-    { icon: 'laptop', tint: 'indigo', title: 'Connect your laptop', body: 'Scan the QR code from the Qivra server for transcription, AI and sync.', action: 'Connect', onPress: () => void finish('ConnectServer') },
     {
-      icon: 'sparkles', tint: 'pink', title: 'AI answers', body: ai.state === 'ok' ? 'Using your own Groq key.' : 'Add your free Groq key, or use your laptop server\'s AI.',
+      icon: 'sparkles', tint: 'pink', title: 'AI answers', body: ai.state === 'ok' ? 'Using your own Groq key: answers, summaries and video transcripts.' : 'Add your free Groq key for answers, summaries and video transcripts.',
       action: ai.state === 'ok' ? 'Groq' : 'Add key', done: ai.state === 'ok', onPress: () => (ai.state === 'ok' ? void finish('AiProviders') : goTo(aiPage)),
     },
+    { icon: 'laptop', tint: 'indigo', title: 'Optional: your own server', body: 'Only for live sync between devices, or to keep audio on your own computer. Everything else works on this phone.', action: 'Set up', onPress: () => void finish('ConnectServer') },
   ];
 
   return (
@@ -132,13 +132,13 @@ export default function OnboardingScreen({ navigation }: RootProps<'Onboarding'>
           <IconTile icon="sparkles" tint="purple" size={72} />
           <T v="display" style={{ marginTop: space.lg, textAlign: 'center' }} accessibilityRole="header">Turn on AI answers</T>
           <T color="textMuted" style={{ marginTop: space.sm, textAlign: 'center', lineHeight: 22 }}>
-            Qivra uses Groq's free, fast AI for summaries and Ask. Use your own free key: it stays on this phone in Android's secure storage.
+            Qivra uses Groq's free, fast AI for summaries, Ask and video transcripts. Use your own free key: it stays on this phone in Android's secure storage.
           </T>
           <Button kind="outline" title="Get a free Groq key" icon="key-outline" style={{ marginTop: space.md }} onPress={() => void Linking.openURL('https://console.groq.com/keys')} />
           <View style={{ alignSelf: 'stretch', marginTop: space.md }}>
             <Field label="Your Groq API key" value={groqKey} onChangeText={(t) => { setGroqKey(t); if (ai.state === 'error') setAi({ state: 'idle' }); }}
               placeholder="gsk_…" secureTextEntry autoCapitalize="none" autoCorrect={false} error={ai.state === 'error' ? ai.message : null} />
-            <T v="caption" color="textFaint" style={{ marginTop: space.xs }}>When you ask or summarise, the relevant saved text is sent to Groq. Its privacy policy applies.</T>
+            <T v="caption" color="textFaint" style={{ marginTop: space.xs }}>When you ask, summarise or save a video, the relevant saved text or the video's audio is sent to Groq. Its privacy policy applies.</T>
             <Button title={ai.state === 'ok' ? 'Groq connected' : 'Verify & save'} icon={ai.state === 'ok' ? 'checkmark' : 'shield-checkmark-outline'} loading={ai.state === 'checking'}
               disabled={!groqKey.trim() || ai.state === 'checking'} style={{ marginTop: space.md }} onPress={() => void saveGroq()} />
           </View>

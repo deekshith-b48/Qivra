@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, View } from 'react-native';
-import { createOpenAICompatProvider } from '../core/ai/provider';
+import { Alert, Linking, View } from 'react-native';
+import { createOpenAICompatProvider, ProviderError } from '../core/ai/provider';
 import { checkServerUrl, isPrivateHost } from '../core/net';
 import type { RootProps } from '../navigation/types';
 import { deleteSecret, getSecret, SECRET_KEYS, setSecret } from '../services/secure';
+import { GEMINI_EMBED } from '../services/ai';
+import { ensureEmbeddings } from '../services/semantic';
 import { updateSettings } from '../services/settings';
 import { Banner, Button, Card, Chip, Field, Header, Screen, Section, T, ToggleRow } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
@@ -108,6 +110,56 @@ export default function AiProvidersScreen({ navigation }: RootProps<'AiProviders
           })} style={{ marginTop: space.md }} />
         </Section>
       ) : null}
+      <MeaningSearchSection />
     </Screen>
+  );
+}
+
+/** Optional free Gemini key: real search by meaning and Related items without a server. */
+function MeaningSearchSection() {
+  const s = useSettings();
+  const { run, busy } = useAction();
+  const [key, setKey] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!s) return null;
+  const on = !!s.ai.embed?.enabled;
+  const verify = () => run(async () => {
+    setMsg(null);
+    const p = createOpenAICompatProvider({ baseUrl: GEMINI_EMBED.baseUrl, model: GEMINI_EMBED.model, apiKey: key.trim(), embeddingModel: GEMINI_EMBED.model, timeoutMs: 30_000 });
+    try {
+      const [v] = await p.embed!(['test']);
+      if (!v?.length) throw new Error('No vector returned');
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof ProviderError && e.code === 'AUTH' ? 'Google rejected this key. Copy it again from aistudio.google.com/apikey.' : 'Could not get a test result from Google. Check the key and your connection.' });
+      return;
+    }
+    await setSecret(SECRET_KEYS.embedApiKey, key.trim());
+    setKey('');
+    await updateSettings({ ai: { ...s.ai, embed: { enabled: true, ...GEMINI_EMBED } } });
+    await ensureEmbeddings();
+    setMsg({ ok: true, text: 'Search by meaning is on. Your library is being indexed in the background.' });
+  });
+  return (
+    <Section title="Search by meaning (optional)">
+      <T v="small" color="textMuted">
+        {on
+          ? 'On, with your Gemini key. Library search finds items about the same thing in any language, and items show Related.'
+          : 'With your Groq key, Library search already adds related results by rewriting your query. For true search by meaning and Related items, add a free Gemini key. Your saved text is sent to Google to make search vectors.'}
+      </T>
+      {msg ? <Banner tone={msg.ok ? 'accent' : 'danger'} title={msg.ok ? 'Key works' : 'Key not saved'} body={msg.text} /> : null}
+      {on ? (
+        <Button kind="outline" title="Remove Gemini key" style={{ marginTop: space.sm }} onPress={() => void run(async () => {
+          await deleteSecret(SECRET_KEYS.embedApiKey);
+          await updateSettings({ ai: { ...s.ai, embed: undefined } });
+          setMsg(null);
+        })} />
+      ) : (
+        <>
+          <Button kind="text" title="Get a free Gemini key" icon="open-outline" onPress={() => void Linking.openURL('https://aistudio.google.com/apikey')} />
+          <Field label="Your Gemini API key" value={key} onChangeText={setKey} secureTextEntry autoCapitalize="none" autoCorrect={false} placeholder="AIza…" />
+          <Button title="Verify & save" loading={busy} disabled={!key.trim()} onPress={() => void verify()} />
+        </>
+      )}
+    </Section>
   );
 }

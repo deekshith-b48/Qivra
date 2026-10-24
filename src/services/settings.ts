@@ -14,6 +14,8 @@ export interface AiSettings {
   externalConsent: boolean;
   /** Run model enrichment automatically after capture (otherwise only on request). */
   autoEnrich: boolean;
+  /** Optional embeddings-only provider (a free Gemini key) for search by meaning and Related items. */
+  embed?: { enabled: boolean; baseUrl: string; model: string };
 }
 
 export interface Settings {
@@ -46,6 +48,8 @@ export interface VoiceSettings {
   language: string;
   /** Send recordings to the paired server instead of transcribing on the phone. */
   preferServer: boolean;
+  /** Send voice notes to Groq Whisper (user's key) instead of the on-device model: up to 12 minutes. */
+  preferCloud?: boolean;
 }
 
 export const DEFAULT_VOICE: VoiceSettings = { modelId: 'whisper-base', language: 'auto', preferServer: false };

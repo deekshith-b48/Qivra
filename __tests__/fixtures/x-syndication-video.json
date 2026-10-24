@@ -1,0 +1,43 @@
+{
+ "__typename": "Tweet",
+ "id_str": "1585341984679469056",
+ "text": "Entering Twitter HQ \u2013 let that sink in! https://t.co/D68z4K2wq7",
+ "mediaDetails": [
+  {
+   "type": "video",
+   "video_info": {
+    "aspect_ratio": [
+     16,
+     9
+    ],
+    "duration_millis": 9301,
+    "variants": [
+     {
+      "content_type": "application/x-mpegURL",
+      "url": "https://video.twimg.com/ext_tw_video/1585341912877146112/pu/pl/TyyErONagoNhghKI.m3u8?tag=14&v=9a8"
+     },
+     {
+      "bitrate": 256000,
+      "content_type": "video/mp4",
+      "url": "https://video.twimg.com/ext_tw_video/1585341912877146112/pu/vid/480x270/6tarM2TjLH1Ahh90.mp4?tag=14"
+     },
+     {
+      "bitrate": 832000,
+      "content_type": "video/mp4",
+      "url": "https://video.twimg.com/ext_tw_video/1585341912877146112/pu/vid/640x360/UOvGixKQhzYgqVGG.mp4?tag=14"
+     },
+     {
+      "bitrate": 2176000,
+      "content_type": "video/mp4",
+      "url": "https://video.twimg.com/ext_tw_video/1585341912877146112/pu/vid/1280x720/cwj11yOgYZ05R_sY.mp4?tag=14"
+     },
+     {
+      "bitrate": 10368000,
+      "content_type": "video/mp4",
+      "url": "https://video.twimg.com/ext_tw_video/1585341912877146112/pu/vid/1920x1080/aeoVUvTgj4wHShhN.mp4?tag=14"
+     }
+    ]
+   }
+  }
+ ]
+}

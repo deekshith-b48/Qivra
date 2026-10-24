@@ -40,6 +40,7 @@ A private, local-first knowledge vault for Android. Share a reel, video, web pag
 
 Saved posts pile up and are never seen again. Qivra keeps them **useful**: every link becomes a transcript, a one-line summary, timestamped key moments and highlighted keywords, all stored in a SQLite database **on your phone**. You can search it offline and ask questions that are answered from your own library, with citations.
 
+- **No laptop needed:** install the app, add your free Groq key, and every feature works on the phone. An optional server adds live sync between devices.
 - **Local-first:** your library lives on the device. No account, no cloud database.
 - **Bring your own AI key:** each user adds their own free Groq key during setup. No key ships in the app.
 - **Works without AI:** search, transcripts, extractive summaries and flashcards still work with no key at all.
@@ -49,9 +50,9 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 | | |
 |---|---|
 | **Capture** | Share from Instagram, X, YouTube, a browser or any app and keep scrolling. Paste a link, write a note, record a voice note, or import files, screenshots and transcripts (SRT, VTT, TXT). Shares survive the app being killed. |
-| **Understand** | YouTube captions are fetched on the phone. Reels and X videos are transcribed by your optional server (Groq Whisper, or local Whisper). Text in images is read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
+| **Understand** | YouTube captions are fetched on the phone. X and Instagram videos, imported audio/video files and voice notes of up to 12 minutes are transcribed by Groq Whisper with your own key, straight from the phone (Instagram when the post's public embed shares the video; otherwise its caption is used). On-screen text in silent reels and text in images are read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
 | **Ask & learn** | Chat with your whole library or one item. Answers stream, cite numbered sources and jump to the right second of a video. Make flashcards from any item and review them with spaced repetition. Daily, weekly and topic reports export as Markdown or PDF. |
-| **Organise** | Library grid or list, full-text search (SQLite FTS5) and search by meaning, smart collections, favourites, highlights and revisit reminders. Swipe to archive or delete, with undo. |
+| **Organise** | Library grid or list, full-text search (SQLite FTS5) and search by meaning (your Groq key rewrites the query into synonyms and translations; add an optional free Gemini key for true vector search and Related items), smart collections, favourites, highlights and revisit reminders. Swipe to archive or delete, with undo. |
 | **Dev mode** (opt-in) | A Dev tab with AI trends from GitHub, Hacker News and Hugging Face; Claude Code skills, plugins and MCP servers (top or new this week); follow-ups on topics you choose, with new releases of repos you follow; a daily-habit streak with a 5-week heatmap and a weekly recap; and a searchable toolbox of the repos, tools and commands in your library, grouped by tool. Hidden unless you turn it on. |
 | **Privacy** | Keys in Android's Keystore, no backups to the cloud, permissions asked only when needed, and saved content treated as untrusted (commands are shown, never run). |
 
@@ -68,7 +69,7 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 ### 1. Install the app
 
-Download **`Qivra-2.0.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
+Download **`Qivra-2.1.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
 
 > The APK is signed with the Android debug key and is meant for sideloading. Check the download against the `.sha256` file attached to the release.
 
@@ -79,11 +80,13 @@ The setup screens ask for an AI key. Groq's tier is free and fast:
 1. Tap **Get a free Groq key**, sign in at [console.groq.com/keys](https://console.groq.com/keys) and create a key.
 2. Paste it into **Your Groq API key** and tap **Verify & save**.
 
-Qivra sends a tiny test request, then stores the key in Android's secure storage. It is sent only to Groq, and only when you ask or summarise. Tap **Later** to skip; you can add it any time under **Settings → AI models**.
+Qivra sends a tiny test request, then stores the key in Android's secure storage. It is sent only to Groq, and only when you ask, summarise or save a video (the video's audio is sent for its transcript). Tap **Later** to skip; you can add it any time under **Settings → AI models**.
+
+That's it: no laptop or server is needed. Optional: for true search by meaning, add a free [Gemini key](https://aistudio.google.com/apikey) under **Settings → AI models → Search by meaning**.
 
 ### 3. Run your own server (optional)
 
-The server, on your laptop, transcribes Instagram and X videos, reads on-screen text, adds search by meaning and syncs between devices.
+Not needed for any feature. The server, on your laptop, adds live sync between devices and lets you keep audio on your own computer (local Whisper).
 
 ```bash
 cd server

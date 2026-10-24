@@ -10,6 +10,6 @@ SuperBrain endpoints keep working for loopback clients.
 """
 
 PRODUCT = "Qivra"
-SERVER_VERSION = "2.0.0"
+SERVER_VERSION = "2.1.0"
 API_VERSION = 1
 PAIRING_PAYLOAD_VERSION = 1

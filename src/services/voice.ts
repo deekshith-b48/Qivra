@@ -8,6 +8,7 @@
  *   transcribe-anything (MLX on Apple Silicon) or faster-whisper.
  */
 
+import { cloudWhisperReady, transcribeMedia } from './cloudWhisper';
 import * as FS from 'expo-file-system/legacy';
 import { PermissionsAndroid, Platform } from 'react-native';
 // The package's exports map has no root entry; the './index' subpath resolves for TS, Metro and Jest alike.
@@ -29,6 +30,8 @@ const AudioRecord: PcmAudioRecord = require('@fugood/react-native-audio-pcm-stre
 const MODEL_DIR = () => `${FS.documentDirectory}models/`;
 const VOICE_DIR = () => `${FS.documentDirectory}media/`;
 export const MAX_RECORDING_MS = 5 * 60_000;
+/** 16 kHz mono WAV is about 1.9 MB a minute; Groq accepts 25 MB. */
+export const CLOUD_MAX_RECORDING_MS = 12 * 60_000;
 
 async function ensureDir(dir: string) {
   if (!(await FS.getInfoAsync(dir)).exists) await FS.makeDirectoryAsync(dir, { intermediates: true });
@@ -56,7 +59,7 @@ export interface Recording {
 
 let recordingActive = false;
 
-export async function startRecording(onLevel?: (level: number, elapsedMs: number) => void, onLimit?: () => void): Promise<Recording> {
+export async function startRecording(onLevel?: (level: number, elapsedMs: number) => void, onLimit?: () => void, maxMs = MAX_RECORDING_MS): Promise<Recording> {
   if (recordingActive) throw new Error('Another recording is already in progress.');
   recordingActive = true;
   const chunks: string[] = [];
@@ -90,7 +93,7 @@ export async function startRecording(onLevel?: (level: number, elapsedMs: number
     })();
     return finishing;
   };
-  const timer = setTimeout(() => { void finish(); onLimit?.(); }, MAX_RECORDING_MS);
+  const timer = setTimeout(() => { void finish(); onLimit?.(); }, maxMs);
   try {
     AudioRecord.start();
   } catch (e) {
@@ -224,15 +227,25 @@ export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number
 }
 
 // ── voice notes ────────────────────────────────────────────────────────────
-export type VoiceMode = 'device' | 'server';
+export type VoiceMode = 'device' | 'server' | 'cloud';
 
-export async function voiceModeAvailable(): Promise<{ device: boolean; server: boolean; preferred: VoiceMode | null; model: VoiceModel }> {
+export async function voiceModeAvailable(): Promise<{ device: boolean; server: boolean; cloud: boolean; preferred: VoiceMode | null; model: VoiceModel }> {
   const s = await getSettings();
   const m = voiceModel(s.voice.modelId);
   const device = !!(await modelPath(m));
   const server = !!(await getConnection());
-  const preferred: VoiceMode | null = s.voice.preferServer && server ? 'server' : device ? 'device' : null;
-  return { device, server, preferred, model: m };
+  const cloud = await cloudWhisperReady();
+  const preferred: VoiceMode | null = s.voice.preferServer && server ? 'server'
+    : s.voice.preferCloud && cloud ? 'cloud'
+      : device ? 'device' : cloud ? 'cloud' : null;
+  return { device, server, cloud, preferred, model: m };
+}
+
+/** Transcribe a recording with Groq Whisper (the user's key); an empty text means no speech. */
+export async function transcribeInCloud(wavUri: string): Promise<VoiceTranscript> {
+  const r = await transcribeMedia(wavUri, 'audio/wav', 'voice.wav');
+  const text = r.segments.map((x) => x.text).join(' ').trim();
+  return { text, segments: r.segments, language: r.language === 'und' ? 'und' : r.language, provider: 'groq-whisper-large-v3-turbo' };
 }
 
 /**
@@ -247,7 +260,7 @@ export async function saveVoiceNote(rec: { uri: string; durationMs: number; byte
     await repo.addMedia(item.id, { uri: rec.uri, name: rec.uri.split('/').pop() ?? 'voice.wav', mime: 'audio/wav', size: rec.bytes });
     if (transcript?.text.trim()) {
       await repo.upsertTranscript({
-        itemId: item.id, language: transcript.language, languageMethod: 'provider', kind: 'original', source: 'voice_on_device',
+        itemId: item.id, language: transcript.language, languageMethod: 'provider', kind: 'original', source: mode === 'cloud' ? 'voice_cloud' : 'voice_on_device',
         provider: transcript.provider, format: 'wav', segments: transcript.segments.length ? transcript.segments : [{ startMs: null, endMs: null, text: transcript.text }],
       });
       await schedulePipeline(item.id);

@@ -37,20 +37,42 @@ export interface AiInfo {
 // expo/fetch exposes the response body as a stream, which React Native's fetch does not.
 const streamFetch = expoFetch as unknown as StreamFetchLike;
 
+/** Free Gemini embeddings through Google's OpenAI-compatible endpoint (optional key in Settings → AI models). */
+export const GEMINI_EMBED = { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-embedding-001' };
+
 const NONE = 'No AI model is configured (Settings → AI models). Answers use your saved items only.';
 
 /** What the UI and the job planner need to know, without building a provider. */
 export async function aiInfo(): Promise<AiInfo> {
   const s = await getSettings();
+  // An embeddings-only key (Gemini) takes over embeddings from whichever chat provider is used.
+  const embed = s.ai.embed?.enabled && s.ai.embed.model ? s.ai.embed.model : null;
   if (s.ai.enabled && s.ai.baseUrl && s.ai.model) {
-    return { enabled: true, source: 'phone', model: s.ai.model, where: s.ai.baseUrl, autoEnrich: s.ai.autoEnrich, embeddingModel: s.ai.embeddingModel || null };
+    return { enabled: true, source: 'phone', model: s.ai.model, where: s.ai.baseUrl, autoEnrich: s.ai.autoEnrich, embeddingModel: embed ?? (s.ai.embeddingModel || null) };
   }
   const gw = (await getConnection())?.aiGateway;
   if (gw?.enabled && gw.model) {
     // The owner turned this on for the server, so new items get AI summaries automatically.
-    return { enabled: true, source: 'server', model: gw.model, where: gw.upstream ?? 'your Qivra server', autoEnrich: true, embeddingModel: gw.embeddingModel ?? null };
+    return { enabled: true, source: 'server', model: gw.model, where: gw.upstream ?? 'your Qivra server', autoEnrich: true, embeddingModel: embed ?? gw.embeddingModel ?? null };
   }
-  return { enabled: false, source: null, model: null, where: null, autoEnrich: false, embeddingModel: null };
+  return { enabled: false, source: null, model: null, where: null, autoEnrich: false, embeddingModel: embed };
+}
+
+/** The provider that makes embeddings: the optional embeddings key first, else the chat provider's embedding model. */
+export async function loadEmbedder(): Promise<{ provider: ChatProvider | null; embeddingModel: string | null; reason: string | null }> {
+  const e = (await getSettings()).ai.embed;
+  if (e?.enabled && e.baseUrl && e.model) {
+    const apiKey = await getSecret(SECRET_KEYS.embedApiKey);
+    if (apiKey) {
+      try {
+        return { provider: createOpenAICompatProvider({ baseUrl: e.baseUrl, model: e.model, apiKey, embeddingModel: e.model, label: `embeddings · ${e.model}` }), embeddingModel: e.model, reason: null };
+      } catch (err) {
+        return { provider: null, embeddingModel: null, reason: (err as Error).message };
+      }
+    }
+  }
+  const p = await loadProvider();
+  return { provider: p.provider, embeddingModel: p.embeddingModel, reason: p.reason };
 }
 
 async function phoneProvider(): Promise<ProviderState | null> {

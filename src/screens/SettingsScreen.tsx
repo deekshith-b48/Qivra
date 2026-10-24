@@ -81,7 +81,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
         <Group>
           <Row icon="hardware-chip" tint={t.pink} title="AI models" value={ai?.enabled ? ai.model ?? 'On' : 'Off'} subtitle={ai?.enabled ? (ai.source === 'server' ? 'Through your Qivra server' : ai.where ?? undefined) : 'Qivra works without AI'} onPress={() => navigation.navigate('AiProviders')} />
           <Row icon="mic" tint={t.red} title="Speech & dictation" value={s.voice.modelId.startsWith('parakeet') ? 'Parakeet' : 'Whisper'} onPress={() => navigation.navigate('VoiceSettings')} />
-          <ToggleRow icon="videocam" tint={t.blue} title="Auto-transcribe shared videos" subtitle="YouTube captions on this phone; Instagram and X on your server." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
+          <ToggleRow icon="videocam" tint={t.blue} title="Auto-transcribe shared videos" subtitle="YouTube captions on this phone; Instagram, X and media files with your Groq key." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
           <Row icon="time" tint={t.gray} title="Processing queue" value={j ? `${j.queued + j.running} pending${j.failed_retryable + j.failed_permanent ? ` · ${j.failed_retryable + j.failed_permanent} failed` : ''}` : undefined} onPress={() => navigation.navigate('Jobs')} />
         </Group>
       </Section>
