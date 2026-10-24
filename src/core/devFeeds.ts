@@ -7,6 +7,8 @@
 
 export type FeedSource = 'github' | 'hn' | 'hf';
 
+import { stripMarkdown } from './metadata';
+
 export interface FeedItem {
   source: FeedSource;
   id: string;
@@ -18,6 +20,17 @@ export interface FeedItem {
   createdAt: string | null;
   /** GitHub owner/name, for install commands and saving. */
   repo?: string;
+  /** A GitHub release of a followed repo (title holds the tag). */
+  kind?: 'release';
+  prerelease?: boolean;
+}
+
+/** owner/name with no path tricks (shared by Hugging Face ids and followed repos). */
+const OWNER_NAME = /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/;
+
+/** A followed term that names a repo ("anthropics/claude-code"), so its releases are tracked. */
+export function isRepoTerm(term: string): boolean {
+  return OWNER_NAME.test(term.trim());
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -36,6 +49,11 @@ export function trendingAiReposUrl(nowMs: number, days = 7): string {
 export function hnSearchUrl(query: string, sinceMs: number, minPoints = 50, hits = 15): string {
   const filters = `created_at_i>${Math.floor(sinceMs / 1000)},points>${minPoints}`;
   return `https://hn.algolia.com/api/v1/search?tags=story&query=${encodeURIComponent(query)}&numericFilters=${encodeURIComponent(filters)}&hitsPerPage=${hits}`;
+}
+
+export function githubReleasesUrl(repo: string, perPage = 5): string {
+  const [owner, name] = repo.trim().split('/');
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/releases?per_page=${perPage}`;
 }
 
 export function hfTrendingUrl(limit = 15): string {
@@ -77,8 +95,23 @@ export function parseHf(json: unknown): FeedItem[] {
   return json.flatMap((m) => {
     const o = m as Record<string, unknown>;
     const id = str(o.id) || str(o.modelId);
-    if (!id || !/^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/.test(id)) return []; // owner/name, no path tricks
+    if (!id || !OWNER_NAME.test(id)) return [];
     return [{ source: 'hf' as const, id: `hf:${id}`, title: id, url: `https://huggingface.co/${id}`, description: str(o.pipeline_tag).replace(/-/g, ' '), metric: num(o.likes), createdAt: str(o.createdAt) || null }];
+  });
+}
+
+export function parseReleases(json: unknown, repo: string): FeedItem[] {
+  if (!Array.isArray(json)) return [];
+  return json.flatMap((r) => {
+    const o = r as Record<string, unknown>;
+    const tag = str(o.tag_name);
+    const url = str(o.html_url);
+    if (o.draft === true || !tag || !url.startsWith('https://github.com/')) return [];
+    const notes = stripMarkdown(str(o.body)).split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+    return [{
+      source: 'github' as const, id: `rel:${repo}@${tag}`, title: `${repo} ${tag}`, url, description: notes.slice(0, 200),
+      metric: 0, createdAt: str(o.published_at) || null, repo, kind: 'release' as const, prerelease: o.prerelease === true,
+    }];
   });
 }
 
@@ -90,6 +123,25 @@ export const CLAUDE_QUERIES: Record<ClaudeKind, string> = {
   plugins: 'topic:claude-code-plugin',
   mcp: 'topic:mcp-server',
 };
+
+export type ClaudeMode = 'top' | 'new';
+
+/** Search for a Claude Code section: all-time most starred, or the best new ones of the last 7 days. */
+export function claudeQuery(kind: ClaudeKind, mode: ClaudeMode, nowMs: number): string {
+  return mode === 'new' ? `${CLAUDE_QUERIES[kind]} created:>${day(nowMs - 7 * 86_400_000)}` : CLAUDE_QUERIES[kind];
+}
+
+const RUNNERS = new Set(['npx', 'bunx', 'pipx', 'uvx', 'pnpx']);
+
+/** The tool a command belongs to, for grouping: skips sudo/env/VAR=x, unwraps npx-style runners and python -m. */
+export function commandGroup(cmd: string): string {
+  const words = cmd.trim().replace(/^\$\s*/, '').split(/\s+/).filter(Boolean);
+  while (words.length && (words[0] === 'sudo' || words[0] === 'env' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words.shift();
+  let w = words[0] ?? '';
+  if (RUNNERS.has(w) && words[1]) w = words[1];
+  else if (/^python\d?(\.\d+)?$/.test(w) && words[1] === '-m' && words[2]) w = words[2];
+  return w.split('/').pop()!.toLowerCase() || 'other';
+}
 
 /** What to paste to install a repo: a Claude Code marketplace for plugins, a clone for the rest. */
 export function installCommand(kind: ClaudeKind, repo: string): string {
@@ -129,16 +181,44 @@ export function dayComplete(h: Habits): boolean {
  * doesn't break the streak). `doneDays` holds YYYY-MM-DD keys of complete days.
  */
 export function streak(doneDays: Set<string>, todayKey: string): number {
-  const prev = (k: string) => {
-    const d = new Date(`${k}T12:00:00Z`);
-    d.setUTCDate(d.getUTCDate() - 1);
-    return d.toISOString().slice(0, 10);
-  };
-  let k = doneDays.has(todayKey) ? todayKey : prev(todayKey);
+  let k = doneDays.has(todayKey) ? todayKey : prevDay(todayKey);
   let n = 0;
   while (doneDays.has(k)) {
     n++;
-    k = prev(k);
+    k = prevDay(k);
   }
   return n;
+}
+
+/** The YYYY-MM-DD key of the day before. */
+export function prevDay(key: string): string {
+  const d = new Date(`${key}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The last `n` day keys ending with `todayKey`, oldest first. */
+export function lastNDays(todayKey: string, n: number): string[] {
+  const out = [todayKey];
+  while (out.length < n) out.unshift(prevDay(out[0]));
+  return out;
+}
+
+/** Longest run of consecutive complete days. */
+export function bestStreak(doneDays: Set<string>): number {
+  let best = 0;
+  for (const d of doneDays) {
+    if (doneDays.has(prevDay(d))) continue; // count each run once, from its first day
+    let n = 1;
+    let k = d;
+    for (;;) {
+      const next = new Date(`${k}T12:00:00Z`);
+      next.setUTCDate(next.getUTCDate() + 1);
+      k = next.toISOString().slice(0, 10);
+      if (!doneDays.has(k)) break;
+      n++;
+    }
+    best = Math.max(best, n);
+  }
+  return best;
 }

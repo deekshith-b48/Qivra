@@ -13,10 +13,11 @@ import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatLocal } from '../core/dates';
-import { type ClaudeKind, type FeedItem, installCommand } from '../core/devFeeds';
+import { type ClaudeKind, type ClaudeMode, commandGroup, type FeedItem, installCommand } from '../core/devFeeds';
 import { requestsFromText } from '../core/share';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
 import { captureRequest } from '../services/capture';
+import { generateReport } from '../services/reports';
 import { allTrends, getClaudeCorner, getFollowUps, getHabits, getTrends, markFollowSeen, noteTrendsChecked } from '../services/devFeeds';
 import { MAX_DEV_FOLLOWS, updateSettings } from '../services/settings';
 import { Backdrop, Banner, Button, Card, Chip, Field, IconButton, type IconName, Loading, Section, Sheet, Snackbar, T, ToggleRow } from '../ui/components';
@@ -24,9 +25,9 @@ import { useAction, useQuery } from '../ui/hooks';
 import { Segmented } from '../ui/media';
 import { useTabBarInset } from '../ui/nav/FloatingTabBar';
 import { radius, space, useTheme } from '../ui/theme';
-import { IconTile } from '../ui/tiles';
+import { IconTile, StatTile } from '../ui/tiles';
 import type { TintName } from '../ui/tokens';
-import { useSettings } from '../ui/useSettings';
+import { useAiInfo, useSettings } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Dev'>, NativeStackScreenProps<RootStackParamList>>;
 type Tab = 'today' | 'trends' | 'claude' | 'toolbox';
@@ -59,18 +60,21 @@ export default function DevScreen({ navigation }: Props) {
   const settings = useSettings();
   const tz = settings?.timezone ?? 'UTC';
   const inset = useTabBarInset();
-  const { run } = useAction();
+  const { run, busy } = useAction();
+  const ai = useAiInfo();
   const [tab, setTab] = useState<Tab>('today');
   const [source, setSource] = useState<'all' | FeedItem['source']>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [followOpen, setFollowOpen] = useState(false);
   const [newTerm, setNewTerm] = useState('');
   const [snack, setSnack] = useState<string | null>(null);
+  const [claudeMode, setClaudeMode] = useState<ClaudeMode>('top');
+  const [toolFilter, setToolFilter] = useState('');
 
   const habits = useQuery(() => getHabits(), ['items', 'cards', 'settings']);
   const trends = useQuery(() => getTrends(), []);
   const follows = useQuery(() => getFollowUps(), ['settings']);
-  const claude = useQuery(() => (tab === 'claude' ? getClaudeCorner() : Promise.resolve(null)), [], [tab]);
+  const claude = useQuery(() => (tab === 'claude' ? getClaudeCorner(false, claudeMode) : Promise.resolve(null)), [], [tab, claudeMode]);
   const toolbox = useQuery((repo) => (tab === 'toolbox' || tab === 'claude' ? repo.devToolbox() : Promise.resolve(null)), ['items'], [tab]);
 
   // Opening the Dev tab counts as "checked the trends" today.
@@ -82,7 +86,7 @@ export default function DevScreen({ navigation }: Props) {
   const refresh = async () => {
     setRefreshing(true);
     try {
-      if (tab === 'claude') await getClaudeCorner(true).then(() => claude.reload());
+      if (tab === 'claude') await getClaudeCorner(true, claudeMode).then(() => claude.reload());
       else {
         await Promise.all([getTrends(true), getFollowUps(true)]);
         await Promise.all([trends.reload(), follows.reload()]);
@@ -105,8 +109,11 @@ export default function DevScreen({ navigation }: Props) {
     setTimeout(() => setSnack(null), 2500);
   });
 
+  // Repos already saved in the library, for the "In your library" mark (lower case → an item that mentions it).
+  const libraryRepos = new Map((toolbox.data?.repos ?? []).map((r) => [r.name.toLowerCase(), r.itemIds[0]]));
   const feedCard = (it: FeedItem, kind?: ClaudeKind) => {
     const s = SOURCE[it.source];
+    const inLibrary = kind && it.repo ? libraryRepos.get(it.repo.toLowerCase()) : undefined;
     return (
       <Card key={it.id} style={{ marginBottom: space.sm, padding: space.md }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
@@ -123,10 +130,15 @@ export default function DevScreen({ navigation }: Props) {
         </View>
         <T v="subtitle" style={{ marginTop: space.sm }} numberOfLines={2}>{it.title}</T>
         {it.description ? <T v="small" color="textMuted" numberOfLines={2} style={{ marginTop: 2 }}>{it.description}</T> : null}
-        <View style={{ flexDirection: 'row', gap: space.xs, marginTop: space.sm, marginLeft: -8 }}>
-          <IconButton icon="bookmark-outline" size={19} label={`Save ${it.title} to Qivra`} onPress={() => void save(it)} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.sm, marginLeft: -8 }}>
+          {inLibrary ? (
+            <IconButton icon="checkmark-circle" size={19} label={`${it.title} is in your library: open it`} onPress={() => navigation.navigate('ItemDetail', { id: inLibrary })} />
+          ) : (
+            <IconButton icon="bookmark-outline" size={19} label={`Save ${it.title} to Qivra`} onPress={() => void save(it)} />
+          )}
           {kind && it.repo ? <IconButton icon="terminal-outline" size={19} label={`Copy install command for ${it.title}`} onPress={() => copy(installCommand(kind, it.repo!), 'Install command')} /> : null}
           <IconButton icon="open-outline" size={19} label={`Open ${it.title}`} onPress={() => void Linking.openURL(it.url)} />
+          {inLibrary ? <View style={{ marginLeft: 'auto' }}><Chip label="In your library" icon="checkmark" tone="accent" /></View> : null}
         </View>
       </Card>
     );
@@ -147,6 +159,20 @@ export default function DevScreen({ navigation }: Props) {
           </View>
         </View>
         <T v="caption" color="textMuted" style={{ marginTop: 2 }}>{doneCount} of 4 today · 3 keep your streak going</T>
+        {h ? (
+          <View style={{ marginTop: space.sm, marginBottom: space.xs }} accessibilityLabel={`${h.heatmap.filter((d) => d.done).length} active days in the last 5 weeks`}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, width: 7 * 14 + 6 * 4 }}>
+              {h.heatmap.map((d, i) => (
+                <View key={d.day} style={{
+                  width: 14, height: 14, borderRadius: 4,
+                  backgroundColor: d.done ? c.tint.green : c.surfaceAlt,
+                  borderWidth: i === h.heatmap.length - 1 ? 1.5 : 0, borderColor: c.text,
+                }} />
+              ))}
+            </View>
+            <T v="caption" color="textMuted" style={{ marginTop: 6 }}>Last 5 weeks · best streak {h.best} day{h.best === 1 ? '' : 's'}</T>
+          </View>
+        ) : null}
         {HABITS.map((x) => {
           const done = !!h?.habits[x.key];
           return (
@@ -158,6 +184,22 @@ export default function DevScreen({ navigation }: Props) {
           );
         })}
       </Card>
+
+      {h ? (
+        <Section title="Last 7 days" action={<Button kind="text" title={busy ? 'Making…' : 'Weekly report'} icon="document-text-outline" onPress={() => void run(async () => {
+          const r = await generateReport({ kind: 'weekly', useAi: ai?.enabled });
+          navigation.navigate('ReportDetail', { id: r.id });
+        }, 'Report failed')} />}>
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
+            <StatTile icon="bookmark" tint="blue" value={h.week.saved} label="saved" />
+            <StatTile icon="book" tint="purple" value={h.week.read} label="read" />
+          </View>
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.sm }}>
+            <StatTile icon="layers" tint="orange" value={h.week.reviewDays} label={h.week.reviewDays === 1 ? 'review day' : 'review days'} />
+            <StatTile icon="flame" tint="green" value={h.week.activeDays} label={h.week.activeDays === 1 ? 'active day' : 'active days'} />
+          </View>
+        </Section>
+      ) : null}
 
       <Section title="Follow-ups" action={<Button kind="text" title="Manage" icon="options-outline" onPress={() => setFollowOpen(true)} />}>
         {follows.loading && !follows.data ? <Loading /> : null}
@@ -176,8 +218,9 @@ export default function DevScreen({ navigation }: Props) {
             {f.items.slice(0, 3).map((it) => (
               <Pressable key={it.id} onPress={() => void Linking.openURL(it.url)} accessibilityRole="link" accessibilityLabel={it.title}
                 style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}>
-                <Ionicons name={SOURCE[it.source].icon} size={15} color={c.textMuted} />
-                <T v="small" numberOfLines={1} style={{ flex: 1 }}>{it.title}</T>
+                <Ionicons name={it.kind === 'release' ? 'pricetag' : SOURCE[it.source].icon} size={15} color={it.kind === 'release' ? c.tint.green : c.textMuted} />
+                <T v="small" numberOfLines={1} style={{ flex: 1, fontWeight: it.kind === 'release' ? '700' : '400' }}>{it.title}</T>
+                {it.prerelease ? <Chip label="Pre-release" tone="warning" /> : null}
                 <IconButton icon="bookmark-outline" size={16} label={`Save ${it.title}`} onPress={() => void save(it)} />
               </Pressable>
             ))}
@@ -205,8 +248,12 @@ export default function DevScreen({ navigation }: Props) {
   );
 
   const libraryClaude = (toolbox.data?.tools ?? []).filter((t) => /claude|mcp|skill|agent/i.test(t.name));
+  const claudeEmpty = claude.data && !claude.loading && CLAUDE_SECTIONS.every((s) => !claude.data?.data[s.kind]?.length);
   const claudeTab = (
     <>
+      <Segmented<ClaudeMode> value={claudeMode} onChange={setClaudeMode} options={[{ key: 'top', label: 'Top' }, { key: 'new', label: 'New this week' }]} />
+      <View style={{ height: space.sm }} />
+      {claudeEmpty && claudeMode === 'new' && !claude.data?.error ? <T color="textMuted">Nothing new this week. Check Top.</T> : null}
       {claude.data?.error ? <Banner tone="warning" title="Couldn't refresh" body={claude.data.error} /> : null}
       {libraryClaude.length ? (
         <Section title="In your library">
@@ -227,15 +274,27 @@ export default function DevScreen({ navigation }: Props) {
   );
 
   const tb = toolbox.data;
+  const f = toolFilter.trim().toLowerCase();
+  const match = (x: string) => !f || x.toLowerCase().includes(f);
+  const repos = tb?.repos.filter((r) => match(r.name)) ?? [];
+  const tools = tb?.tools.filter((t) => match(t.name)) ?? [];
+  const commands = tb?.commands.filter((cmd) => match(cmd.command)) ?? [];
+  // Commands grouped by the tool they run (git, npm, docker…), largest group first.
+  const groups = [...commands.reduce((m, cmd) => m.set(commandGroup(cmd.command), [...(m.get(commandGroup(cmd.command)) ?? []), cmd]), new Map<string, typeof commands>())]
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
   const toolboxTab = !tb ? <Loading /> : (
     <>
+      {tb.repos.length || tb.tools.length || tb.commands.length ? (
+        <Field label="Filter" value={toolFilter} onChangeText={setToolFilter} autoCapitalize="none" autoCorrect={false} placeholder="Filter repos, tools, commands…" />
+      ) : null}
+      {f && !repos.length && !tools.length && !commands.length ? <T color="textMuted">Nothing matches "{toolFilter.trim()}".</T> : null}
       {!tb.repos.length && !tb.tools.length && !tb.commands.length ? (
         <T color="textMuted">Save GitHub repos, tutorials and dev videos: their repos, tools and commands collect here.</T>
       ) : null}
-      {tb.repos.length ? (
-        <Section title={`Repos (${tb.repos.length})`}>
+      {repos.length ? (
+        <Section title={`Repos (${repos.length})`}>
           <Card style={{ paddingVertical: space.xs }}>
-            {tb.repos.map((r) => (
+            {repos.map((r) => (
               <Pressable key={r.name} onPress={() => void Linking.openURL(`https://github.com/${r.name}`)} onLongPress={() => navigation.navigate('ItemDetail', { id: r.itemIds[0] })}
                 accessibilityRole="link" accessibilityLabel={`${r.name}, in ${r.count} item${r.count === 1 ? '' : 's'}`} accessibilityHint="Long press to open the item it came from"
                 style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 8, opacity: pressed ? 0.6 : 1 })}>
@@ -247,23 +306,28 @@ export default function DevScreen({ navigation }: Props) {
           </Card>
         </Section>
       ) : null}
-      {tb.tools.length ? (
+      {tools.length ? (
         <Section title="Tools">
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {tb.tools.map((t) => <Chip key={t.name} label={`${t.name} · ${t.count}`} onPress={() => navigation.navigate('Main', { screen: 'Library', params: { q: t.name } })} />)}
+            {tools.map((t) => <Chip key={t.name} label={`${t.name} · ${t.count}`} onPress={() => navigation.navigate('Main', { screen: 'Library', params: { q: t.name } })} />)}
           </View>
         </Section>
       ) : null}
-      {tb.commands.length ? (
-        <Section title="Commands">
-          {tb.commands.map((cmd) => (
-            <Card key={cmd.command} style={{ marginBottom: space.sm, padding: space.md, backgroundColor: cmd.destructive ? c.dangerSoft : c.surface }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <T v="mono" selectable style={{ flex: 1 }}>{cmd.command}</T>
-                <IconButton icon="copy-outline" size={18} label={`Copy ${cmd.command}`} onPress={() => copy(cmd.command, 'Command')} />
-              </View>
-              {cmd.destructive ? <T v="small" color="danger">⚠ Potentially destructive: {cmd.reason}</T> : null}
-            </Card>
+      {commands.length ? (
+        <Section title={`Commands (${commands.length})`}>
+          {groups.map(([group, cmds]) => (
+            <View key={group} style={{ marginBottom: space.sm }}>
+              <T v="caption" color="textMuted" style={{ fontWeight: '800', marginBottom: space.xs }} accessibilityRole="header">{group} · {cmds.length}</T>
+              {cmds.map((cmd) => (
+                <Card key={cmd.command} style={{ marginBottom: space.xs, padding: space.md, backgroundColor: cmd.destructive ? c.dangerSoft : c.surface }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <T v="mono" selectable style={{ flex: 1 }}>{cmd.command}</T>
+                    <IconButton icon="copy-outline" size={18} label={`Copy ${cmd.command}`} onPress={() => copy(cmd.command, 'Command')} />
+                  </View>
+                  {cmd.destructive ? <T v="small" color="danger">⚠ Potentially destructive: {cmd.reason}</T> : null}
+                </Card>
+              ))}
+            </View>
           ))}
           <T v="caption" color="textFaint">Copied from your saved items. Qivra never runs commands.</T>
         </Section>
@@ -289,7 +353,7 @@ export default function DevScreen({ navigation }: Props) {
       </ScrollView>
 
       <Sheet visible={followOpen} onClose={() => setFollowOpen(false)} title="Follow topics">
-        <T v="small" color="textMuted">Topics or repos to watch on GitHub and Hacker News (up to {MAX_DEV_FOLLOWS}).</T>
+        <T v="small" color="textMuted">Topics or repos to watch on GitHub and Hacker News (up to {MAX_DEV_FOLLOWS}). Follow an owner/repo to also get its new releases.</T>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginVertical: space.sm }}>
           {(settings?.devFollows ?? []).map((t) => (
             <Chip key={t} label={`${t} ✕`} onPress={() => void updateSettings({ devFollows: (settings?.devFollows ?? []).filter((x) => x !== t) })} />

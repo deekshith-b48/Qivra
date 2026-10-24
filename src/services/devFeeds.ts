@@ -8,8 +8,9 @@
 
 import { localDate, rangeFor } from '../core/dates';
 import {
-  CLAUDE_QUERIES, type ClaudeKind, dayComplete, type FeedItem, githubSearchUrl, type Habits, hfTrendingUrl, hnSearchUrl, mixFeeds,
-  parseGithub, parseHf, parseHn, streak, trendingAiReposUrl,
+  bestStreak, CLAUDE_QUERIES, type ClaudeKind, type ClaudeMode, claudeQuery, dayComplete, type FeedItem, githubReleasesUrl, githubSearchUrl,
+  type Habits, hfTrendingUrl, hnSearchUrl, isRepoTerm, lastNDays, mixFeeds, parseGithub, parseHf, parseHn, parseReleases, streak,
+  trendingAiReposUrl,
 } from '../core/devFeeds';
 import { getRepo } from './db';
 import { fetchText } from './http';
@@ -76,11 +77,12 @@ export function allTrends(t: Trends): FeedItem[] {
   return mixFeeds(t.github, t.hn, t.hf);
 }
 
-export async function getClaudeCorner(force = false): Promise<FeedResult<Record<ClaudeKind, FeedItem[]>>> {
-  return cached('claude', 6 * HOUR, force, async () => {
+export async function getClaudeCorner(force = false, mode: ClaudeMode = 'top'): Promise<FeedResult<Record<ClaudeKind, FeedItem[]>>> {
+  return cached(`claude.${mode}`, 6 * HOUR, force, async () => {
     const out = {} as Record<ClaudeKind, FeedItem[]>;
+    const now = Date.now();
     for (const kind of Object.keys(CLAUDE_QUERIES) as ClaudeKind[]) {
-      out[kind] = parseGithub(await getJson(githubSearchUrl(CLAUDE_QUERIES[kind], 'stars', 10)));
+      out[kind] = parseGithub(await getJson(githubSearchUrl(claudeQuery(kind, mode, now), 'stars', 10)));
     }
     return out;
   }, { skills: [], plugins: [], mcp: [] });
@@ -106,11 +108,15 @@ export async function getFollowUps(force = false): Promise<FeedResult<FollowUp[]
     for (const term of devFollows) {
       const since = await sinceOf(term);
       const sinceDay = new Date(since).toISOString().slice(0, 10);
-      const [gh, hn] = await Promise.all([
+      const [releases, gh, hn] = await Promise.all([
+        // A followed owner/repo also tracks that repo's releases.
+        isRepoTerm(term)
+          ? getJson(githubReleasesUrl(term)).then((j) => parseReleases(j, term.trim()).filter((r) => r.createdAt && Date.parse(r.createdAt) > since)).catch(() => [])
+          : Promise.resolve([] as FeedItem[]),
         getJson(githubSearchUrl(`${term} in:name,description,topics pushed:>${sinceDay}`, 'stars', 5)).then(parseGithub).catch(() => []),
         getJson(hnSearchUrl(term, since, 10, 5)).then(parseHn).catch(() => []),
       ]);
-      out.push({ term, items: mixFeeds(gh, hn), since });
+      out.push({ term, items: [...releases, ...mixFeeds(gh, hn)], since });
     }
     return out;
   }, []);
@@ -146,7 +152,21 @@ export async function noteTrendsChecked(): Promise<void> {
   await repo.setMeta(`dev.trends.${key}`, '1');
 }
 
-export async function getHabits(): Promise<{ habits: Habits; streak: number }> {
+export interface WeekRecap {
+  saved: number;
+  read: number;
+  reviewDays: number;
+  activeDays: number;
+}
+
+export async function getHabits(): Promise<{
+  habits: Habits;
+  streak: number;
+  best: number;
+  /** The last 35 days, oldest first. */
+  heatmap: { day: string; done: boolean }[];
+  week: WeekRecap;
+}> {
   const repo = await getRepo();
   const { key, timezone } = await todayKey();
   const r = rangeFor('today', Date.now(), timezone);
@@ -158,7 +178,16 @@ export async function getHabits(): Promise<{ habits: Habits; streak: number }> {
   };
   if (dayComplete(habits)) await repo.setMeta(`dev.day.${key}`, '1');
   const days = new Set((await repo.metaKeys('dev.day.')).map((k) => k.slice('dev.day.'.length)));
-  return { habits, streak: streak(days, key) };
+  const heatmap = lastNDays(key, 35).map((day) => ({ day, done: days.has(day) }));
+  const w = rangeFor('week', Date.now(), timezone);
+  const weekDays = new Set(lastNDays(key, 7));
+  const week: WeekRecap = {
+    saved: await repo.countWhere('captured_at >= ? AND captured_at < ?', [w.startIso, w.endIso]),
+    read: await repo.countWhere('last_viewed_at >= ? AND last_viewed_at < ?', [w.startIso, w.endIso]),
+    reviewDays: (await repo.metaKeys('dev.reviewed.')).filter((k) => weekDays.has(k.slice('dev.reviewed.'.length))).length,
+    activeDays: heatmap.slice(-7).filter((d) => d.done).length,
+  };
+  return { habits, streak: streak(days, key), best: bestStreak(days), heatmap, week };
 }
 
 /**
@@ -174,7 +203,9 @@ export async function notifyFollowUps(now = new Date()): Promise<boolean> {
   const Notifications = await import('expo-notifications');
   if (!(await Notifications.getPermissionsAsync()).granted) return false;
   const res = await getFollowUps();
-  const parts = res.data.filter((f) => f.items.length).map((f) => `${f.items.length} new for ${f.term}`);
+  // Releases by name first ("anthropics/claude-code v2.1.0 released"), then counts per topic.
+  const releases = res.data.flatMap((f) => f.items.filter((i) => i.kind === 'release').slice(0, 1).map((i) => `${i.title} released`));
+  const parts = [...releases, ...res.data.filter((f) => f.items.some((i) => i.kind !== 'release')).map((f) => `${f.items.filter((i) => i.kind !== 'release').length} new for ${f.term}`)];
   if (!parts.length) return false;
   await Notifications.scheduleNotificationAsync({
     content: { title: 'New in topics you follow', body: parts.join(', '), data: { url: 'qivra://dev' } },

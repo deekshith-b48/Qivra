@@ -91,7 +91,7 @@ export class Repo {
       `SELECT json_extract(j.value, '$.command') AS command, json_extract(j.value, '$.destructive') AS destructive,
               json_extract(j.value, '$.reason') AS reason, MIN(i.id) AS item_id
        FROM items i, ${src('$.commands')} j WHERE i.deleted = 0 AND json_extract(j.value, '$.command') IS NOT NULL
-       GROUP BY command ORDER BY MAX(i.captured_at) DESC LIMIT ?`, [limit]);
+       GROUP BY command ORDER BY MAX(i.captured_at) DESC LIMIT ?`, [limit * 2.5]); // grouped by tool in the UI, so a longer list stays readable
     return {
       repos: repos.map((r) => ({ name: str(r.name), count: Number(r.n), itemIds: str(r.ids).split(',').filter(Boolean) })),
       tools: tools.map((r) => ({ name: str(r.name), count: Number(r.n) })),

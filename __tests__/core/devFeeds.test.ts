@@ -1,5 +1,6 @@
 import {
-  dayComplete, githubSearchUrl, hfTrendingUrl, hnSearchUrl, installCommand, mixFeeds, parseGithub, parseHf, parseHn, streak, trendingAiReposUrl,
+  bestStreak, claudeQuery, commandGroup, dayComplete, githubReleasesUrl, githubSearchUrl, hfTrendingUrl, hnSearchUrl, installCommand, isRepoTerm,
+  lastNDays, mixFeeds, parseGithub, parseHf, parseHn, parseReleases, streak, trendingAiReposUrl,
 } from '../../src/core/devFeeds';
 
 test('request URLs are encoded (HN filters need %3E for ">")', () => {
@@ -42,4 +43,45 @@ test('habits: three of four complete a day; the streak survives an unfinished to
   expect(streak(done, '2026-10-23')).toBe(3); // today not done yet
   expect(streak(new Set([...done, '2026-10-23']), '2026-10-23')).toBe(4);
   expect(streak(new Set(['2026-10-20']), '2026-10-23')).toBe(0);
+});
+
+test('followed owner/repo terms track releases; drafts and non-GitHub links are dropped', () => {
+  expect(isRepoTerm('anthropics/claude-code')).toBe(true);
+  expect(isRepoTerm(' anthropics/claude-code ')).toBe(true);
+  for (const bad of ['MCP', '../etc', 'a/b/c', 'a b/c', '/x', 'x/']) expect(isRepoTerm(bad)).toBe(false);
+  expect(githubReleasesUrl('anthropics/claude-code')).toBe('https://api.github.com/repos/anthropics/claude-code/releases?per_page=5');
+  const rel = parseReleases([
+    { tag_name: 'v2.1.0', html_url: 'https://github.com/a/b/releases/tag/v2.1.0', published_at: '2026-10-22T10:00:00Z', body: '## Highlights\n- **Faster** startup' },
+    { tag_name: 'v2.2.0-beta', html_url: 'https://github.com/a/b/releases/tag/v2.2.0-beta', prerelease: true, body: '' },
+    { tag_name: 'v3', html_url: 'https://github.com/a/b/releases/tag/v3', draft: true },
+    { tag_name: 'evil', html_url: 'javascript:alert(1)' },
+  ], 'a/b');
+  expect(rel.map((r) => [r.title, r.kind, r.prerelease])).toEqual([['a/b v2.1.0', 'release', false], ['a/b v2.2.0-beta', 'release', true]]);
+  expect(rel[0]).toMatchObject({ description: 'Highlights', createdAt: '2026-10-22T10:00:00Z', id: 'rel:a/b@v2.1.0' });
+  expect(parseReleases({ message: 'Not Found' }, 'a/b')).toEqual([]);
+});
+
+test('Claude corner "new this week" adds a created-since filter', () => {
+  expect(claudeQuery('plugins', 'top', Date.UTC(2026, 9, 23))).toBe('topic:claude-code-plugin');
+  expect(claudeQuery('mcp', 'new', Date.UTC(2026, 9, 23))).toBe('topic:mcp-server created:>2026-10-16');
+});
+
+test('commands group by the tool they run', () => {
+  expect(commandGroup('git status')).toBe('git');
+  expect(commandGroup('sudo apt install ffmpeg')).toBe('apt');
+  expect(commandGroup('npx expo prebuild --clean')).toBe('expo');
+  expect(commandGroup('python3 -m pytest -q')).toBe('pytest');
+  expect(commandGroup('FOO=1 BAR=2 npm run build')).toBe('npm');
+  expect(commandGroup('$ Docker ps')).toBe('docker');
+  expect(commandGroup('./gradlew assembleRelease')).toBe('gradlew');
+  expect(commandGroup('')).toBe('other');
+});
+
+test('heatmap days and best streak', () => {
+  const days = lastNDays('2026-11-02', 35);
+  expect(days).toHaveLength(35);
+  expect(days[0]).toBe('2026-09-29');
+  expect(days.slice(-3)).toEqual(['2026-10-31', '2026-11-01', '2026-11-02']); // across the month boundary
+  expect(bestStreak(new Set(['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07']))).toBe(3);
+  expect(bestStreak(new Set())).toBe(0);
 });

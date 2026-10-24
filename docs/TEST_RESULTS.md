@@ -1,5 +1,19 @@
 # Test results
 
+## Unreleased (2026-10-24): Dev tab upgrades
+
+- `tsc` passes. Jest: 353 passed, 4 live tests skipped. Server pytest: 131 passed.
+- New tests:
+  - Followed `owner/repo` terms: safe-name check, release URL, release parsing (drafts and non-GitHub links dropped, pre-releases flagged).
+  - Claude corner "new this week" query; commands grouped by tool (`sudo`, `VAR=x`, `npx` and `python -m` handled); heatmap days across a month boundary and best streak.
+  - Dev screen: a followed repo's release shows by tag; the heatmap counts active days; Weekly report opens the report; "New this week" asks GitHub for recent repos; a library repo is marked "In your library"; the Toolbox filter narrows the lists and commands appear under tool headings.
+- Emulator (release build, live network):
+  - Following `anthropics/claude-code` showed its latest releases (v2.1.310, v2.1.309, v2.1.308) with tag icons.
+  - Heatmap, best streak and the "Last 7 days" card fit in light and dark themes.
+  - Claude "New this week" listed only repos created in the last week; Top is unchanged.
+  - Toolbox filter "whisper" narrowed to 3 repos and 1 tool.
+- Not verified on the emulator: command groups and the "In your library" mark (this test library has no saved commands or matching repos; both are covered by the UI test).
+
 ## 2.0.0 (2026-10-23): bring-your-own Groq key, compact UI, open fixes
 
 - Release APK: `dist/Qivra-2.0.0-release.apk`, version code 17.

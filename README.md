@@ -52,7 +52,7 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 | **Understand** | YouTube captions are fetched on the phone. Reels and X videos are transcribed by your optional server (Groq Whisper, or local Whisper). Text in images is read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
 | **Ask & learn** | Chat with your whole library or one item. Answers stream, cite numbered sources and jump to the right second of a video. Make flashcards from any item and review them with spaced repetition. Daily, weekly and topic reports export as Markdown or PDF. |
 | **Organise** | Library grid or list, full-text search (SQLite FTS5) and search by meaning, smart collections, favourites, highlights and revisit reminders. Swipe to archive or delete, with undo. |
-| **Dev mode** (opt-in) | A Dev tab with AI trends from GitHub, Hacker News and Hugging Face, Claude Code skills, plugins and MCP servers, follow-ups on topics you choose, and a daily-habit streak. Hidden unless you turn it on. |
+| **Dev mode** (opt-in) | A Dev tab with AI trends from GitHub, Hacker News and Hugging Face; Claude Code skills, plugins and MCP servers (top or new this week); follow-ups on topics you choose, with new releases of repos you follow; a daily-habit streak with a 5-week heatmap and a weekly recap; and a searchable toolbox of the repos, tools and commands in your library, grouped by tool. Hidden unless you turn it on. |
 | **Privacy** | Keys in Android's Keystore, no backups to the cloud, permissions asked only when needed, and saved content treated as untrusted (commands are shown, never run). |
 
 <details>

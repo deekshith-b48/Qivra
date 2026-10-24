@@ -3,7 +3,9 @@ import * as Clipboard from 'expo-clipboard';
 import DevScreen from '../../src/screens/DevScreen';
 import OnboardingScreen from '../../src/screens/OnboardingScreen';
 import { getRepo } from '../../src/services/db';
-import { getSettings } from '../../src/services/settings';
+import { getSettings, updateSettings } from '../../src/services/settings';
+import { localDate } from '../../src/core/dates';
+import { prevDay } from '../../src/core/devFeeds';
 import { ThemeProvider } from '../../src/ui/theme';
 import { resetTestRepo } from '../helpers/uiSetup';
 
@@ -14,12 +16,13 @@ const wrap = (el: React.ReactElement) => render(<ThemeProvider>{el}</ThemeProvid
 
 const GH = { items: [{ full_name: 'DietrichGebert/ponytail', html_url: 'https://github.com/DietrichGebert/ponytail', description: 'Lazy senior dev mode', stargazers_count: 4200 }] };
 const HN = { hits: [{ objectID: '42', title: 'AI agents find bugs', url: 'https://example.com/ai', points: 300, num_comments: 80 }] };
+const RELEASES = [{ tag_name: 'v2.1.0', html_url: 'https://github.com/anthropics/claude-code/releases/tag/v2.1.0', published_at: new Date().toISOString(), body: 'Faster startup' }];
 const HF = [{ id: 'deepseek-ai/DeepSeek-V4', likes: 2300, pipeline_tag: 'text-generation' }];
 
 beforeEach(() => {
   resetTestRepo();
   global.fetch = jest.fn(async (url: string) => {
-    const body = url.includes('hn.algolia') ? HN : url.includes('huggingface') ? HF : GH;
+    const body = url.includes('/releases') ? RELEASES : url.includes('hn.algolia') ? HN : url.includes('huggingface') ? HF : GH;
     return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(body) };
   }) as never;
 });
@@ -48,4 +51,43 @@ test('Dev screen: habits, trends from all three sources, save to library, copy a
   fireEvent.press(screen.getByRole('tab', { name: 'Claude' }));
   fireEvent.press((await screen.findAllByRole('button', { name: 'Copy install command for DietrichGebert/ponytail' }))[0]);
   expect(copied).toHaveBeenCalledWith('/plugin marketplace add DietrichGebert/ponytail');
+});
+
+test('Dev upgrades: repo releases, heatmap + weekly report, Claude "new this week" + library mark, toolbox filter and groups', async () => {
+  const navigation = nav() as unknown as { navigate: jest.Mock };
+  const repo = await getRepo();
+  const { timezone } = await getSettings();
+  const today = localDate(Date.now(), timezone);
+  await repo.setMeta(`dev.day.${prevDay(today)}`, '1');
+  await repo.setMeta(`dev.day.${prevDay(prevDay(today))}`, '1');
+  await updateSettings({ devFollows: ['anthropics/claude-code'] });
+  const enr = { origin: 'local', version: 1, provider: 't', generatedAt: '2026-10-01T00:00:00Z', summary: '', keyPoints: [], concepts: [], tools: ['Docker'], urls: [], tags: [], followUpQuestions: [], actionItems: [], timestamps: [],
+    repos: ['dietrichgebert/ponytail'], // lower case: the library mark ignores case
+    commands: [{ command: 'git status', destructive: false }, { command: 'git log --oneline', destructive: false }, { command: 'npx expo prebuild', destructive: false }] };
+  const { item } = await repo.createItem({ sourceType: 'github', url: 'https://github.com/DietrichGebert/ponytail', title: 'ponytail' });
+  await repo.updateItem(item.id, { enrichment: enr as never });
+
+  wrap(<DevScreen navigation={navigation as never} route={{ key: 'd', name: 'Dev' } as never} />);
+  // Follow-ups: the followed repo's new release, by tag.
+  expect(await screen.findByText('anthropics/claude-code v2.1.0')).toBeTruthy();
+  // Heatmap and best streak from the two completed days.
+  expect(await screen.findByLabelText('2 active days in the last 5 weeks')).toBeTruthy();
+  expect(screen.getByText(/best streak 2 days/)).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Weekly report' }));
+  await waitFor(() => expect(navigation.navigate).toHaveBeenCalledWith('ReportDetail', expect.objectContaining({ id: expect.any(String) })));
+
+  // Claude: "New this week" asks GitHub for recently created repos; a repo in the library is marked.
+  fireEvent.press(screen.getByRole('tab', { name: 'Claude' }));
+  expect((await screen.findAllByText('In your library')).length).toBeGreaterThan(0);
+  fireEvent.press(screen.getByRole('tab', { name: 'New this week' }));
+  await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).includes('created%3A%3E'))).toBe(true));
+
+  // Toolbox: commands grouped by tool; the filter narrows the lists.
+  fireEvent.press(screen.getByRole('tab', { name: 'Toolbox' }));
+  expect(await screen.findByText('git · 2')).toBeTruthy();
+  expect(screen.getByText('expo · 1')).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Filter'), 'expo');
+  expect(await screen.findByText('npx expo prebuild')).toBeTruthy();
+  expect(screen.queryByText('git status')).toBeNull();
+  expect(screen.queryByText('dietrichgebert/ponytail')).toBeNull();
 });
