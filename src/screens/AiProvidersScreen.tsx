@@ -78,9 +78,7 @@ export default function AiProvidersScreen({ navigation }: RootProps<'AiProviders
         <T v="subtitle">Status</T>
         <T color="textMuted">{s?.ai.enabled
           ? `Using ${s.ai.model} at ${s.ai.baseUrl}${s.ai.externalConsent ? ' (external, consent given)' : ''}`
-          : ai?.source === 'server'
-            ? `Using ${ai.model} via your Qivra server (${ai.where}). The server holds the API key — nothing to fill in here. New items get AI summaries automatically.`
-            : 'No model configured. Answers quote your saved items; summaries are extractive.'}</T>
+          : 'No model configured. Choose the Groq preset and paste your free key from console.groq.com/keys. Without it, answers quote your saved items and summaries are extractive.'}</T>
         {usage.data ? <T v="small" color="textMuted" style={{ marginTop: 4 }}>Last 30 days: {usage.data.calls} model call(s), {usage.data.promptTokens + usage.data.completionTokens} tokens reported by the provider. Cost depends on your provider’s pricing.</T> : null}
       </Card>
       <Section title="Presets">

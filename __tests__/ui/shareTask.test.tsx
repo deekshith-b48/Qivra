@@ -14,8 +14,7 @@ jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn(async () => ({ exists: false })),
 }));
 jest.mock('../../src/services/capture', () => ({ drainShareInbox: jest.fn() }));
-jest.mock('../../src/services/processing', () => ({ runDueJobs: jest.fn(async () => 0), wakeServerJobs: jest.fn(async () => undefined), recoverIfIdle: jest.fn(async () => 0) }));
-jest.mock('../../src/services/server', () => ({ getConnection: jest.fn(async () => null), checkConnection: jest.fn() }));
+jest.mock('../../src/services/processing', () => ({ runDueJobs: jest.fn(async () => 0), wakeWaitingJobs: jest.fn(async () => undefined), recoverIfIdle: jest.fn(async () => 0) }));
 
 beforeEach(() => {
   resetTestRepo();

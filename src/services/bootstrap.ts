@@ -6,10 +6,9 @@ import { registerBackgroundWork } from './background';
 import { drainShareInbox, type CaptureResult } from './capture';
 import { getRepo } from './db';
 import { runLegacyImport } from './legacyImport';
-import { requestSync, runDueJobs, upgradeOldReadmes, wakeServerJobs } from './processing';
+import { removeServerOnce, runDueJobs, upgradeOldReadmes, wakeWaitingJobs } from './processing';
 import { refreshDailyDigest } from './reminders';
 import { ensureEmbeddings } from './semantic';
-import { checkConnection, getConnection } from './server';
 import { maybeGenerateWeeklyReport } from './weeklyReport';
 
 setRandomSource((bytes) => Crypto.getRandomValues(bytes));
@@ -28,11 +27,8 @@ export async function boot(): Promise<BootResult> {
   const onboarded = (await repo.getMeta('app.onboarded')) === '1';
   void registerBackgroundWork();
   void (async () => {
-    if (await getConnection()) {
-      const c = await checkConnection();
-      if (c && !c.lastError) await wakeServerJobs(repo);
-      if (await repo.syncEnabled()) await requestSync();
-    }
+    // Installs that were paired with the old laptop server move everything onto the phone (once).
+    await removeServerOnce(repo).catch(() => 0);
     await runDueJobs();
     await refreshDailyDigest();
     // Backfill meaning-based search for anything not embedded yet (new items, or a newly available model).
@@ -47,11 +43,8 @@ export async function boot(): Promise<BootResult> {
 export async function onResume(): Promise<BootResult['shared']> {
   const shared = await drainShareInbox().catch(() => ({ results: [], rejected: [] }));
   void (async () => {
-    // Picks up a server that was (re)started meanwhile, including its AI gateway.
-    if (await getConnection()) {
-      const c = await checkConnection().catch(() => null);
-      if (c && !c.lastError) await wakeServerJobs(await getRepo());
-    }
+    // Back in the app, probably online again: jobs that were waiting for the internet run now.
+    await wakeWaitingJobs(await getRepo());
     await runDueJobs();
     await refreshDailyDigest();
     // Backfill meaning-based search for anything not embedded yet (new items, or a newly available model).

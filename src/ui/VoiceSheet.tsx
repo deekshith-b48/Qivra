@@ -65,8 +65,7 @@ export function VoiceSheet({
           return;
         }
         setHint(mode === 'device' ? `${a.model.label} on this phone. Audio stays here during transcription. Up to 5 minutes.`
-          : mode === 'cloud' ? 'Sent to Groq Whisper with your key for transcription. Up to 12 minutes.'
-            : 'Recording will be sent to your Qivra server for transcription. Up to 5 minutes.');
+          : 'Sent to Groq Whisper with your key for transcription. Up to 12 minutes.');
         setStage({ k: 'idle', mode });
       } catch (e) {
         if (key === session.current) setStage({ k: 'error', message: (e as Error).message });
@@ -120,14 +119,6 @@ export function VoiceSheet({
       temporary = file.uri;
       if (key !== session.current) return;
       if (file.durationMs < 400) throw new Error('That was too short. Tap the mic and speak, then tap stop.');
-      if (mode === 'server') {
-        const id = await saveVoiceNote(file, 'server');
-        temporary = null; // the saved item owns the audio now
-        if (key !== session.current) return;
-        onSaved?.(id);
-        onClose();
-        return;
-      }
       const t = mode === 'cloud' ? await transcribeInCloud(file.uri) : await transcribeOnDevice(file.uri, (progress) => {
         if (key === session.current) setStage({ k: 'transcribing', mode, progress });
       }, controller.signal);
@@ -189,7 +180,7 @@ export function VoiceSheet({
       {stage.k === 'transcribing' ? (
         <View style={{ paddingVertical: space.xl, alignItems: 'center' }}>
           <Ionicons name="sparkles-outline" size={28} color={c.accent} />
-          <T accessibilityLiveRegion="polite" v="subtitle" style={{ marginTop: space.sm }}>{stage.mode === 'device' ? 'Transcribing on your phone…' : stage.mode === 'cloud' ? 'Transcribing with Groq…' : 'Uploading to your server…'}</T>
+          <T accessibilityLiveRegion="polite" v="subtitle" style={{ marginTop: space.sm }}>{stage.mode === 'device' ? 'Transcribing on your phone…' : 'Transcribing with Groq…'}</T>
           <View style={{ width: '100%', height: 6, backgroundColor: c.surfaceAlt, borderRadius: radius.pill, marginTop: space.md, overflow: 'hidden' }}>
             <View style={{ width: `${Math.round((stage.progress || 0.05) * 100)}%`, height: 6, backgroundColor: c.accent }} />
           </View>

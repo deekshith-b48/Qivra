@@ -19,8 +19,6 @@ import AiProvidersScreen from './src/screens/AiProvidersScreen';
 import VoiceSettingsScreen from './src/screens/VoiceSettingsScreen';
 import CaptureScreen from './src/screens/CaptureScreen';
 import CollectionsScreen from './src/screens/CollectionsScreen';
-import ConflictsScreen from './src/screens/ConflictsScreen';
-import ConnectServerScreen from './src/screens/ConnectServerScreen';
 import DevScreen from './src/screens/DevScreen';
 import GlanceScreen from './src/screens/GlanceScreen';
 import HighlightsScreen from './src/screens/HighlightsScreen';
@@ -29,7 +27,6 @@ import JobsScreen from './src/screens/JobsScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import PrivacyStorageScreen from './src/screens/PrivacyStorageScreen';
-import QrScanScreen from './src/screens/QrScanScreen';
 import ReportDetailScreen from './src/screens/ReportDetailScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
@@ -142,7 +139,7 @@ function Root() {
     <NavigationContainer
       ref={nav}
       theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, border: c.border, primary: c.text } }}
-      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Glance: { path: 'glance', alias: ['study'] }, Library: 'library', Dev: 'dev', Agent: 'ask' } }, Reports: 'reports', ConnectServer: 'connect', ItemDetail: 'item/:id' } } }}
+      linking={{ prefixes: ['qivra://'], config: { screens: { Main: { screens: { Today: 'today', Glance: { path: 'glance', alias: ['study'] }, Library: 'library', Dev: 'dev', Agent: 'ask' } }, Reports: 'reports', ItemDetail: 'item/:id' } } }}
     >
       <StatusBar style={c.scheme === 'dark' ? 'light' : 'dark'} />
       <Stack.Navigator initialRouteName={state.boot?.onboarded ? 'Main' : 'Onboarding'} screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: c.bg } }}>
@@ -158,13 +155,10 @@ function Root() {
         <Stack.Screen name="Reports" component={ReportsScreen} />
         <Stack.Screen name="ReportDetail" component={ReportDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen name="ConnectServer" component={ConnectServerScreen} />
-        <Stack.Screen name="QrScan" component={QrScanScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="AiProviders" component={AiProvidersScreen} />
         <Stack.Screen name="VoiceSettings" component={VoiceSettingsScreen} />
         <Stack.Screen name="PrivacyStorage" component={PrivacyStorageScreen} />
         <Stack.Screen name="Jobs" component={JobsScreen} />
-        <Stack.Screen name="Conflicts" component={ConflictsScreen} />
         <Stack.Screen name="About" component={AboutScreen} />
       </Stack.Navigator>
     </NavigationContainer>

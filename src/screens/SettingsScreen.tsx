@@ -17,20 +17,18 @@ import { Button, Card, Field, Group, Header, Row, Screen, Section, Sheet, T, Tog
 import { useQuery } from '../ui/hooks';
 import { Segmented } from '../ui/media';
 import { space, useTheme } from '../ui/theme';
-import { useAiInfo, useConnection, useSettings } from '../ui/useSettings';
+import { useAiInfo, useSettings } from '../ui/useSettings';
 
 export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
   const { c } = useTheme();
   const s = useSettings();
   const ai = useAiInfo();
-  const { connection } = useConnection();
   const counts = useQuery(async (repo) => ({
     jobs: await repo.jobCounts(),
-    conflicts: (await repo.openConflicts()).length,
     items: await repo.countWhere('1 = 1'),
     shelves: await repo.shelfCounts(),
     reminders: (await repo.upcomingReminders(new Date().toISOString(), 100)).length,
-  }), ['jobs', 'conflicts', 'items']);
+  }), ['jobs', 'items']);
   const notif = useQuery(async () => {
     try {
       return await Notifications.getPermissionsAsync();
@@ -45,7 +43,6 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
   const j = counts.data?.jobs;
   const n = counts.data;
   const t = c.tint;
-  const serverState = connection ? (connection.lastError ? 'Problem' : 'Connected') : 'Not connected';
   const askNotifications = async () => {
     const cur = notif.data;
     if (cur?.granted) return;
@@ -64,22 +61,15 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
           <Wordmark size={24} />
           <T v="caption" color="textMuted" style={{ marginTop: 4 }}>Version {Constants.expoConfig?.version ?? '—'}{n ? ` · ${n.items} item${n.items === 1 ? '' : 's'}` : ''}</T>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }} accessibilityLabel={`Server: ${serverState}`}>
-          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: connection ? (connection.lastError ? t.red : t.green) : t.gray }} />
-          <T v="caption" color="textMuted">{serverState}</T>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }} accessibilityLabel={`AI: ${ai?.enabled ? 'on' : 'off'}`}>
+          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: ai?.enabled ? t.green : t.gray }} />
+          <T v="caption" color="textMuted">{ai?.enabled ? 'AI on' : 'AI off'}</T>
         </View>
       </Card>
 
-      <Section title="Connection">
-        <Group>
-          <Row icon="server" tint={t.indigo} title="Your Qivra server" value={connection ? serverState : 'Connect'} onPress={() => navigation.navigate('ConnectServer')} />
-          <Row icon="git-compare" tint={t.orange} title="Sync conflicts" value={n?.conflicts ? `${n.conflicts} to review` : 'None'} onPress={() => navigation.navigate('Conflicts')} />
-        </Group>
-      </Section>
-
       <Section title="AI & processing">
         <Group>
-          <Row icon="hardware-chip" tint={t.pink} title="AI models" value={ai?.enabled ? ai.model ?? 'On' : 'Off'} subtitle={ai?.enabled ? (ai.source === 'server' ? 'Through your Qivra server' : ai.where ?? undefined) : 'Qivra works without AI'} onPress={() => navigation.navigate('AiProviders')} />
+          <Row icon="hardware-chip" tint={t.pink} title="AI models" value={ai?.enabled ? ai.model ?? 'On' : 'Off'} subtitle={ai?.enabled ? 'Your own key: answers, summaries and video transcripts' : 'Add your free Groq key for AI and video transcripts'} onPress={() => navigation.navigate('AiProviders')} />
           <Row icon="mic" tint={t.red} title="Speech & dictation" value={s.voice.modelId.startsWith('parakeet') ? 'Parakeet' : 'Whisper'} onPress={() => navigation.navigate('VoiceSettings')} />
           <ToggleRow icon="videocam" tint={t.blue} title="Auto-transcribe shared videos" subtitle="YouTube captions on this phone; Instagram, X and media files with your Groq key." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
           <Row icon="time" tint={t.gray} title="Processing queue" value={j ? `${j.queued + j.running} pending${j.failed_retryable + j.failed_permanent ? ` · ${j.failed_retryable + j.failed_permanent} failed` : ''}` : undefined} onPress={() => navigation.navigate('Jobs')} />

@@ -34,7 +34,7 @@ export function readyMessage(item: Pick<Item, 'title' | 'url' | 'summary' | 'sta
     return { title: `Needs a transcript: ${name}`, body: item.errorMessage ? firstSentence(item.errorMessage) : 'Open it to add a transcript.' };
   }
   if (isFailed(item.status)) return { title: `Could not finish: ${name}`, body: 'Open it to retry.' };
-  if (item.status === 'TRANSCRIBING') return { title: `Saved: ${name}`, body: 'Still transcribing on your Qivra server — it will be ready in the app.' };
+  if (item.status === 'TRANSCRIBING') return { title: `Saved: ${name}`, body: 'Still transcribing — it will be ready in the app.' };
   return { title: `Ready: ${name}`, body: item.summary ? firstSentence(item.summary) : 'Saved to your library.' };
 }
 

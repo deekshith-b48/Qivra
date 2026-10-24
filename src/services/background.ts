@@ -11,7 +11,7 @@ import { refreshDailyDigest } from './reminders';
 import * as TaskManager from 'expo-task-manager';
 import { drainShareInbox } from './capture';
 import { getRepo } from './db';
-import { requestSync, runDueJobs } from './processing';
+import { runDueJobs, wakeWaitingJobs } from './processing';
 import { maybeGenerateWeeklyReport } from './weeklyReport';
 import { notifyFollowUps } from './devFeeds';
 
@@ -24,7 +24,7 @@ export function defineBackgroundTask(): void {
       const repo = await getRepo();
       await repo.recoverRunningJobs();
       await drainShareInbox();
-      if (await repo.syncEnabled()) await requestSync();
+      await wakeWaitingJobs(repo);
       await runDueJobs(20_000);
       await refreshDailyDigest();
       await maybeGenerateWeeklyReport();

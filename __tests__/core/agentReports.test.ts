@@ -5,7 +5,6 @@ import type { ChatMessage, ChatProvider, ChatResult } from '../../src/core/ai/pr
 import { createOpenAICompatProvider, ProviderError } from '../../src/core/ai/provider';
 import { buildReport, markdownToPlainText, reportFilename, type ReportSource } from '../../src/core/reports';
 import { rangeFor } from '../../src/core/dates';
-import { ApiError, QivraClient, mapError } from '../../src/core/api';
 
 const NOW = Date.parse('2026-10-21T08:00:00Z');
 
@@ -215,54 +214,5 @@ describe('reports', () => {
 
   test('plain text conversion', () => {
     expect(markdownToPlainText('# Title\n- **Bold** and `code` [link](https://x.y)')).toBe('Title\n=====\n- Bold and code link (https://x.y)');
-  });
-});
-
-describe('API client', () => {
-  test('error mapping', () => {
-    expect(mapError(401, { error: { code: 'INVALID_CREDENTIAL' } }).kind).toBe('revoked');
-    expect(mapError(401, { error: { code: 'UNAUTHORIZED' } }).kind).toBe('unauthorized');
-    expect(mapError(410, { error: { code: 'PAIRING_EXPIRED', message: 'expired' } })).toMatchObject({ kind: 'pairing', message: 'expired' });
-    expect(mapError(409, { error: { code: 'WRONG_SERVER' } }).kind).toBe('wrong_server');
-    expect(mapError(421, null).kind).toBe('host_rejected');
-    expect(mapError(429, null).retryable).toBe(true);
-    expect(mapError(503, null).kind).toBe('server');
-  });
-
-  test('refuses insecure public URLs', () => {
-    expect(() => new QivraClient({ baseUrl: 'http://example.com' })).toThrow(ApiError);
-  });
-
-  test('retries GET on transient failure but never retries non-idempotent POST', async () => {
-    let n = 0;
-    const flaky = async () => {
-      n++;
-      if (n < 3) throw new TypeError('Network request failed');
-      return { ok: true, status: 200, json: async () => ({ product: 'Qivra', server_id: 'abc', status: 'ok' }) };
-    };
-    const c = new QivraClient({ baseUrl: 'http://192.168.1.2:5001', fetchImpl: flaky as never, sleep: async () => {} });
-    await expect(c.health()).resolves.toMatchObject({ server_id: 'abc' });
-    expect(n).toBe(3);
-    n = 0;
-    await expect(c.completePairing('ABCD2345', 'Pixel', null)).rejects.toMatchObject({ kind: 'offline' });
-    expect(n).toBe(1);
-  });
-
-  test('wrong port (non-Qivra JSON) is reported as invalid_response, timeouts as timeout', async () => {
-    const other = async () => ({ ok: true, status: 200, json: async () => ({ hello: 'world' }) });
-    await expect(new QivraClient({ baseUrl: 'http://192.168.1.2:8080', fetchImpl: other as never }).health()).rejects.toMatchObject({ kind: 'invalid_response' });
-    const hang = (_u: string, init: { signal?: AbortSignal }) => new Promise((_r, rej) => init.signal?.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
-    await expect(new QivraClient({ baseUrl: 'http://192.168.1.2:5001', fetchImpl: hang as never, retries: 0 }).health(50)).rejects.toMatchObject({ kind: 'timeout' });
-  });
-
-  test('bearer token is sent only as a header', async () => {
-    const seen: { url: string; headers: Record<string, string> }[] = [];
-    const f = async (url: string, init: { headers: Record<string, string> }) => {
-      seen.push({ url, headers: init.headers });
-      return { ok: true, status: 200, json: async () => ({ paired: true }) };
-    };
-    await new QivraClient({ baseUrl: 'http://10.0.2.2:5001', token: 'qv1_secret', fetchImpl: f as never }).pairingStatus();
-    expect(seen[0].headers.Authorization).toBe('Bearer qv1_secret');
-    expect(seen[0].url).not.toContain('secret');
   });
 });

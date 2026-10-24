@@ -131,9 +131,10 @@ test('home shortcuts reach every feature that is not a tab, and quick-capture pi
   const n = nav() as { navigate: jest.Mock };
   wrap(<TodayScreen navigation={n as never} route={{ key: 't', name: 'Today' } as never} />);
   await screen.findByText('Shortcuts');
-  const expected: [string, unknown[]][] = [
+  const expected: [string | RegExp, unknown[]][] = [
     ['Collections', ['Collections']], ['Reports', ['Reports']], ['Review', ['Review']], ['Queue', ['Jobs']],
-    ['Server', ['ConnectServer']], ['AI models', ['AiProviders']], ['Speech', ['VoiceSettings']], ['Privacy', ['PrivacyStorage']],
+    [/^AI models/, ['AiProviders']], // marked when no Groq key is set yet
+    ['Speech', ['VoiceSettings']], ['Privacy', ['PrivacyStorage']],
     ['Settings', ['Settings']],
   ];
   for (const [label, args] of expected) {

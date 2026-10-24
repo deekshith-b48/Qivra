@@ -1,5 +1,17 @@
 # Test results
 
+## 2.2.0 (2026-10-24): no server — the whole app runs on the phone
+
+- Release APK: `dist/Qivra-2.2.0-release.apk`, version code 19.
+
+- `tsc` passes. Jest: 318 passed, 4 live tests skipped.
+- Removed from the app: server pairing, QR scanning, sync and conflicts, the server AI gateway, server transcription and server voice notes (with their tests).
+- New tests:
+  - A phone that was paired with the old laptop server forgets the pairing once (token and connection cleared, server jobs dropped) and a video stuck "Transcribing on your Qivra server" is re-run and transcribed through Groq on the phone.
+  - Offline: a shared X video waits for the internet without using up attempts ("Waiting for internet…"), also across several app re-opens, and finishes by itself once the network is back.
+  - Onboarding has no server step; Settings and Home have no server UI.
+- Two UI tests that relied on render timing now wait for their data (Favourites shelf, the transcript line count).
+
 ## 2.1.0 (2026-10-24): every feature works without a server
 
 - Release APK: `dist/Qivra-2.1.0-release.apk`, version code 18.

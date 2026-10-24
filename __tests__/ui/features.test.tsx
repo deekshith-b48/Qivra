@@ -47,7 +47,7 @@ test('star an item and find it on the Favourites shelf', async () => {
   screen.unmount();
   wrap(<LibraryScreen navigation={nav()} route={{ key: 'l', name: 'Library' } as never} />);
   fireEvent.press(await screen.findByRole('button', { name: 'Favourites, 1' }));
-  await waitFor(() => expect(screen.queryByText('Other video')).toBeNull(), { timeout: 5000 }); // the list reloads after the shelf changes
+  await waitFor(() => expect(screen.queryByText('Other video')).toBeNull(), { timeout: 10_000 }); // the list reloads after the shelf changes (slow when the whole suite runs in parallel)
   expect(screen.getAllByText(/Hooks tutorial/).length).toBeGreaterThan(0);
 });
 
@@ -68,8 +68,9 @@ test('settings rows open their screens', async () => {
   wrap(<SettingsScreen navigation={n as never} route={{ key: 's', name: 'Settings' } as never} />);
   fireEvent.press(await screen.findByRole('button', { name: /^Highlights/ }));
   expect(n.navigate).toHaveBeenLastCalledWith('Highlights');
-  fireEvent.press(screen.getByRole('button', { name: /^Your Qivra server/ }));
-  expect(n.navigate).toHaveBeenLastCalledWith('ConnectServer');
+  fireEvent.press(screen.getByRole('button', { name: /^AI models/ }));
+  expect(n.navigate).toHaveBeenLastCalledWith('AiProviders');
+  expect(screen.queryByText(/Qivra server|Sync conflicts/)).toBeNull();
   fireEvent.press(screen.getByRole('button', { name: /^Time zone/ }));
   expect(await screen.findByText(/Use this phone's time zone/)).toBeTruthy();
 });

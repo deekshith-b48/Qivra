@@ -10,7 +10,7 @@ import { firstSentence } from '../core/enrich';
 import { STATUS_LABELS } from '../core/status';
 import type { Item } from '../db/types';
 import type { RootStackParamList, TabParamList } from '../navigation/types';
-import { requestSync, runDueJobs } from '../services/processing';
+import { runDueJobs } from '../services/processing';
 import { generateReport } from '../services/reports';
 import { Backdrop, Banner, Button, Card, CircleButton, elevation, EmptyState, type IconName, Loading, Section, SectionLink, StatStrip, T } from '../ui/components';
 import { useTabBarInset } from '../ui/nav/FloatingTabBar';
@@ -19,7 +19,7 @@ import { PlatformBadge, PLATFORM_ICONS } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
 import { AppIcon, CapturePill, IconTile, TINT_CYCLE } from '../ui/tiles';
 import { soft, type TintName } from '../ui/tokens';
-import { useAiInfo, useConnection, useSettings } from '../ui/useSettings';
+import { useAiInfo, useSettings } from '../ui/useSettings';
 
 type Props = CompositeScreenProps<BottomTabScreenProps<TabParamList, 'Today'>, NativeStackScreenProps<RootStackParamList>>;
 
@@ -85,7 +85,6 @@ export default function TodayScreen({ navigation }: Props) {
   const settings = useSettings();
   const ai = useAiInfo();
   const tz = settings?.timezone ?? 'UTC';
-  const { connection } = useConnection();
   const { busy, run } = useAction();
   const q = useQuery(
     async (repo) => {
@@ -96,11 +95,10 @@ export default function TodayScreen({ navigation }: Props) {
         savedToday: items.length,
         feed: await repo.homeFeed(r.startIso.slice(0, 10)),
         clusters: await repo.tagCountsInRange(r.startIso, r.endIso),
-        conflicts: (await repo.openConflicts()).length,
         total: await repo.countWhere('1 = 1'),
       };
     },
-    ['items', 'jobs', 'conflicts', 'settings'],
+    ['items', 'jobs', 'settings'],
     [tz],
   );
   const d = q.data;
@@ -110,7 +108,6 @@ export default function TodayScreen({ navigation }: Props) {
 
   const refresh = () =>
     run(async () => {
-      if (connection) await requestSync();
       await runDueJobs();
       await q.reload();
     });
@@ -122,8 +119,7 @@ export default function TodayScreen({ navigation }: Props) {
     { icon: 'document-text', tint: 'teal', label: 'Reports', onPress: () => navigation.navigate('Reports') },
     { icon: 'layers', tint: 'yellow', label: 'Review', count: due.data || undefined, onPress: () => navigation.navigate('Review') },
     { icon: 'time', tint: 'gray', label: 'Queue', count: queued || undefined, onPress: () => navigation.navigate('Jobs') },
-    { icon: 'server', tint: 'indigo', label: 'Server', dot: connection ? (connection.lastError ? 'bad' : 'ok') : undefined, onPress: () => navigation.navigate('ConnectServer') },
-    { icon: 'hardware-chip', tint: 'pink', label: 'AI models', onPress: () => navigation.navigate('AiProviders') },
+    { icon: 'hardware-chip', tint: 'pink', label: 'AI models', dot: ai ? (ai.enabled ? 'ok' : 'bad') : undefined, onPress: () => navigation.navigate('AiProviders') },
     { icon: 'mic', tint: 'red', label: 'Speech', onPress: () => navigation.navigate('VoiceSettings') },
     { icon: 'lock-closed', tint: 'green', label: 'Privacy', onPress: () => navigation.navigate('PrivacyStorage') },
   ];
@@ -154,8 +150,7 @@ export default function TodayScreen({ navigation }: Props) {
         ) : null}
 
         {/* Things that need attention come first. */}
-        {d?.conflicts ? <Banner tone="warning" title={`${d.conflicts} sync conflict(s)`} body="An item was edited on two devices. Choose which version to keep." action={<Button kind="outline" title="Review" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
-        {d && connection?.lastError ? <Banner tone="warning" title="Server unreachable" body={connection.lastError.message} action={<Button kind="outline" title="Connection" onPress={() => navigation.navigate('ConnectServer')} />} /> : null}
+        {ai && !ai.enabled ? <Banner tone="info" title="Add your free Groq key" body="It turns on AI answers and summaries, and transcribes Instagram and X videos on this phone." action={<Button kind="outline" title="Add key" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
 
         {/* Quick capture: the same modes as the + button. */}
         <Section title="Save something">

@@ -150,7 +150,7 @@ async function generalAnswer(question: string, opts: AgentOptions, smallTalk: bo
   if (!provider) {
     return smallTalk
       ? { ...base, mode: 'general', answer: SMALL_TALK_LOCAL, provider: null, usage: null }
-      : { ...base, mode: 'no_evidence', answer: `General chat needs an AI model. ${opts.providerUnavailableReason ?? 'Connect your Qivra server or add a model in Settings → AI models.'}`, provider: null, usage: null };
+      : { ...base, mode: 'no_evidence', answer: `General chat needs an AI model. ${opts.providerUnavailableReason ?? 'Add your free Groq key in Settings → AI models.'}`, provider: null, usage: null };
   }
   const messages: ChatMessage[] = [
     { role: 'system', content: `${GENERAL_RULES}${smallTalk ? '\nThe user is making small talk: reply in one or two friendly sentences and mention what you can help with (questions about their saved library, or general chat in General mode).' : ''}\nToday is ${new Date(opts.now).toISOString().slice(0, 10)}.` },

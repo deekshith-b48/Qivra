@@ -95,7 +95,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
       ) : mode === 'media' ? (
         <>
           <T color="textMuted">Import an audio or video file you are allowed to process. It is copied into Qivra's private storage (max 200 MB).</T>
-          <Banner tone="info" title="Transcription" body="Imported audio/video files can be transcribed by your paired server from the item page. For on-device recording and transcription, choose Voice." />
+          <Banner tone="info" title="Transcription" body="Imported audio/video files (up to 25 MB) are transcribed with your Groq key. For on-device recording and transcription, choose Voice." />
           <Field label="Title (optional)" value={title} onChangeText={setTitle} />
           <Button title="Choose file" icon="folder-open-outline" onPress={() => void media()} loading={busy} />
         </>

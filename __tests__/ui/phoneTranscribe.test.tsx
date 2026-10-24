@@ -1,13 +1,12 @@
 import { getRepo } from '../../src/services/db';
-import { runDueJobs, schedulePipeline } from '../../src/services/processing';
-import { setSecret, SECRET_KEYS } from '../../src/services/secure';
+import { removeServerOnce, runDueJobs, schedulePipeline, wakeWaitingJobs } from '../../src/services/processing';
+import { getSecret, setSecret, SECRET_KEYS } from '../../src/services/secure';
 import { updateSettings } from '../../src/services/settings';
 import X_VIDEO from '../fixtures/x-syndication-video.json';
 import { resetTestRepo } from '../helpers/uiSetup';
 
-// Phone-only: no server is paired; transcription goes to Groq with the user's own key.
+// Phone-only: transcription goes to Groq with the user's own key.
 jest.mock('../../src/services/processing', () => jest.requireActual('../../src/services/processing'));
-jest.mock('../../src/services/server', () => ({ getClient: jest.fn(async () => null), getConnection: jest.fn(async () => null), checkConnection: jest.fn() }));
 jest.mock('../../src/services/ai', () => ({ aiInfo: jest.fn(async () => ({ enabled: false })), loadProvider: jest.fn(async () => ({ provider: null })) }));
 
 const mockDeleted: string[] = [];
@@ -22,14 +21,17 @@ jest.mock('expo-file-system/legacy', () => ({
 const WHISPER = { language: 'english', duration: 9.3, text: 'Entering Twitter HQ.', segments: [{ start: 0.4, end: 3.1, text: ' Entering Twitter HQ.', no_speech_prob: 0.02 }] };
 let groqCalls: { url: string; auth: string }[] = [];
 let instagramPage = '<title>Instagram</title>';
+let offline = false;
 
 beforeEach(async () => {
   resetTestRepo();
   mockDeleted.length = 0;
   groqCalls = [];
+  offline = false;
   await setSecret(SECRET_KEYS.aiApiKey, 'gsk_test_key');
   await updateSettings({ autoTranscribe: true, ai: { enabled: true, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', externalConsent: true } });
   global.fetch = jest.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
+    if (offline) throw new TypeError('Network request failed');
     const res = (status: number, body: unknown) => ({ ok: status < 400, status, headers: { get: () => null }, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)), json: async () => body });
     if (url.includes('cdn.syndication.twimg.com')) return res(200, X_VIDEO);
     if (url.includes('/audio/transcriptions')) {
@@ -100,4 +102,47 @@ test('without a Groq key, the item asks for one instead of a server', async () =
   const done = await settle(item.id);
   expect(done).toMatchObject({ status: 'NEEDS_INPUT', errorCode: 'NO_TRANSCRIBER' });
   expect(done?.errorMessage).toMatch(/Groq key/);
+});
+
+test('a phone paired with the old laptop server forgets it once and re-runs stuck videos on the phone', async () => {
+  const repo = await getRepo();
+  await setSecret(SECRET_KEYS.deviceToken, 'qv1_old');
+  await repo.setMeta('server.connection', JSON.stringify({ serverUrl: 'http://192.168.1.20:5001', deviceId: 'd1' }));
+  const { item } = await repo.createItem({ sourceType: 'x', url: 'https://x.com/a/status/1585341984679469056' });
+  await repo.setStatus(item.id, 'METADATA_CHECK');
+  await repo.setStatus(item.id, 'TRANSCRIBING', { code: 'INFO_TRANSCRIBING', message: 'Transcribing on your Qivra server…' });
+  await repo.enqueueJob({ id: `job_server_transcribe_url_${item.id}`, kind: 'server_transcribe_url', itemId: item.id, retry: true, maxAttempts: 4 });
+  expect(await removeServerOnce(repo)).toBe(1);
+  expect(await getSecret(SECRET_KEYS.deviceToken)).toBeNull();
+  expect(await repo.getMeta('server.connection')).toBe('null');
+  expect(await repo.listJobs({ itemId: item.id, statuses: ['queued'] })).not.toContainEqual(expect.objectContaining({ kind: 'server_transcribe_url' }));
+  const done = await settle(item.id);
+  expect(done?.status).toBe('READY');
+  expect((await repo.listTranscripts(item.id)).map((t) => t.source)).toContain('cloud_whisper');
+  expect(await removeServerOnce(repo)).toBe(0); // only once
+});
+
+test('offline: the video waits for the internet without using up attempts, then finishes on its own', async () => {
+  const repo = await getRepo();
+  offline = true;
+  const { item } = await repo.createItem({ sourceType: 'x', url: 'https://x.com/a/status/1585341984679469056' });
+  await schedulePipeline(item.id);
+  let job = null;
+  for (let i = 0; i < 60 && job?.lastErrorCode !== 'WAITING_FOR_NETWORK'; i++) {
+    await runDueJobs(2_000);
+    await new Promise((r) => setImmediate(r));
+    job = await repo.getJob(`job_cloud_transcribe_${item.id}`);
+  }
+  for (let i = 0; i < 3; i++) {
+    await wakeWaitingJobs(repo); // as when the app is reopened, several times while still offline
+    await runDueJobs(2_000);
+  }
+  job = await repo.getJob(`job_cloud_transcribe_${item.id}`);
+  expect(job).toMatchObject({ status: 'queued', attempts: 0, lastErrorCode: 'WAITING_FOR_NETWORK' });
+  expect((await repo.getItem(item.id))?.errorMessage).toBe('Waiting for internet…');
+  offline = false;
+  await wakeWaitingJobs(repo);
+  const done = await settle(item.id);
+  expect(done?.status).toBe('READY');
+  expect(groqCalls).toHaveLength(1);
 });

@@ -29,13 +29,10 @@ export type RootStackParamList = {
   Highlights: undefined;
   ReportDetail: { id: string };
   Settings: undefined;
-  ConnectServer: { scanned?: string } | undefined;
-  QrScan: undefined;
   AiProviders: undefined;
   VoiceSettings: undefined;
   PrivacyStorage: undefined;
   Jobs: undefined;
-  Conflicts: undefined;
   About: undefined;
 };
 

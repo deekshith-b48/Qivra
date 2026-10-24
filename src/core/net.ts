@@ -61,7 +61,7 @@ export function checkServerUrl(raw: string): UrlCheck {
     return { ok: false, code: 'INVALID_URL', message: 'Enter a full URL such as http://192.168.1.20:5000' };
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, code: 'UNSUPPORTED_SCHEME', message: 'Only http:// and https:// server addresses are supported.' };
+    return { ok: false, code: 'UNSUPPORTED_SCHEME', message: 'Only http:// and https:// addresses are supported.' };
   }
   if (url.username || url.password) {
     return { ok: false, code: 'HAS_CREDENTIALS', message: 'Server URLs must not contain a username or password.' };

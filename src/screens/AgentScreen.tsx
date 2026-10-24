@@ -185,7 +185,7 @@ export default function AgentScreen({ navigation, route }: Props) {
     return () => sub.remove();
   }, [inChat, navigation]);
   const subtitle = !ai?.enabled ? 'No AI model · answers quote your saved items'
-    : `${mode === 'general' && !scopeId ? 'General chat' : 'Your library'} · ${ai.model}${ai.source === 'server' ? ' via your server' : ''}`;
+    : `${mode === 'general' && !scopeId ? 'General chat' : 'Your library'} · ${ai.model}`;
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: c.bg }}>
@@ -236,7 +236,7 @@ export default function AgentScreen({ navigation, route }: Props) {
                 <T v="title" style={{ marginTop: space.md, textAlign: 'center' }}>{scopeId ? 'What do you want to know about it?' : 'What do you want to know?'}</T>
                 <T color="textMuted" style={{ textAlign: 'center', marginTop: 4 }}>Answers come from what you saved, with sources you can open.</T>
               </View>
-              {!ai?.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra answers with the matching passages from your library. Connect your server or add a model for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
+              {!ai?.enabled ? <Banner tone="info" title="Works without AI" body="Without a model, Qivra answers with the matching passages from your library. Add your free Groq key for written answers." action={<Button kind="outline" title="AI models" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
                 {(scopeId ? ITEM_SUGGESTIONS.map((p) => ({ icon: 'chatbubble-ellipses-outline' as const, title: p, prompt: p })) : SUGGESTIONS).map((s) => (
                   <Pressable key={s.title} onPress={() => void send(s.prompt)} accessibilityRole="button" accessibilityLabel={s.title}

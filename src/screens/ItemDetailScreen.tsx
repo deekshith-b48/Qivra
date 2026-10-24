@@ -18,7 +18,7 @@ import { clearItemReminders, scheduleItemReminder } from '../services/reminders'
 import { emit } from '../services/events';
 import { similarItems } from '../services/semantic';
 import { makeCards } from '../services/flashcards';
-import { cancelItemProcessing, requestModelEnrichment, requestServerProcessing, schedulePipeline } from '../services/processing';
+import { cancelItemProcessing, requestModelEnrichment, schedulePipeline } from '../services/processing';
 import { ActionPill, Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Row, Screen, Section, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard } from '../ui/ItemCard';
@@ -26,7 +26,7 @@ import { Markdown } from '../ui/Markdown';
 import { markdownProse, stripMarkdown } from '../core/metadata';
 import { HighlightedText, PlatformBadge, PLATFORM_ICONS, ProgressSteps, Segmented, TimestampPill, type StepState } from '../ui/media';
 import { radius, space, useTheme } from '../ui/theme';
-import { useConnection, useSettings, useAiInfo } from '../ui/useSettings';
+import { useSettings, useAiInfo } from '../ui/useSettings';
 import { YouTubeHero, type YouTubeHeroHandle } from '../ui/YouTubeHero';
 import { ImageHero } from '../ui/ImageHero';
 
@@ -70,7 +70,6 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const { c } = useTheme();
   const settings = useSettings();
   const ai = useAiInfo();
-  const { connection } = useConnection();
   const tz = settings?.timezone ?? 'UTC';
   const { busy, run } = useAction();
   const [tab, setTab] = useState<'summary' | 'text' | 'details'>(route.params.at !== undefined ? 'text' : 'summary');
@@ -183,14 +182,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     const repo = await getRepo();
     if (item.status === 'CANCELLED') await repo.setStatus(id, 'METADATA_CHECK');
     for (const j of await repo.listJobs({ itemId: id, statuses: ['failed_permanent'] })) {
-      if (j.kind === 'server_transcribe_url' || j.kind === 'cloud_transcribe') await repo.enqueueJob({ id: j.id, kind: j.kind, itemId: id, retry: true, maxAttempts: 4 });
+      if (j.kind === 'cloud_transcribe') await repo.enqueueJob({ id: j.id, kind: j.kind, itemId: id, retry: true, maxAttempts: 4 });
     }
     await schedulePipeline(id);
-  });
-  const serverAction = (kind: 'transcribe' | 'transcribe_url') => run(async () => {
-    const what = { transcribe: 'upload the attached media file and transcribe it', transcribe_url: 'download this post’s audio and transcribe it' }[kind];
-    if (!(await confirm('Use your server?', `Qivra will ${what} on ${connection?.serverUrl}.`, 'Continue'))) return;
-    await requestServerProcessing(id, kind);
   });
   const del = () => run(async () => {
     if (!(await confirm('Delete this item?', 'Its transcripts, notes and attached media on this phone will be deleted.', 'Delete', true))) return;
@@ -226,10 +220,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     item.status !== 'NEEDS_INPUT' && !isFailed(item.status) && item.status !== 'CANCELLED' ? null
       : NEEDS_KEY.has(item.errorCode ?? '') ? { primary: { title: 'Add Groq key', icon: 'key-outline', onPress: () => navigation.navigate('AiProviders') }, secondary: importT }
         : isFailed(item.status) || item.status === 'CANCELLED' ? { primary: retryA, secondary: importT }
-          : { primary: importT, secondary: connection && isVideo ? { ...retryA, title: 'Try server again' } : isVideo || item.sourceType === 'file' ? { ...retryA, title: 'Try again' } : undefined };
+          : { primary: importT, secondary: isVideo || item.sourceType === 'file' ? { ...retryA, title: 'Try again' } : undefined };
 
   const textTab = ordered.length > 0;
-  const syncLabel = item.syncStatus === 'pending' ? 'Not synced yet' : item.syncStatus === 'conflicted' ? 'Sync conflict' : item.syncStatus === 'failed' ? 'Sync failed' : null;
   const meta = [item.author, formatLocal(item.capturedAt, tz, { dateStyle: 'medium', timeStyle: 'short' }), item.language !== 'und' ? languageName(item.language) : '', item.origin === 'superbrain' ? 'Imported' : ''].filter(Boolean).join(' · ');
   const showFocus = (term: string | null) => {
     setFocus(term);
@@ -247,9 +240,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         {item.metadata?.description && isVideo ? <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: space.sm }} selectable /> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
           <Button kind="outline" title="Import transcript" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
-          {connection && isVideo ? <Button kind="outline" title="Transcribe on server" onPress={() => void serverAction('transcribe_url')} /> : null}
           {!isVideo ? <Button kind="outline" title="Attach audio/video" onPress={() => void run(() => pickMediaFile(id))} /> : null}
-          {d.media.length && connection ? <Button kind="outline" title="Transcribe attached file" onPress={() => void serverAction('transcribe')} /> : null}
         </View>
       </Card>
     </Section>
@@ -357,7 +348,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
       ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xs }}>
         <T v="caption" color="textFaint" style={{ flex: 1 }} numberOfLines={2}>
-          {activeT.provider ?? activeT.source} · {activeT.origin === 'server' ? 'from your server' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps'}{activeT.corrected ? ' · corrected' : ''}
+          {activeT.provider ?? activeT.source} · {/^(cloud_whisper|voice_cloud)$/.test(activeT.source) ? 'Groq Whisper' : activeT.origin === 'server' ? 'imported' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps'}{activeT.corrected ? ' · corrected' : ''}
         </T>
         <IconButton icon="language-outline" size={19} label="Language" onPress={() => setLangOpen(true)} />
         <IconButton icon="copy-outline" size={19} label="Copy" onPress={() => void Clipboard.setStringAsync(activeT.text).then(() => Alert.alert('Copied', 'Transcript copied.'))} />
@@ -443,7 +434,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
             {j.lastError ? <T v="caption" color={j.status === 'failed_permanent' ? 'danger' : 'textMuted'}>{j.lastError}</T> : null}
           </View>
         )) : <T v="small" color="textMuted">No processing jobs.</T>}
-        {e ? <T v="caption" color="textFaint">Summary source: {e.origin === 'local' ? 'extracted on this phone' : e.origin === 'model' ? 'AI model' : 'your server'} · {e.provider}</T> : null}
+        {e ? <T v="caption" color="textFaint">Summary source: {e.origin === 'local' ? 'extracted on this phone' : e.origin === 'model' ? 'AI model' : 'imported'} · {e.provider}</T> : null}
         {d.media.length ? <T v="caption" color="textFaint">Attached media: {d.media.map((m) => `${m.name} (${(m.size / 1048576).toFixed(1)} MB)`).join(', ')}</T> : null}
         <Button kind="text" title="Reprocess" icon="refresh" onPress={() => void retry()} style={{ alignSelf: 'flex-start' }} />
       </Section>
@@ -493,12 +484,6 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         <T v="title" style={{ marginTop: space.md }} numberOfLines={titleOpen ? undefined : 3} onPress={() => setTitleOpen(!titleOpen)} onLongPress={() => startEdit('title')} accessibilityHint="Tap to show the whole title; long press to edit it">{item.title || item.url || 'Untitled'}</T>
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
           <T v="caption" color="textMuted" style={{ flexShrink: 1 }}>{meta}</T>
-          {syncLabel ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: meta ? 8 : 0 }} accessibilityLabel={syncLabel}>
-              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: item.syncStatus === 'pending' ? c.textFaint : c.danger }} />
-              <T v="caption" color={item.syncStatus === 'pending' ? 'textMuted' : 'danger'}>{syncLabel}</T>
-            </View>
-          ) : null}
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: space.md, marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.sm, paddingVertical: 2 }}>
           <ActionPill primary icon="sparkles-outline" label="Ask" a11yLabel="Ask about this" onPress={() => navigation.navigate('Main', { screen: 'Agent', params: { itemId: id } })} />
@@ -534,7 +519,6 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
             </>}
           />
         ) : null}
-        {item.syncStatus === 'conflicted' ? <Banner tone="warning" title="Edited on another device" action={<Button kind="outline" title="Resolve" onPress={() => navigation.navigate('Conflicts')} />} /> : null}
 
         <View style={{ marginTop: space.lg, marginBottom: space.md }}>
           <Segmented options={tabs} value={current} onChange={setTab} />

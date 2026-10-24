@@ -152,7 +152,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
       emit('items');
     }),
     delete: () => run(async () => {
-      if (!(await confirm(`Delete ${ids.length} item(s)?`, 'Transcripts, notes and attached media on this phone are deleted. Synced items are deleted on your server at the next sync.', 'Delete', true))) return;
+      if (!(await confirm(`Delete ${ids.length} item(s)?`, 'Transcripts, notes and attached media on this phone are deleted.', 'Delete', true))) return;
       const repo = await getRepo();
       await deleteItemFiles(ids);
       await repo.deleteItems(ids);

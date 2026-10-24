@@ -365,12 +365,12 @@ export function Provenance({ origin }: { origin: string }) {
     local: ['Extracted on device', 'neutral'],
     user: ['Your edit', 'accent'],
     model: ['AI-generated', 'warning'],
-    server: ['From your server', 'info'],
+    server: ['Imported', 'info'], // summaries made by the old laptop server
     generating: ['AI summary · generating…', 'info'],
     none: ['—', 'neutral'],
   };
   const [label, tone] = map[origin] ?? [origin, 'neutral'];
-  return <Chip label={label} tone={tone} icon={origin === 'model' || origin === 'generating' ? 'sparkles-outline' : origin === 'server' ? 'server-outline' : origin === 'user' ? 'create-outline' : 'phone-portrait-outline'} />;
+  return <Chip label={label} tone={tone} icon={origin === 'model' || origin === 'generating' ? 'sparkles-outline' : origin === 'server' ? 'download-outline' : origin === 'user' ? 'create-outline' : 'phone-portrait-outline'} />;
 }
 
 export function Sheet({ visible, onClose, title, children }: { visible: boolean; onClose: () => void; title: string; children: React.ReactNode }) {

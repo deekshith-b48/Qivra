@@ -1,6 +1,6 @@
 /**
  * First run: four short swipeable pages about what Qivra does, then a setup
- * checklist (notifications, AI answers, an optional server). Everything on the
+ * checklist (notifications, AI answers). Everything on the
  * checklist is optional; "Get started" always works.
  */
 
@@ -97,7 +97,6 @@ export default function OnboardingScreen({ navigation }: RootProps<'Onboarding'>
       icon: 'sparkles', tint: 'pink', title: 'AI answers', body: ai.state === 'ok' ? 'Using your own Groq key: answers, summaries and video transcripts.' : 'Add your free Groq key for answers, summaries and video transcripts.',
       action: ai.state === 'ok' ? 'Groq' : 'Add key', done: ai.state === 'ok', onPress: () => (ai.state === 'ok' ? void finish('AiProviders') : goTo(aiPage)),
     },
-    { icon: 'laptop', tint: 'indigo', title: 'Optional: your own server', body: 'Only for live sync between devices, or to keep audio on your own computer. Everything else works on this phone.', action: 'Set up', onPress: () => void finish('ConnectServer') },
   ];
 
   return (

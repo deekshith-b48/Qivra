@@ -40,7 +40,7 @@ A private, local-first knowledge vault for Android. Share a reel, video, web pag
 
 Saved posts pile up and are never seen again. Qivra keeps them **useful**: every link becomes a transcript, a one-line summary, timestamped key moments and highlighted keywords, all stored in a SQLite database **on your phone**. You can search it offline and ask questions that are answered from your own library, with citations.
 
-- **No laptop needed:** install the app, add your free Groq key, and every feature works on the phone. An optional server adds live sync between devices.
+- **No server, no laptop:** install the app, add your free Groq key, and every feature works on the phone over the internet.
 - **Local-first:** your library lives on the device. No account, no cloud database.
 - **Bring your own AI key:** each user adds their own free Groq key during setup. No key ships in the app.
 - **Works without AI:** search, transcripts, extractive summaries and flashcards still work with no key at all.
@@ -69,7 +69,7 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 ### 1. Install the app
 
-Download **`Qivra-2.1.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
+Download **`Qivra-2.2.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
 
 > The APK is signed with the Android debug key and is meant for sideloading. Check the download against the `.sha256` file attached to the release.
 
@@ -82,86 +82,51 @@ The setup screens ask for an AI key. Groq's tier is free and fast:
 
 Qivra sends a tiny test request, then stores the key in Android's secure storage. It is sent only to Groq, and only when you ask, summarise or save a video (the video's audio is sent for its transcript). Tap **Later** to skip; you can add it any time under **Settings → AI models**.
 
-That's it: no laptop or server is needed. Optional: for true search by meaning, add a free [Gemini key](https://aistudio.google.com/apikey) under **Settings → AI models → Search by meaning**.
-
-### 3. Run your own server (optional)
-
-Not needed for any feature. The server, on your laptop, adds live sync between devices and lets you keep audio on your own computer (local Whisper).
-
-```bash
-cd server
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-qivra.txt -r requirements-media.txt
-cp qivra.env.example qivra.env      # add your Groq key here for server-side AI and Whisper
-.venv/bin/python -m qivra serve --lan
-```
-
-The server prints a QR code. In Qivra, open **Settings → Your Qivra server → Scan QR code**. Optional extras:
-
-```bash
-.venv/bin/pip install -r requirements-embeddings.txt -r requirements-ocr.txt   # search by meaning, text in reels
-.venv/bin/pip install -r requirements-transcribe-anything.txt                  # MLX Whisper on Apple Silicon
-```
+That's it. There is no server and no laptop to set up: the app talks to the internet directly. Optional: for true search by meaning, add a free [Gemini key](https://aistudio.google.com/apikey) under **Settings → AI models → Search by meaning**.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  subgraph Phone["Android phone · Qivra app"]
-    Share["Share sheet"] --> Jobs["Durable job queue"]
+  subgraph Phone["Android phone · Qivra app (everything runs here)"]
+    Share["Share sheet"] --> Jobs["Durable job queue<br/>waits for the internet, resumes on its own"]
     UI["Home · Glance · Library · Ask · Dev"] --> Jobs
     Jobs --> DB[("SQLite + FTS5<br/>items · transcripts · chunks")]
+    Jobs --> OCR["ML Kit OCR<br/>images · reel frames"]
     Jobs --> Whisper["On-device Whisper<br/>voice notes"]
-    Key[("Keystore<br/>device credential · AI key")]
+    Key[("Android Keystore<br/>your Groq / Gemini keys")]
   end
 
-  subgraph Laptop["Your laptop · Qivra server (optional)"]
-    API["FastAPI /api/v1<br/>pairing · sync · jobs · search"]
-    Media["yt-dlp · Whisper · OCR · embeddings"]
-    GW["AI gateway<br/>key in qivra.env"]
-    API --> Media
-    API --> GW
-  end
-
-  Jobs <-->|"LAN or VPN · per-device token"| API
-  Jobs -->|"captions · page text"| Web(("YouTube · X · web"))
-  Jobs -->|"your own key"| Groq(("Groq API"))
-  GW --> Groq
-  Media -->|"opt-in"| Groq
+  Jobs -->|"captions · page text · README"| Web(("YouTube · web · GitHub"))
+  Jobs -->|"public embeds"| Social(("X · Instagram"))
+  Jobs -->|"your key · HTTPS"| Groq(("Groq<br/>chat · Whisper"))
+  Jobs -.->|"optional key"| Gemini(("Gemini<br/>embeddings"))
 ```
 
 1. **Capture.** A share writes an envelope to disk, starts a foreground service and returns you to the app you were in.
-2. **Process.** Each step (metadata, transcript, summary, index) is a row in a durable `jobs` table. Steps retry with backoff, recover after a crash and wait for the server when the laptop sleeps.
-3. **Enrich.** The model gets the transcript with `[mm:ss]` markers. Timestamps are snapped to real segments, and keywords that are not in the source are dropped.
-4. **Use.** Search, Ask, flashcards and reports read the local database. Ask answers only from your saved items and cites them.
+2. **Process.** Each step (metadata, transcript, summary, index) is a row in a durable `jobs` table. Steps retry with backoff and recover after a crash. Without internet a step waits instead of failing, and continues by itself when the phone is back online.
+3. **Transcribe.** YouTube captions are fetched directly. X and Instagram videos are found through their public embeds and sent to Groq Whisper with your key; silent reels are read frame by frame with on-device OCR.
+4. **Enrich.** The model gets the transcript with `[mm:ss]` markers. Timestamps are snapped to real segments, and keywords that are not in the source are dropped.
+5. **Use.** Search, Ask, flashcards and reports read the local database. Ask answers only from your saved items and cites them.
 
-Read more in [Architecture](docs/ARCHITECTURE.md), [AI providers and transcripts](docs/AI_PROVIDERS_AND_TRANSCRIPTS.md), [Local server and QR pairing](docs/LOCAL_SERVER_AND_QR_PAIRING.md) and [Voice and transcription](docs/VOICE_AND_TRANSCRIPTION.md).
+Read more in [Architecture](docs/ARCHITECTURE.md), [AI providers and transcripts](docs/AI_PROVIDERS_AND_TRANSCRIPTS.md) and [Voice and transcription](docs/VOICE_AND_TRANSCRIPTION.md).
 
 ## Configuration
 
-Server settings live in `server/qivra.env` (git-ignored). Copy it from [`qivra.env.example`](server/qivra.env.example).
+Everything is set in the app:
 
-| Variable | Default | Purpose |
+| Setting | Where | Purpose |
 |---|---|---|
-| `QIVRA_AI_BASE_URL` | `https://api.groq.com/openai/v1` | Any OpenAI-compatible provider (HTTPS only for hosted ones). |
-| `QIVRA_AI_API_KEY` | *(empty)* | Your provider key. Stays on the laptop; paired phones use it through the gateway. |
-| `QIVRA_AI_MODEL` | `openai/gpt-oss-120b` | Chat model for summaries and Ask. |
-| `QIVRA_AI_EMBEDDING_MODEL` | *(empty)* | Optional hosted embedding model. |
-| `QIVRA_TRANSCRIBER` | `auto` | `groq` sends audio to Groq Whisper; `auto` keeps audio on the laptop. |
-| `QIVRA_AI_REASONING_EFFORT` | `low` | `low`, `medium` or `high` for reasoning models. |
-
-| Flag | Purpose |
-|---|---|
-| `--lan` | Listen on your Wi-Fi so phones can pair. |
-| `--remote` | Like `--lan`, but the QR prefers your Tailscale / WireGuard address, for use away from home. Nothing is exposed to the internet. |
-| `--no-qr` | Do not print the pairing QR code. |
+| Groq key | Setup screens, or **Settings → AI models** | AI answers, summaries, flashcards, and transcripts of X / Instagram videos, imported media and long voice notes. Free at [console.groq.com/keys](https://console.groq.com/keys). |
+| Gemini key (optional) | **Settings → AI models → Search by meaning** | True vector search and Related items. Free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). |
+| Voice model | **Settings → Speech & dictation** | On-device Whisper or Parakeet for private voice notes and dictation, or Groq for notes up to 12 minutes. |
+| Auto-transcribe | **Settings → AI & processing** | Transcribe shared videos automatically. |
 
 ## Privacy & security
 
-- **Your key, your account.** The app ships no API key. Each user's key is stored in Android's Keystore and is never logged, synced, exported or put in a QR code.
-- **Pairing:** one-time codes that expire after 5 minutes, rate-limited, and a separate revocable token per device, stored only as a SHA-256 hash on the server.
-- **Server hardening:** admin routes answer only on loopback; Host and Origin checks against DNS rebinding; SSRF guards on server fetches; size limits; no API docs served; security headers.
-- **Network:** cleartext HTTP only to private, LAN or VPN addresses.
+- **Your key, your account.** The app ships no API key. Each user's key is stored in Android's Keystore and is never logged, synced or exported.
+- **No server:** nothing goes through a Qivra server. The phone calls Groq (and Gemini, if you add it) directly over HTTPS with your own key; other requests are public lookups (YouTube captions, page text, X/Instagram embeds).
+- **Network:** hosted providers must use HTTPS.
 - **Content:** saved text is untrusted data. It cannot instruct the AI, and commands in it are never executed.
 
 Full details: [Security and privacy](docs/SECURITY_AND_PRIVACY.md). To report a vulnerability, please open a private [security advisory](https://github.com/deekshith-b48/Qivra/security/advisories/new) rather than a public issue.
@@ -174,7 +139,6 @@ Full details: [Security and privacy](docs/SECURITY_AND_PRIVACY.md). To report a 
 npm ci
 npx tsc --noEmit                                   # type check
 npx jest                                           # app tests (logic + UI)
-cd server && .venv/bin/python -m pytest -q tests   # server tests
 ```
 
 **Build the release APK:**
@@ -185,7 +149,7 @@ echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 cd android && ./gradlew assembleRelease
 ```
 
-The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. An emulator reaches a server on the same machine at `http://10.0.2.2:<port>`.
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`.
 
 ### Project structure
 
@@ -195,13 +159,10 @@ The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. A
 │   ├── core/               pure TypeScript: URLs, metadata, captions, highlights, search, reports
 │   ├── db/                 SQLite schema, migrations and repository
 │   ├── services/           side effects: capture, jobs, share task, AI, voice, reminders
-│   ├── sync/               revision-based sync and conflicts
 │   ├── screens/            Home, Glance, Library, Ask, Dev, item page, settings
 │   └── ui/                 design tokens, theme and shared components
 ├── plugins/                Expo config plugin + native Kotlin share target and service
-├── server/
-│   ├── qivra/              FastAPI server: pairing, sync, jobs, media, AI gateway
-│   └── tests/              pytest suite
+├── server/                 old self-hosted server (unsupported; the app no longer uses it)
 ├── __tests__/              Jest suites (core, db, ui)
 └── docs/                   architecture, security, test results
 ```
@@ -213,7 +174,7 @@ The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. A
 - [ ] Signed release builds and an F-Droid listing
 - [ ] iOS share extension
 - [ ] Encrypted export and restore
-- [ ] On-device embeddings, so search by meaning works without a server
+- [ ] On-device embeddings, so search by meaning works without any key
 
 Ideas and votes are welcome in [Issues](https://github.com/deekshith-b48/Qivra/issues).
 
@@ -223,7 +184,7 @@ Contributions are welcome.
 
 1. Open an issue first for larger changes, so we can agree on the approach.
 2. Fork, create a branch, and keep the change focused.
-3. Add a test for any new logic or bug fix, and run `npx tsc --noEmit`, `npx jest` and the server tests.
+3. Add a test for any new logic or bug fix, and run `npx tsc --noEmit`, and `npx jest`.
 4. Open a pull request that explains what changed and why, with screenshots for UI changes.
 
 Match the existing style: small functions, shared components from `src/ui`, and no secrets in code or commits.

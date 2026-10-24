@@ -7,7 +7,6 @@
  * WorkManager-backed background task (see background.ts).
  */
 
-import { ApiError } from '../core/api';
 import { localEnrich, type Enrichment } from '../core/enrich';
 import { enrichmentPrompt, mergeModelEnrichment, parseModelEnrichment } from '../core/enrichModel';
 import { detectLanguage } from '../core/language';
@@ -19,16 +18,14 @@ import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
 import { CaptionsUnavailable, fetchYouTubeCaptions } from '../core/youtubeCaptions';
 import type { Repo } from '../db/repo';
 import type { Item, Job } from '../db/types';
-import { runSync as runSyncRaw } from '../sync/engine';
 import { aiInfo, loadEmbedder, loadProvider } from './ai';
-import { deleteLocalFiles } from './capture';
 import { getRepo } from './db';
 import { fetchText } from './http';
 import { emit } from './events';
-import { getClient, getConnection } from './server';
 import { generateReport } from './reports';
 import { CloudWhisperError, cloudWhisperReady, deleteCached, downloadToCache, transcribeMedia } from './cloudWhisper';
 import { ocrItemImages, ocrVideoFrames } from './ocr';
+import { deleteSecret, SECRET_KEYS } from './secure';
 import { getSettings } from './settings';
 
 class JobError extends Error {
@@ -38,11 +35,33 @@ class JobError extends Error {
 }
 
 const VIDEO_LIKE = new Set<string>(VIDEO_SOURCES);
-const SERVER_RETRY_MS = 60_000;
+const NETWORK_RETRY_MS = 60_000;
+/** A job that is waiting for the phone to be online again (does not use up attempts). */
+const WAITING_FOR_NETWORK = 'WAITING_FOR_NETWORK';
 
-/** Make queued server jobs due now (called when the server is reachable again). */
-export async function wakeServerJobs(repo: Repo): Promise<void> {
-  await repo.db.run(`UPDATE jobs SET run_after = ? WHERE status IN ('queued','failed_retryable') AND kind LIKE 'server_%'`, [new Date().toISOString()]);
+/** Make jobs that wait for the internet due now (called when the app comes back to the foreground). */
+export async function wakeWaitingJobs(repo: Repo): Promise<void> {
+  await repo.db.run(`UPDATE jobs SET run_after = ? WHERE status = 'queued' AND last_error_code = ?`, [new Date().toISOString(), WAITING_FOR_NETWORK]);
+}
+
+/**
+ * Qivra 2.2 runs entirely on the phone. Installs that were paired with the old laptop server:
+ * forget the pairing (the server is not contacted), drop server and sync jobs, and re-run items
+ * that were waiting for the server so they use Groq on the phone instead. Runs once.
+ */
+export async function removeServerOnce(repo: Repo): Promise<number> {
+  if ((await repo.getMeta('app.serverRemoved')) === '1') return 0;
+  await deleteSecret(SECRET_KEYS.deviceToken).catch(() => undefined);
+  await repo.setMeta('server.connection', 'null');
+  await repo.setMeta('sync.enabled', '0');
+  await repo.db.run(`DELETE FROM jobs WHERE kind LIKE 'server\\_%' ESCAPE '\\' OR kind = 'sync'`);
+  await repo.db.run(`UPDATE items SET sync_status = 'local_only' WHERE sync_status != 'local_only'`);
+  const stuck = await repo.db.all<{ id: string }>(
+    `SELECT id FROM items WHERE deleted = 0 AND (status = 'TRANSCRIBING' OR (status = 'NEEDS_INPUT' AND error_code IN ('SERVER_NOT_PAIRED','SERVER_UNREACHABLE','SERVER_FAILED','SERVER_OUTDATED','TRANSCRIPT_MISSING','TRANSCRIPTION_REQUIRED')))`,
+  );
+  await repo.setMeta('app.serverRemoved', '1');
+  for (const r of stuck) await schedulePipeline(r.id);
+  return stuck.length;
 }
 
 /** Move an item through the state machine, tolerating repeated runs. */
@@ -181,7 +200,6 @@ type TranscriptOutcome =
   | { kind: 'needs_input'; code: string; message: string };
 
 const NO_SPEECH_CODES = new Set(['NO_SPEECH', 'NO_AUDIO', 'NO_MEDIA_IN_POST']);
-const SERVER_TRANSCRIBABLE = new Set(['youtube', 'instagram', 'x']);
 
 async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutcome> {
   let captionNote = '';
@@ -200,23 +218,9 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
       }
     }
   }
-  const serverJob = await repo.getJob(`job_server_transcribe_url_${item.id}`);
-  if (serverJob?.status === 'failed_permanent') {
-    if (NO_SPEECH_CODES.has(serverJob.lastErrorCode ?? '')) return { kind: 'no_speech', message: serverJob.lastError ?? 'No speech in this post.' };
-    return { kind: 'needs_input', code: serverJob.lastErrorCode ?? 'SERVER_FAILED', message: `${serverJob.lastError ?? 'Server transcription failed.'} You can import a transcript instead.` };
-  }
-  if (serverJob && ['queued', 'running', 'failed_retryable'].includes(serverJob.status)) {
-    return { kind: 'waiting', message: 'Transcribing on your Qivra server…' };
-  }
   const settings = await getSettings();
-  const connected = !!(await getConnection());
-  if (connected && settings.autoTranscribe && SERVER_TRANSCRIBABLE.has(item.sourceType) && serverJob?.status !== 'succeeded') {
-    await repo.enqueueJob({ id: `job_server_transcribe_url_${item.id}`, kind: 'server_transcribe_url', itemId: item.id, retry: true, maxAttempts: 4 });
-    emit('jobs');
-    return { kind: 'waiting', message: 'Transcribing on your Qivra server…' };
-  }
-  // No server: Instagram and X videos are transcribed from the phone with the user's Groq key.
-  if (!connected && settings.autoTranscribe && CLOUD_TRANSCRIBABLE.has(item.sourceType)) {
+  // Instagram and X videos are transcribed from the phone with the user's Groq key.
+  if (settings.autoTranscribe && CLOUD_TRANSCRIBABLE.has(item.sourceType)) {
     const cloud = await cloudDecision(repo, item);
     if (cloud.kind === 'waiting') return cloud;
     if (cloud.kind === 'failed') {
@@ -229,15 +233,15 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
     }
   }
   if (item.sourceType === 'x' && (item.metadata?.description ?? '').trim()) {
-    const canTranscribe = connected || (await cloudWhisperReady());
+    const canTranscribe = await cloudWhisperReady();
     return { kind: 'no_speech', message: canTranscribe ? 'Using the post text.' : 'Using the post text. Add your free Groq key in Settings → AI models to transcribe X videos too.' };
   }
   const why = item.sourceType === 'youtube' ? `${captionNote || 'No captions on YouTube.'} ` : '';
   const groq = await cloudWhisperReady();
   return {
     kind: 'needs_input',
-    code: connected || groq ? 'TRANSCRIPT_MISSING' : 'NO_TRANSCRIBER',
-    message: connected || groq || item.sourceType === 'youtube'
+    code: groq ? 'TRANSCRIPT_MISSING' : 'NO_TRANSCRIBER',
+    message: groq || item.sourceType === 'youtube'
       ? `${why}Import a transcript (SRT, VTT, TXT) or paste one.`
       : `${why}Add your free Groq key in Settings → AI models and Qivra transcribes Instagram and X videos on the phone. Or import a transcript.`,
   };
@@ -250,7 +254,9 @@ async function cloudDecision(repo: Repo, item: Item): Promise<{ kind: 'waiting';
   const id = `job_cloud_transcribe_${item.id}`;
   const job = await repo.getJob(id);
   if (job?.status === 'failed_permanent') return { kind: 'failed', code: job.lastErrorCode ?? 'TRANSCRIBE_FAILED', message: job.lastError ?? 'Transcription failed.' };
-  if (job && ['queued', 'running', 'failed_retryable'].includes(job.status)) return { kind: 'waiting', message: 'Transcribing with Groq Whisper…' };
+  if (job && ['queued', 'running', 'failed_retryable'].includes(job.status)) {
+    return { kind: 'waiting', message: job.lastErrorCode === WAITING_FOR_NETWORK ? 'Waiting for internet…' : 'Transcribing with Groq Whisper…' };
+  }
   if (job?.status === 'succeeded' || !(await cloudWhisperReady())) return { kind: 'unavailable' };
   await repo.enqueueJob({ id, kind: 'cloud_transcribe', itemId: item.id, retry: true, maxAttempts: 3 });
   emit('jobs');
@@ -277,7 +283,7 @@ async function findPostVideo(item: Item): Promise<{ url: string | null; duration
 }
 
 /** Phone-only transcription with the user's Groq key: the post's video, or an imported audio/video file. */
-async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<string, unknown>> {
+async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<string, unknown> | 'offline'> {
   const item = await repo.getItem(job.itemId ?? '');
   if (!item || item.deleted) throw new JobError('ITEM_NOT_FOUND', 'Item was deleted.', false);
   let file: { uri: string; mime: string; name: string; temp: boolean } | null = null;
@@ -311,6 +317,12 @@ async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<strin
       throw new JobError('NO_SPEECH', 'No speech in this video.', false);
     }
   } catch (e) {
+    // No connection (fetch throws a TypeError, a timeout aborts): wait for the internet instead of failing.
+    if ((e instanceof CloudWhisperError && e.code === 'OFFLINE') || (!(e instanceof JobError) && !(e instanceof CloudWhisperError))) {
+      await repo.db.run('UPDATE items SET error_message = ? WHERE id = ?', ['Waiting for internet…', item.id]);
+      emit('items');
+      return 'offline';
+    }
     if (e instanceof CloudWhisperError) throw new JobError(e.code, e.message, e.retryable);
     throw e;
   } finally {
@@ -409,124 +421,6 @@ async function handleEmbed(repo: Repo): Promise<Record<string, unknown>> {
   return { embedded: total };
 }
 
-async function requireClient() {
-  const client = await getClient();
-  if (!client) throw new JobError('NOT_PAIRED', 'Not connected to a server.', false);
-  return client;
-}
-
-/** Server-side processing: sync the item up, start the job, then poll until it finishes. */
-async function handleServerJob(repo: Repo, job: Job, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich'): Promise<Record<string, unknown> | 'pending' | 'unreachable'> {
-  const client = await requireClient();
-  const itemId = job.itemId ?? '';
-  const item = await repo.getItem(itemId);
-  if (!item || item.deleted) throw new JobError('ITEM_NOT_FOUND', 'Item was deleted.', false);
-  try {
-    if (!job.serverJobId) {
-      await runSync(repo, client); // the server needs the item before it can process it
-      if (kind === 'transcribe') {
-        const media = (await repo.listMedia(itemId))[0];
-        if (!media) throw new JobError('NO_MEDIA', 'Attach an audio or video file first.', false);
-        if (!media.uploadedAt) {
-          const form = new FormData();
-          form.append('file', { uri: media.uri, name: media.name, type: media.mime } as unknown as Blob);
-          await client.uploadMedia(itemId, form);
-          await repo.markMediaUploaded(media.id);
-        }
-        if (item.status !== 'TRANSCRIBING') await moveTo(repo, item, 'TRANSCRIBING');
-      }
-      const started = await client.process(itemId, kind, job.id);
-      await repo.setServerJobId(job.id, started.job.id);
-      return 'pending';
-    }
-    const { job: sj } = await client.job(job.serverJobId);
-    if (sj.status === 'queued' || sj.status === 'running') return 'pending';
-    if (sj.status !== 'succeeded') {
-      if (kind === 'transcribe_url') await applyServerPostMeta(repo, itemId, client);
-      if (kind === 'transcribe') await moveTo(repo, (await repo.getItem(itemId))!, 'NEEDS_INPUT', { code: sj.error_code ?? 'SERVER_FAILED', message: sj.error_message ?? 'Server processing failed.' });
-      throw new JobError(sj.error_code ?? 'SERVER_FAILED', sj.error_message ?? 'Server processing failed.', sj.status === 'failed_retryable');
-    }
-    if (kind === 'transcribe_url') {
-      const meta = (sj.result?.meta ?? {}) as { title?: string; uploader?: string; description?: string; thumbnail?: string };
-      const cur = await repo.getItem(itemId);
-      if (cur) {
-        await repo.updateItem(itemId, {
-          title: cur.title || meta.title || cur.title,
-          author: cur.author || meta.uploader || '',
-          thumbnailUrl: cur.thumbnailUrl || (meta.thumbnail?.startsWith('https://') ? meta.thumbnail : ''),
-          metadata: { ...(cur.metadata ?? {}), description: cur.metadata?.description || meta.description || '', fetchedAt: new Date().toISOString(), provider: cur.metadata?.provider ?? 'server:yt-dlp' },
-        });
-      }
-    }
-    if (kind === 'captions' || kind === 'transcribe' || kind === 'transcribe_url') {
-      const { transcripts } = await client.transcripts(itemId);
-      for (const t of transcripts) {
-        await repo.upsertTranscript({
-          itemId, language: t.language, languageMethod: t.language === 'und' ? 'heuristic' : 'provider', kind: t.kind, source: `server_${t.source}`.slice(0, 40),
-          provider: t.provider, format: null, origin: 'server',
-          segments: t.segments.length ? t.segments.map((s) => ({ startMs: s.start_ms, endMs: s.end_ms, text: s.text })) : [{ startMs: null, endMs: null, text: t.text }],
-        });
-      }
-      await schedulePipeline(itemId);
-    } else {
-      await runSync(repo, client); // pull the server's updated item (metadata/enrichment)
-    }
-    emit('items');
-    return { serverJob: sj.id };
-  } catch (e) {
-    if (e instanceof JobError) throw e;
-    // The laptop is asleep or off the network: wait for it instead of spending attempts.
-    if (e instanceof ApiError && (e.kind === 'offline' || e.kind === 'timeout')) return 'unreachable';
-    if (e instanceof ApiError && e.code === 'VALIDATION_ERROR') {
-      throw new JobError('SERVER_OUTDATED', 'Your Qivra server is older than this app. Restart it from the latest code (python -m qivra serve --lan).', false);
-    }
-    if (e instanceof ApiError) throw new JobError(e.code ?? e.kind.toUpperCase(), e.message, e.retryable);
-    throw e;
-  }
-}
-
-/** Copy post details (title, author, thumbnail, caption) found by the server onto the local item. */
-async function applyServerPostMeta(repo: Repo, itemId: string, client: NonNullable<Awaited<ReturnType<typeof getClient>>>): Promise<void> {
-  try {
-    const { item: remote } = await client.item(itemId);
-    const meta = (remote.data.metadata ?? {}) as { title?: string; uploader?: string; description?: string; thumbnail?: string };
-    const cur = await repo.getItem(itemId);
-    if (!cur || (!meta.title && !meta.description && !meta.thumbnail)) return;
-    await repo.updateItem(itemId, {
-      title: cur.title || meta.title || '',
-      author: cur.author || meta.uploader || '',
-      thumbnailUrl: cur.thumbnailUrl || (meta.thumbnail?.startsWith('https://') ? meta.thumbnail : ''),
-      metadata: { ...(cur.metadata ?? {}), description: cur.metadata?.description || meta.description || '' },
-    });
-  } catch {
-    /* best effort */
-  }
-}
-
-/** Sync, then delete the media files of items that were deleted on another device. */
-async function runSync(repo: Repo, client: Parameters<typeof runSyncRaw>[1]) {
-  const removed: string[] = [];
-  try {
-    const { removedFiles: _removed, ...stats } = await runSyncRaw(repo, client, { removedFiles: removed });
-    return stats;
-  } finally {
-    await deleteLocalFiles(removed); // also when a later round fails: those rows are already gone
-  }
-}
-
-async function handleSync(repo: Repo): Promise<Record<string, unknown>> {
-  const client = await getClient();
-  if (!client || !(await repo.syncEnabled())) return { skipped: true };
-  try {
-    const stats = await runSync(repo, client);
-    emit('items', 'collections', 'conflicts', 'connection');
-    return { ...stats };
-  } catch (e) {
-    if (e instanceof ApiError) throw new JobError(e.kind.toUpperCase(), e.message, e.retryable);
-    throw e;
-  }
-}
-
 async function handleScheduledReport(): Promise<Record<string, unknown>> {
   const s = await getSettings();
   if (!s.scheduledDailyReport) return { skipped: true };
@@ -558,7 +452,7 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
       if (!jobs.length) break;
       for (const job of jobs) {
         try {
-          let result: Record<string, unknown> | 'pending' | 'unreachable';
+          let result: Record<string, unknown> | 'offline';
           switch (job.kind) {
             case 'local_enrich':
             case 'index':
@@ -571,25 +465,15 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
               result = await handleEmbed(repo);
               break;
             case 'server_metadata':
-              result = await handleServerJob(repo, job, 'metadata');
-              break;
             case 'server_captions':
-              result = await handleServerJob(repo, job, 'captions');
-              break;
             case 'server_transcribe':
-              result = await handleServerJob(repo, job, 'transcribe');
-              break;
             case 'server_transcribe_url':
-              result = await handleServerJob(repo, job, 'transcribe_url');
-              break;
             case 'server_enrich':
-              result = await handleServerJob(repo, job, 'enrich');
+            case 'sync':
+              result = { skipped: 'server removed' }; // left over from the laptop server, which the app no longer uses
               break;
             case 'cloud_transcribe':
               result = await handleCloudTranscribe(repo, job);
-              break;
-            case 'sync':
-              result = await handleSync(repo);
               break;
             case 'scheduled_report':
               result = await handleScheduledReport();
@@ -597,19 +481,17 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
             default:
               throw new JobError('UNKNOWN_JOB', `Unknown job ${job.kind}`, false);
           }
-          if (result === 'pending' || result === 'unreachable') {
-            // Poll again later without consuming an attempt; an unreachable server is retried less often
-            // (and immediately when the app sees the server again, see bootstrap.onResume).
-            const waitMs = result === 'pending' ? 15_000 : SERVER_RETRY_MS;
+          if (result === 'offline') {
+            // Try again later without consuming an attempt (and at once when the app is opened, see bootstrap.onResume).
             await repo.db.run(`UPDATE jobs SET status = 'queued', attempts = attempts - 1, run_after = ?, last_error_code = ?, last_error = ? WHERE id = ?`, [
-              new Date(Date.now() + waitMs).toISOString(), result === 'unreachable' ? 'SERVER_UNREACHABLE' : null, result === 'unreachable' ? 'Waiting for your Qivra server to be reachable.' : null, job.id,
+              new Date(Date.now() + NETWORK_RETRY_MS).toISOString(), WAITING_FOR_NETWORK, 'Waiting for internet.', job.id,
             ]);
           } else await repo.completeJob(job.id, result);
         } catch (e) {
           const err = e instanceof JobError ? e : new JobError('INTERNAL', (e as Error)?.message ?? 'Unexpected error', true);
           const updated = await repo.failJob(job.id, { code: err.code, message: err.message, retryable: err.retryable });
           // A finally-failed server transcription hands the item back to the local pipeline to decide its end state.
-          if ((job.kind === 'server_transcribe_url' || job.kind === 'cloud_transcribe') && job.itemId && updated?.status === 'failed_permanent') await schedulePipeline(job.itemId);
+          if (job.kind === 'cloud_transcribe' && job.itemId && updated?.status === 'failed_permanent') await schedulePipeline(job.itemId);
           if (job.itemId && (job.kind === 'local_enrich' || job.kind === 'index')) {
             const item = await repo.getItem(job.itemId);
             if (item && !item.deleted) {
@@ -649,25 +531,9 @@ async function scheduleNextRun(): Promise<void> {
   }
 }
 
-/** Ask for server-side processing — always a deliberate user action (it uploads data). */
-export async function requestServerProcessing(itemId: string, kind: 'metadata' | 'captions' | 'transcribe' | 'transcribe_url' | 'enrich'): Promise<void> {
-  if (!(await getConnection())) throw new Error('Connect to your server first (Settings → Connect to My Server).');
-  const repo = await getRepo();
-  await repo.enqueueJob({ id: `job_server_${kind}_${itemId}`, kind: `server_${kind}` as Job['kind'], itemId, retry: true, maxAttempts: 4 });
-  emit('jobs');
-  void runDueJobs();
-}
-
 export async function requestModelEnrichment(itemId: string): Promise<void> {
   const repo = await getRepo();
   await repo.enqueueJob({ id: `job_model_enrich_${itemId}`, kind: 'model_enrich', itemId, retry: true, maxAttempts: 3 });
-  emit('jobs');
-  void runDueJobs();
-}
-
-export async function requestSync(): Promise<void> {
-  const repo = await getRepo();
-  await repo.enqueueJob({ id: 'job_sync', kind: 'sync', retry: true, maxAttempts: 6 });
   emit('jobs');
   void runDueJobs();
 }

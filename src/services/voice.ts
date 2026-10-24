@@ -20,8 +20,7 @@ import { voiceModel, voiceTitle, whisperSegmentsToMs, type VoiceModel } from '..
 import { chunkLevel, pcmChunksToWavBase64 } from '../core/wav';
 import { getRepo } from './db';
 import { emit } from './events';
-import { requestServerProcessing, schedulePipeline } from './processing';
-import { getConnection } from './server';
+import { schedulePipeline } from './processing';
 import { getSettings } from './settings';
 
 // The package ships an incorrect type declaration, so it is loaded with require() and typed via PcmAudioRecord.
@@ -227,18 +226,15 @@ export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number
 }
 
 // ── voice notes ────────────────────────────────────────────────────────────
-export type VoiceMode = 'device' | 'server' | 'cloud';
+export type VoiceMode = 'device' | 'cloud';
 
-export async function voiceModeAvailable(): Promise<{ device: boolean; server: boolean; cloud: boolean; preferred: VoiceMode | null; model: VoiceModel }> {
+export async function voiceModeAvailable(): Promise<{ device: boolean; cloud: boolean; preferred: VoiceMode | null; model: VoiceModel }> {
   const s = await getSettings();
   const m = voiceModel(s.voice.modelId);
   const device = !!(await modelPath(m));
-  const server = !!(await getConnection());
   const cloud = await cloudWhisperReady();
-  const preferred: VoiceMode | null = s.voice.preferServer && server ? 'server'
-    : s.voice.preferCloud && cloud ? 'cloud'
-      : device ? 'device' : cloud ? 'cloud' : null;
-  return { device, server, cloud, preferred, model: m };
+  const preferred: VoiceMode | null = s.voice.preferCloud && cloud ? 'cloud' : device ? 'device' : cloud ? 'cloud' : null;
+  return { device, cloud, preferred, model: m };
 }
 
 /** Transcribe a recording with Groq Whisper (the user's key); an empty text means no speech. */
@@ -249,8 +245,7 @@ export async function transcribeInCloud(wavUri: string): Promise<VoiceTranscript
 }
 
 /**
- * Save a recording as a voice note. On-device: transcript is stored immediately.
- * Server: the WAV is uploaded (explicitly chosen by the user) and transcribed there.
+ * Save a recording as a voice note with its transcript (made on the phone, or by Groq with the user's key).
  */
 export async function saveVoiceNote(rec: { uri: string; durationMs: number; bytes: number }, mode: VoiceMode, transcript?: VoiceTranscript): Promise<string> {
   const repo = await getRepo();
@@ -263,13 +258,8 @@ export async function saveVoiceNote(rec: { uri: string; durationMs: number; byte
         itemId: item.id, language: transcript.language, languageMethod: 'provider', kind: 'original', source: mode === 'cloud' ? 'voice_cloud' : 'voice_on_device',
         provider: transcript.provider, format: 'wav', segments: transcript.segments.length ? transcript.segments : [{ startMs: null, endMs: null, text: transcript.text }],
       });
-      await schedulePipeline(item.id);
-    } else if (mode === 'server') {
-      await schedulePipeline(item.id);
-      await requestServerProcessing(item.id, 'transcribe');
-    } else {
-      await schedulePipeline(item.id);
     }
+    await schedulePipeline(item.id);
     emit('items');
     return item.id;
   } catch (e) {

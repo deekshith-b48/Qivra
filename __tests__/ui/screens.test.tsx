@@ -7,7 +7,6 @@ import { emit } from '../../src/services/events';
 import { ThemeProvider, dark } from '../../src/ui/theme';
 import OnboardingScreen from '../../src/screens/OnboardingScreen';
 import LibraryScreen from '../../src/screens/LibraryScreen';
-import ConnectServerScreen from '../../src/screens/ConnectServerScreen';
 import ItemDetailScreen from '../../src/screens/ItemDetailScreen';
 import AgentScreen from '../../src/screens/AgentScreen';
 import ReportDetailScreen from '../../src/screens/ReportDetailScreen';
@@ -36,7 +35,7 @@ test('onboarding: Skip jumps to setup, Get started marks the app onboarded and o
   expect(await (await getRepo()).getMeta('app.onboarded')).toBe('1');
 });
 
-test('onboarding setup: notifications ask for permission; Connect opens the server screen over Home', async () => {
+test('onboarding setup: notifications ask for permission; there is no server step', async () => {
   const Notifications = require('expo-notifications');
   const ask = jest.spyOn(Notifications, 'requestPermissionsAsync').mockResolvedValue({ granted: true } as never);
   const n = nav() as { reset: jest.Mock };
@@ -44,8 +43,8 @@ test('onboarding setup: notifications ask for permission; Connect opens the serv
   fireEvent.press(screen.getByRole('button', { name: 'Notifications: Allow' }));
   expect(await screen.findByRole('button', { name: 'Notifications: Allowed' })).toBeTruthy();
   expect(ask).toHaveBeenCalled();
-  fireEvent.press(screen.getByRole('button', { name: 'Optional: your own server: Set up' }));
-  await waitFor(() => expect(n.reset).toHaveBeenCalledWith({ index: 1, routes: [{ name: 'Main' }, { name: 'ConnectServer' }] }));
+  expect(screen.getByRole('button', { name: /^AI answers/ })).toBeTruthy();
+  expect(screen.queryByText(/your own server|laptop|Connect/)).toBeNull();
 });
 
 test('library has Videos / Websites / Notes sections and its search bar searches everything', async () => {
@@ -72,21 +71,6 @@ test('library has Videos / Websites / Notes sections and its search bar searches
   expect(await screen.findByText('No results', {}, { timeout: 3000 })).toBeTruthy();
 });
 
-test('connect screen validates manual pairing input before any network call', async () => {
-  const fetchSpy = jest.spyOn(global, 'fetch' as never);
-  wrap(<ConnectServerScreen navigation={nav()} route={{ key: 'c', name: 'ConnectServer', params: {} } as never} />);
-  fireEvent.changeText(await screen.findByLabelText('Server URL'), 'http://example.com:5000');
-  fireEvent.changeText(screen.getByLabelText('Access ID'), 'ABCD-2345');
-  fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
-  expect(await screen.findByText(/only allowed for local-network addresses/)).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Server URL'), '192.168.1.20:5001');
-  fireEvent.changeText(screen.getByLabelText('Access ID'), '12');
-  fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
-  expect(await screen.findByText(/8 characters/)).toBeTruthy();
-  expect(fetchSpy).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: 'Scan QR code' })).toBeTruthy();
-});
-
 test('video page: compact header, then Summary / Transcript / Details tabs; keyword chips open the filtered transcript', async () => {
   const repo = await getRepo();
   const { item } = await repo.createItem({ sourceType: 'youtube', title: 'Hooks tutorial', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
@@ -100,6 +84,7 @@ test('video page: compact header, then Summary / Transcript / Details tabs; keyw
   });
   wrap(<ItemDetailScreen navigation={nav()} route={{ key: 'i', name: 'ItemDetail', params: { id: item.id } } as never} />);
   expect(await screen.findByText('Hooks tutorial')).toBeTruthy();
+  await screen.findByRole('tab', { name: 'Transcript, 2' }); // the line count arrives with the transcript
   expect(screen.getAllByRole('tab').map((t) => t.props.accessibilityLabel)).toEqual(['Summary', 'Transcript, 2', 'Details']);
   expect(screen.getByText('TL;DR')).toBeTruthy();
   expect(screen.getByText('Extracted on device')).toBeTruthy();
@@ -147,7 +132,7 @@ test('error banner offers one primary and one secondary action', async () => {
   expect(await screen.findByText('Add your Groq key to transcribe')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Add Groq key' })).toBeTruthy();
   expect(screen.getAllByRole('button', { name: 'Import transcript' }).length).toBeGreaterThan(0);
-  for (const extra of ['Retry', 'Try server again', 'Try again']) expect(screen.queryByRole('button', { name: extra })).toBeNull();
+  for (const extra of ['Retry', 'Try again']) expect(screen.queryByRole('button', { name: extra })).toBeNull();
 });
 
 test('ask answers from saved items without a model; sources open from the Sources sheet', async () => {

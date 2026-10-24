@@ -1,3 +1,5 @@
+> **Unsupported since Qivra 2.2.** The app no longer uses a server: everything runs on the phone with your own Groq key. This page is kept only for the old `server/` code.
+
 # Local server, access ID and QR pairing
 
 ## Start

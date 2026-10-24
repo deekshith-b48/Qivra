@@ -7,7 +7,6 @@ import { resetTestRepo } from '../helpers/uiSetup';
 
 // Exercise the real capture → job runner → OCR path (uiSetup mocks processing for screen tests).
 jest.mock('../../src/services/processing', () => jest.requireActual('../../src/services/processing'));
-jest.mock('../../src/services/server', () => ({ getClient: jest.fn(async () => null), getConnection: jest.fn(async () => null), checkConnection: jest.fn() }));
 jest.mock('../../src/services/ai', () => ({ aiInfo: jest.fn(async () => ({ enabled: false })), loadProvider: jest.fn(async () => ({ provider: null })) }));
 
 const mockFiles = new Map<string, string>();

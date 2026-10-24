@@ -10,12 +10,11 @@ import { updateSettings } from '../services/settings';
 import { Banner, Button, Card, Chip, Header, Screen, Section, T, ToggleRow } from '../ui/components';
 import { confirm, useQuery } from '../ui/hooks';
 import { radius, space, useTheme } from '../ui/theme';
-import { useConnection, useSettings } from '../ui/useSettings';
+import { useSettings } from '../ui/useSettings';
 
 export default function VoiceSettingsScreen({ navigation }: RootProps<'VoiceSettings'>) {
   const { c } = useTheme();
   const s = useSettings();
-  const { connection } = useConnection();
   const [progress, setProgress] = useState<Record<string, number>>({});
   const groq = useQuery(() => cloudWhisperReady(), ['settings']);
   const installed = useQuery(async () => {
@@ -50,7 +49,7 @@ export default function VoiceSettingsScreen({ navigation }: RootProps<'VoiceSett
           <T v="subtitle">Private by default</T>
         </View>
         <T v="small" color="textMuted" style={{ marginTop: 4 }}>
-          Speech is transcribed on this phone with whisper.cpp (Whisper or NVIDIA Parakeet). Audio never leaves the device unless you choose your own server below. Inspired by OpenWhispr.
+          Speech is transcribed on this phone with whisper.cpp (Whisper or NVIDIA Parakeet). Audio never leaves the device unless you turn on Groq for long notes below. Inspired by OpenWhispr.
         </T>
       </Card>
 
@@ -110,9 +109,6 @@ export default function VoiceSettingsScreen({ navigation }: RootProps<'VoiceSett
         {groq.data ? (
           <ToggleRow title="Transcribe voice notes with Groq" subtitle="Sends the recording to Groq Whisper with your key. Up to 12 minutes instead of 5, and no model download needed. Dictation uses the phone model when one is downloaded." value={!!s.voice.preferCloud} onChange={(v) => void updateSettings({ voice: { ...s.voice, preferCloud: v } })} />
         ) : <Banner tone="info" title="Add your Groq key for longer notes" body="With your own free Groq key, voice notes of up to 12 minutes are transcribed by Groq Whisper." action={<Button kind="outline" title="Add key" onPress={() => navigation.navigate('AiProviders')} />} />}
-        {connection ? (
-          <ToggleRow title="Transcribe voice notes on my server" subtitle="Optional: uploads the recording to your paired Qivra server instead (keeps audio on your own computer)." value={s.voice.preferServer} onChange={(v) => void updateSettings({ voice: { ...s.voice, preferServer: v } })} />
-        ) : null}
       </Section>
     </Screen>
   );

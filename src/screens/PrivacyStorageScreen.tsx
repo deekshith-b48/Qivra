@@ -5,7 +5,6 @@ import type { RootProps } from '../navigation/types';
 import { getRepo } from '../services/db';
 import { emit } from '../services/events';
 import { exportLibrary } from '../services/reports';
-import { disconnect, getConnection } from '../services/server';
 import { Banner, Button, Card, Header, Screen, Section, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { useSettings } from '../ui/useSettings';
@@ -45,8 +44,8 @@ export default function PrivacyStorageScreen({ navigation }: RootProps<'PrivacyS
       </Card>
       <Section title="What leaves this phone">
         <T v="small" color="textMuted">• Public metadata lookups for links you save (YouTube oEmbed, GitHub API, the web page itself).</T>
-        <T v="small" color="textMuted">• If paired: titles, notes, tags, summaries and collections sync to your own server. Transcripts and media are sent only when you ask for server processing.</T>
-        <T v="small" color="textMuted">• If you configure an AI model: the saved text needed for that request. External providers require your consent first.</T>
+        <T v="small" color="textMuted">• Video posts you save from X and Instagram: their public video is fetched from the post's embed page, and with your Groq key its audio is sent to Groq for the transcript.</T>
+        <T v="small" color="textMuted">• With your own AI key (Groq, optional Gemini): the saved text needed for that request, sent straight from this phone. You give consent when you add the key.</T>
         {devMode ? <T v="small" color="textMuted">• Dev mode: public searches to GitHub, Hacker News and Hugging Face (trends, the Claude Code corner and the topics you follow). No library content is sent.</T> : null}
         <T v="small" color="textMuted">• Nothing else: no analytics, no crash reporting, no ads.</T>
       </Section>
@@ -58,11 +57,10 @@ export default function PrivacyStorageScreen({ navigation }: RootProps<'PrivacyS
         <T v="caption" color="textFaint" style={{ marginTop: 4 }}>Includes items, notes, tags, collections, transcripts, reports and conversations. Credentials are never exported.</T>
       </Section>
       <Section title="Delete">
-        <Banner tone="danger" title="Delete everything on this phone" body="Removes all items, transcripts, imported media, reports and conversations from this phone. It does not delete data on your server." action={
+        <Banner tone="danger" title="Delete everything on this phone" body="Removes all items, transcripts, imported media, reports and conversations from this phone. Nothing is stored anywhere else." action={
           <Button kind="danger" title="Delete all data" loading={busy} onPress={() => void run(async () => {
             if (!(await confirm('Delete all Qivra data?', 'This cannot be undone. Export first if you want a copy.', 'Delete everything', true))) return;
             if (!(await confirm('Are you sure?', 'All items, transcripts, media and reports on this phone will be erased.', 'Erase', true))) return;
-            if (await getConnection()) await disconnect(false);
             const repo = await getRepo();
             await repo.deleteEverything();
             await FS.deleteAsync(`${FS.documentDirectory}media/`, { idempotent: true });

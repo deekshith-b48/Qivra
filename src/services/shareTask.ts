@@ -13,8 +13,7 @@ import type { Item } from '../db/types';
 import { drainShareInbox } from './capture';
 import { getRepo } from './db';
 import { type ReadyNote, readyNote, writeShareResult } from './notify';
-import { recoverIfIdle, runDueJobs, wakeServerJobs } from './processing';
-import { checkConnection, getConnection } from './server';
+import { recoverIfIdle, runDueJobs, wakeWaitingJobs } from './processing';
 
 export const SHARE_TASK_NAME = 'QivraShare';
 const BUDGET_MS = 150_000; // the native service allows 170 s
@@ -47,11 +46,8 @@ export async function runShareTask(opts: { budgetMs?: number; pollMs?: number } 
     // Duplicates are notified too: the user shared it again and expects to land on it.
     itemIds = [...new Set(shared.results.filter((r) => r.itemId && !r.error).map((r) => r.itemId as string))];
     if (!itemIds.length) return { itemIds, settled };
-    // Refresh the server connection (and its AI gateway) so this run can use it.
-    if (await getConnection()) {
-      const c = await checkConnection().catch(() => null);
-      if (c && !c.lastError) await wakeServerJobs(repo);
-    }
+    // Earlier shares that were waiting for the internet can go now too.
+    await wakeWaitingJobs(repo);
     while (true) {
       await runDueJobs(Math.max(1_000, Math.min(20_000, deadline - Date.now())));
       const items = await Promise.all(itemIds.map((id) => repo.getItem(id)));

@@ -3,7 +3,6 @@ import { LATEST_VERSION, MIGRATIONS, migrate } from '../../src/db/schema';
 import { Repo } from '../../src/db/repo';
 import { rulesToFilter, sanitizeRules } from '../../src/core/smart';
 import type { Enrichment } from '../../src/core/enrich';
-import { applyRemote } from '../../src/sync/engine';
 
 const NOW = new Date('2026-10-22T12:00:00Z');
 
@@ -128,18 +127,5 @@ describe('cards in the repo', () => {
     await repo.db.run('DELETE FROM items WHERE id = ?', [other.id]);
     expect(await repo.countDueCards(now)).toBe(0);
     expect(await repo.listCards(other.id)).toEqual([]);
-  });
-});
-
-describe('sync of smart rules', () => {
-  test('pulled collections keep their rules; malformed rules become a manual collection', async () => {
-    const repo = await freshRepo();
-    const ent = (id: string, data: Record<string, unknown>) => ({
-      kind: 'collection' as const, id, revision: 1, seq: 1, deleted: false, data, created_at: 'x', updated_at: 'x', updated_by: 'dev',
-    });
-    expect(await applyRemote(repo, ent('col_a', { name: 'Smart', rules: { tags: ['RAG'], unread: true } }))).toBe('pulled');
-    expect(await applyRemote(repo, ent('col_b', { name: 'Odd', rules: 'nope' }))).toBe('pulled');
-    expect((await repo.getCollection('col_a'))?.rules).toEqual({ tags: ['rag'], unread: true });
-    expect((await repo.getCollection('col_b'))?.rules).toBeNull();
   });
 });
