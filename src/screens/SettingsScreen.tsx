@@ -11,6 +11,7 @@ import { Alert, Linking, View } from 'react-native';
 import { isValidTimeZone } from '../core/dates';
 import type { RootProps } from '../navigation/types';
 import { disableDailyReminder, enableDailyReminder } from '../services/reminders';
+import { downloaderVersion, updateDownloader } from '../services/downloader';
 import { deviceTimeZone, updateSettings } from '../services/settings';
 import { enableWeeklyReport } from '../services/weeklyReport';
 import { Button, Card, Field, Group, Header, Row, Screen, Section, Sheet, T, ToggleRow, Wordmark } from '../ui/components';
@@ -36,6 +37,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
       return null;
     }
   }, ['settings']);
+  const ytdl = useQuery(async () => downloaderVersion(), ['settings']);
   const [tzOpen, setTzOpen] = React.useState(false);
   const [tz, setTz] = React.useState('');
   React.useEffect(() => setTz(s?.timezone ?? ''), [s?.timezone]);
@@ -71,8 +73,8 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
         <Group>
           <Row icon="hardware-chip" tint={t.pink} title="AI models" value={ai?.enabled ? ai.model ?? 'On' : 'Off'} subtitle={ai?.enabled ? 'Your own key: answers, summaries and video transcripts' : 'Add your free Groq key for AI and video transcripts'} onPress={() => navigation.navigate('AiProviders')} />
           <Row icon="mic" tint={t.red} title="Speech & dictation" value={s.voice.modelId.startsWith('parakeet') ? 'Parakeet' : 'Whisper'} onPress={() => navigation.navigate('VoiceSettings')} />
-          <ToggleRow icon="language" tint={t.green} title="Transcripts in English" subtitle="Translate other languages with your Groq key and show English first; the original stays one tap away." value={s.englishTranscripts} onChange={(v) => void updateSettings({ englishTranscripts: v })} />
-          <ToggleRow icon="videocam" tint={t.blue} title="Auto-transcribe shared videos" subtitle="YouTube captions directly; X videos and shared video files with your Groq key." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
+          <ToggleRow icon="videocam" tint={t.blue} title="Auto-transcribe shared videos" subtitle="Always in English: YouTube's English captions; Instagram reels, X videos and video files with your Groq key." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
+          <Row icon="cloud-download" tint={t.green} title="Video downloader" value={ytdl.data ? `yt-dlp ${ytdl.data}` : undefined} subtitle="Downloads Instagram reels on the phone. Update it if reels stop downloading." onPress={() => void updateDownloader().then((m) => Alert.alert('Video downloader', m), (e: Error) => Alert.alert('Update failed', e.message)).finally(() => void ytdl.reload())} />
           <Row icon="time" tint={t.gray} title="Processing queue" value={j ? `${j.queued + j.running} pending${j.failed_retryable + j.failed_permanent ? ` · ${j.failed_retryable + j.failed_permanent} failed` : ''}` : undefined} onPress={() => navigation.navigate('Jobs')} />
         </Group>
       </Section>

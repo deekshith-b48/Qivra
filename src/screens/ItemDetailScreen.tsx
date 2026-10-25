@@ -6,19 +6,20 @@ import { formatLocal } from '../core/dates';
 import { formatReminder, reminderPresets } from '../core/reminderTimes';
 import { keyMomentsOf } from '../core/enrich';
 import { extractKeywords, type Keyword } from '../core/highlights';
-import { languageName, LANGUAGES } from '../core/language';
+import { languageName } from '../core/language';
+import { INDIAN_LANGUAGES, isIndianLanguage, type IndianLanguage, type SummaryTranslation } from '../core/translate';
 import { isFailed, isPending, STATUS_LABELS } from '../core/status';
 import { formatTimestamp, type Segment } from '../core/transcripts';
 import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
 import type { Highlight, Item, Transcript } from '../db/types';
 import type { RootProps } from '../navigation/types';
-import { deleteItemFiles, pickMediaFile } from '../services/capture';
+import { deleteItemFiles } from '../services/capture';
 import { getRepo } from '../services/db';
 import { clearItemReminders, scheduleItemReminder } from '../services/reminders';
 import { emit } from '../services/events';
 import { similarItems } from '../services/semantic';
 import { makeCards } from '../services/flashcards';
-import { cancelItemProcessing, requestModelEnrichment, schedulePipeline } from '../services/processing';
+import { cancelItemProcessing, requestModelEnrichment, requestTranslation, schedulePipeline, summaryTranslationKey } from '../services/processing';
 import { ActionPill, Banner, Button, Card, Chip, Field, Header, IconButton, type IconName, Loading, Provenance, Row, Screen, Section, Sheet, T } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
 import { ItemCard } from '../ui/ItemCard';
@@ -80,7 +81,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const [focus, setFocus] = useState<string | null>(null);
   const [edit, setEdit] = useState<null | 'title' | 'note' | 'summary' | 'tags'>(null);
   const [draft, setDraft] = useState('');
-  const [langOpen, setLangOpen] = useState(false);
+  // Qivra works in English; Kannada, Hindi, Telugu and Tamil are translated views (with the user's Groq key).
+  const [viewLang, setViewLang] = useState<'en' | IndianLanguage>('en');
+  const [translateOpen, setTranslateOpen] = useState(false);
   const [correcting, setCorrecting] = useState<{ ordinal: number; text: string } | null>(null);
   // Long-press on a transcript line, key moment or the summary: save it as a highlight, copy it, or correct it.
   const [picked, setPicked] = useState<{ text: string; startMs: number | null; source: Highlight['source']; ordinal?: number } | null>(null);
@@ -107,6 +110,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
       collections: await repo.listCollections(),
       memberOf: await repo.itemCollectionIds(id),
       related: await repo.relatedItems(item, 4),
+      translations: Object.fromEntries(await Promise.all(INDIAN_LANGUAGES.map(async (l) => [l.code, await repo.getJson<SummaryTranslation | null>(summaryTranslationKey(id, l.code), null)] as const))) as Record<IndianLanguage, SummaryTranslation | null>,
     };
   }, ['items', 'jobs', 'collections'], [id]);
 
@@ -123,13 +127,13 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     const t = setTimeout(() => heroRef.current?.seek(atParam), 300);
     return () => clearTimeout(t);
   }, [atParam, videoIdForAt]);
-  // English first (the AI translation of a non-English video), the original language one tap away.
-  const englishFirst = settings?.englishTranscripts ?? true;
-  const speech = (d?.transcripts.filter((t) => !ARTICLE_SOURCES.has(t.source)) ?? [])
-    .sort((a, b) => (englishFirst ? Number(b.kind === 'translation' && b.language === 'en') - Number(a.kind === 'translation' && a.language === 'en') : 0));
+  // Indian-language translations are views of the English transcript, shown when picked in the Translate sheet.
+  const isLangView = (t: Transcript) => t.kind === 'translation' && isIndianLanguage(t.language);
+  const speech = d?.transcripts.filter((t) => !ARTICLE_SOURCES.has(t.source) && !isLangView(t)) ?? [];
   const articles = d?.transcripts.filter((t) => ARTICLE_SOURCES.has(t.source)) ?? [];
   const ordered: Transcript[] = [...speech, ...articles];
-  const activeT = ordered.find((t) => t.id === transcriptId) ?? ordered[0] ?? null;
+  const langT = viewLang === 'en' ? null : d?.transcripts.find((t) => t.kind === 'translation' && t.language === viewLang) ?? null;
+  const activeT = langT ?? ordered.find((t) => t.id === transcriptId) ?? ordered[0] ?? null;
   const segs = useQuery(async (repo) => (activeT ? repo.getSegments(activeT.id) : []), ['items'], [activeT?.id, activeT?.updatedAt]);
 
   const keywords: Keyword[] = useMemo(() => {
@@ -204,7 +208,34 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const shownSegs = lineSource.map((s, i) => ({ ...s, i })).filter((s) => !focus || s.text.toLowerCase().includes(focus.toLowerCase()));
   const info = item.errorCode?.startsWith('INFO_');
   const generating = !!d.aiJob && (d.aiJob.status === 'queued' || d.aiJob.status === 'running');
-  const moments = keyMomentsOf(e);
+  const st = viewLang === 'en' ? null : d.translations[viewLang];
+  const moments = st?.moments.length ? st.moments : keyMomentsOf(e);
+  const summaryText = st ? st.tldr || st.summary : item.summary;
+  const translating = (l: string) => d.jobs.some((j) => j.kind === 'translate_to' && j.payload?.lang === l && ['queued', 'running', 'failed_retryable'].includes(j.status));
+  const translateFailure = (l: string) => d.jobs.find((j) => j.kind === 'translate_to' && j.payload?.lang === l && j.status === 'failed_permanent');
+  const translated = (l: IndianLanguage) => !!d.translations[l] || d.transcripts.some((t) => t.kind === 'translation' && t.language === l);
+  const shownLangs = INDIAN_LANGUAGES.filter((l) => translated(l.code) || translating(l.code) || translateFailure(l.code));
+  const pickLang = (code: 'en' | IndianLanguage) => run(async () => {
+    setTranslateOpen(false);
+    setViewLang(code);
+    if (code === 'en' || translated(code)) return;
+    if (!ai?.enabled) return Alert.alert('Add your Groq key', 'Translation uses your free Groq key. Add it in Settings → AI models.');
+    await requestTranslation(id, code);
+  });
+  const viewName = INDIAN_LANGUAGES.find((l) => l.code === viewLang)?.name;
+  const langBar = shownLangs.length ? (
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -space.lg, marginBottom: space.sm }} contentContainerStyle={{ paddingHorizontal: space.lg }}>
+        <Chip label="English" selected={viewLang === 'en'} onPress={() => setViewLang('en')} />
+        {shownLangs.map((l) => <Chip key={l.code} label={l.native} selected={viewLang === l.code} onPress={() => setViewLang(l.code)} />)}
+      </ScrollView>
+      {viewLang !== 'en' && translating(viewLang) ? <Banner tone="info" icon="language-outline" title={`Translating into ${viewName}…`} body="With your Groq key. It appears here when ready." /> : null}
+      {viewLang !== 'en' && !translating(viewLang) && translateFailure(viewLang) ? (
+        <Banner tone="danger" title={`Could not translate into ${viewName}`} body={translateFailure(viewLang)?.lastError ?? undefined}
+          action={<Button kind="outline" title="Try again" icon="refresh" onPress={() => void run(() => requestTranslation(id, viewLang))} />} />
+      ) : null}
+    </>
+  ) : null;
   const saveHighlight = () => run(async () => {
     if (!picked) return;
     await repoOp((r) => r.addHighlight({ itemId: id, text: picked.text, startMs: picked.startMs, source: picked.source }));
@@ -221,7 +252,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const retryA: Action = { title: 'Retry', icon: 'refresh', onPress: () => void retry() };
   const problem: { primary: Action; secondary?: Action } | null =
     item.status !== 'NEEDS_INPUT' && !isFailed(item.status) && item.status !== 'CANCELLED' ? null
-      : item.errorCode === 'INSTAGRAM_DOWNLOAD' ? { primary: { title: 'Add the downloaded reel', icon: 'download-outline', onPress: () => void run(() => pickMediaFile(id)) }, secondary: importT }
+      : item.errorCode === 'INSTAGRAM_BLOCKED' || item.errorCode === 'DOWNLOAD_FAILED' ? { primary: retryA, secondary: importT }
       : NEEDS_KEY.has(item.errorCode ?? '') ? { primary: { title: 'Add Groq key', icon: 'key-outline', onPress: () => navigation.navigate('AiProviders') }, secondary: importT }
         : isFailed(item.status) || item.status === 'CANCELLED' ? { primary: retryA, secondary: importT }
           : { primary: importT, secondary: isVideo || item.sourceType === 'file' ? { ...retryA, title: 'Try again' } : undefined };
@@ -244,7 +275,6 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         {item.metadata?.description && isVideo ? <HighlightedText text={item.metadata.description} terms={terms} style={{ fontSize: 14, marginTop: space.sm }} selectable /> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md }}>
           <Button kind="outline" title="Import transcript" onPress={() => navigation.navigate('TranscriptImport', { itemId: id })} />
-          {!isVideo ? <Button kind="outline" title="Attach audio/video" onPress={() => void run(() => pickMediaFile(id))} /> : null}
         </View>
       </Card>
     </Section>
@@ -252,6 +282,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   const summaryTab = (
     <>
+      {langBar}
       <Card>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <T v="subtitle" style={{ flex: 1 }}>TL;DR</T>
@@ -268,9 +299,9 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
           {item.summary ? <Provenance origin={item.summaryOrigin} /> : null}
           {generating ? <Provenance origin="generating" /> : null}
         </View>
-        {item.summary ? (
-          <Pressable onLongPress={() => setPicked({ text: item.summary, startMs: null, source: 'summary' })} accessibilityHint="Long press to save as a highlight or copy">
-            <HighlightedText text={item.summary} terms={terms} style={{ marginTop: space.sm }} />
+        {summaryText ? (
+          <Pressable onLongPress={() => setPicked({ text: summaryText, startMs: null, source: 'summary' })} accessibilityHint="Long press to save as a highlight or copy">
+            <HighlightedText text={summaryText} terms={st ? [] : terms} style={{ marginTop: space.sm }} />
           </Pressable>
         ) : (
           <T color="textFaint" style={{ marginTop: space.sm }}>{isPending(item.status) || item.status === 'TRANSCRIBING' ? 'The summary appears once the transcript is ready.' : 'No summary yet — there is no text to summarise.'}</T>
@@ -343,7 +374,8 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
 
   const transcriptTab = activeT ? (
     <>
-      {ordered.length > 1 ? (
+      {langBar}
+      {ordered.length > 1 && !langT ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -space.lg }} contentContainerStyle={{ paddingHorizontal: space.lg }}>
           {ordered.map((t) => (
             <Chip key={t.id} label={textKindLabel(t.source) ?? `${languageName(t.language)}${t.kind === 'translation' ? ' · translation' : ''}`} selected={activeT.id === t.id} onPress={() => setTranscriptId(t.id)} />
@@ -354,9 +386,8 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         <T v="caption" color="textFaint" style={{ flex: 1 }} numberOfLines={2}>
           {activeT.provider ?? activeT.source} · {activeT.source === 'ai_translation' ? 'translated by AI' : /^(cloud_whisper|voice_cloud)$/.test(activeT.source) ? 'Groq Whisper' : activeT.origin === 'server' ? 'imported' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps'}{activeT.corrected ? ' · corrected' : ''}
         </T>
-        <IconButton icon="language-outline" size={19} label="Language" onPress={() => setLangOpen(true)} />
+        <IconButton icon="language-outline" size={19} label="Translate" onPress={() => setTranslateOpen(true)} />
         <IconButton icon="copy-outline" size={19} label="Copy" onPress={() => void Clipboard.setStringAsync(activeT.text).then(() => Alert.alert('Copied', 'Transcript copied.'))} />
-        <IconButton icon="add" size={20} label="Add translation" onPress={() => navigation.navigate('TranscriptImport', { itemId: id, kind: 'translation' })} />
       </View>
       {item.metadata?.description && isVideo ? (
         <Pressable onPress={() => setCaptionOpen(!captionOpen)} accessibilityRole="button" accessibilityHint={captionOpen ? 'Shows less' : 'Shows the whole caption'}>
@@ -535,12 +566,12 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
         {edit === 'summary' ? <T v="small" color="textMuted">Your correction replaces the generated summary and is marked as your edit.</T> : null}
         <Button title="Save" onPress={() => void saveEdit()} loading={busy} style={{ marginTop: space.md }} />
       </Sheet>
-      <Sheet visible={langOpen} onClose={() => setLangOpen(false)} title="Transcript language">
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-          {LANGUAGES.map((l) => (
-            <Chip key={l.code} label={l.name} selected={activeT?.language === l.code} onPress={() => void run(async () => { if (activeT) await repoOp((r) => r.setTranscriptLanguage(activeT.id, l.code)); setLangOpen(false); })} />
-          ))}
-        </View>
+      <Sheet visible={translateOpen} onClose={() => setTranslateOpen(false)} title="Translate">
+        <T v="small" color="textMuted" style={{ marginBottom: space.sm }}>Qivra works in English. Translate this transcript and summary with your Groq key.</T>
+        <Row icon="language-outline" tint={c.tint.blue} title="English" value={viewLang === 'en' ? 'Showing' : 'Original'} onPress={() => void pickLang('en')} />
+        {INDIAN_LANGUAGES.map((l) => (
+          <Row key={l.code} icon="language-outline" tint={c.tint.green} title={`${l.native} · ${l.name}`} value={viewLang === l.code ? 'Showing' : translated(l.code) ? 'Ready' : translating(l.code) ? 'Translating…' : undefined} onPress={() => void pickLang(l.code)} />
+        ))}
       </Sheet>
       <Sheet visible={!!picked} onClose={() => setPicked(null)} title={picked?.source === 'transcript' ? 'This line' : picked?.source === 'summary' ? 'Summary' : 'Key moment'}>
         <T v="small" color="textMuted" numberOfLines={4} style={{ marginBottom: space.md }}>{picked?.startMs != null ? `${formatTimestamp(picked.startMs)} · ` : ''}{picked?.text}</T>

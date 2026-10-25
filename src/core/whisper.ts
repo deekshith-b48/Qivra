@@ -1,6 +1,6 @@
 /**
  * Parses an OpenAI-compatible Whisper `verbose_json` transcription (Groq's
- * `/audio/transcriptions`) into Qivra transcript segments. Pure, unit-tested.
+ * `/audio/translations` or `/audio/transcriptions`) into Qivra transcript segments. Pure, unit-tested.
  */
 
 export interface WhisperResult {

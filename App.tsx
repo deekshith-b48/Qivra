@@ -51,7 +51,7 @@ const TABS: Record<keyof TabParamList, TabSpec> = {
   Today: { label: 'Home', icon: ['home', 'home-outline'] },
   Glance: { label: 'Glance', icon: ['grid', 'grid-outline'] },
   Library: { label: 'Library', icon: ['folder', 'folder-outline'] },
-  Agent: { label: 'Ask', icon: ['chatbubble-ellipses', 'chatbubble-ellipses-outline'] },
+  Agent: { label: 'Ask AI', icon: ['chatbubble-ellipses', 'chatbubble-ellipses-outline'] },
   Dev: { label: 'Dev', icon: ['code-slash', 'code-slash-outline'] },
 };
 
@@ -65,7 +65,7 @@ function MainTabs() {
     <>
       <Tabs.Navigator
         screenOptions={{ headerShown: false }}
-        tabBar={(props) => <FloatingTabBar {...props} tabs={tabs} onAdd={() => setCaptureOpen(true)} />}
+        tabBar={(props) => <FloatingTabBar {...props} tabs={tabs} onAdd={() => setCaptureOpen(true)} fab="Agent" />}
       >
         <Tabs.Screen name="Today" component={TodayScreen} options={{ title: 'Home', tabBarAccessibilityLabel: 'Home' }} />
         <Tabs.Screen name="Glance" component={GlanceScreen} options={{ title: 'Glance', tabBarAccessibilityLabel: 'Glance' }} />

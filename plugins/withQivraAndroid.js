@@ -11,13 +11,17 @@
  *  - Build properties: NDK version available on this machine, ABIs.
  *
  *  - QivraShareTaskService (not exported): headless JS share processing.
+ *  - QivraDownloader: yt-dlp on the phone (youtubedl-android, as in ytdlnis) for Instagram reel audio.
+ *    Its Python runs from the native library folder, so native libraries are packaged the legacy way.
  *
- * Native code added: plugins/android/ShareActivity.kt and QivraShareTaskService.kt
+ * Native code added: plugins/android/ShareActivity.kt, QivraShareTaskService.kt and QivraDownloaderModule.kt
  * (documented in docs/ARCHITECTURE.md).
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { withAndroidManifest, withDangerousMod, withGradleProperties, AndroidConfig } = require('expo/config-plugins');
+const { withAndroidManifest, withAppBuildGradle, withDangerousMod, withGradleProperties, withMainApplication, AndroidConfig } = require('expo/config-plugins');
+
+const YTDL = 'io.github.junkfood02.youtubedl-android:library:0.18.1';
 
 const SHARE_MIME = ['text/plain', 'text/*', 'text/vtt', 'application/x-subrip', 'audio/*', 'video/*', 'image/*'];
 
@@ -89,7 +93,7 @@ module.exports = function withQivraAndroid(config, opts = {}) {
     const root = cfg.modRequest.platformProjectRoot;
     const javaDir = path.join(root, 'app/src/main/java', ...pkg.split('.'));
     fs.mkdirSync(javaDir, { recursive: true });
-    for (const file of ['ShareActivity.kt', 'QivraShareTaskService.kt']) {
+    for (const file of ['ShareActivity.kt', 'QivraShareTaskService.kt', 'QivraDownloaderModule.kt']) {
       const src = fs.readFileSync(path.join(cfg.modRequest.projectRoot, 'plugins/android', file), 'utf8');
       fs.writeFileSync(path.join(javaDir, file), src.replace(/__PACKAGE__/g, pkg));
     }
@@ -107,6 +111,21 @@ module.exports = function withQivraAndroid(config, opts = {}) {
     };
     if (ndkVersion) set('ndkVersion', ndkVersion);
     if (architectures) set('reactNativeArchitectures', architectures);
+    set('expo.useLegacyPackaging', 'true'); // youtubedl-android executes libpython.so from the extracted native libs
+    return cfg;
+  });
+
+  config = withAppBuildGradle(config, (cfg) => {
+    if (!cfg.modResults.contents.includes(YTDL)) {
+      cfg.modResults.contents = cfg.modResults.contents.replace(/\ndependencies \{/, `\ndependencies {\n    implementation("${YTDL}")`);
+    }
+    return cfg;
+  });
+
+  config = withMainApplication(config, (cfg) => {
+    if (!cfg.modResults.contents.includes('QivraDownloaderPackage()')) {
+      cfg.modResults.contents = cfg.modResults.contents.replace(/PackageList\(this\)\.packages\.apply \{/, '$&\n              add(QivraDownloaderPackage())');
+    }
     return cfg;
   });
   return config;

@@ -49,8 +49,8 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 | | |
 |---|---|
-| **Capture** | Share from YouTube, X, a browser or any app and keep scrolling (for an Instagram reel, download it in Instagram, then tap **Add the downloaded reel** on its item). Paste a link, write a note, record a voice note, or import files, screenshots and transcripts (SRT, VTT, TXT). Shares survive the app being killed. |
-| **Understand** | YouTube captions are read directly. X videos, shared or imported audio/video (including downloaded Instagram reels) and voice notes of up to 12 minutes are transcribed by Groq Whisper with your own key, straight from the phone. Non-English transcripts are translated to English with your key and shown in English first (the original is one tap away), and summaries are made from the English text. YouTube videos without captions can't be fetched by apps (import a transcript); for an Instagram reel, download it in Instagram and tap **Add the downloaded reel** on its item. On-screen text in silent videos and text in images are read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
+| **Capture** | Share from YouTube, Instagram, X, a browser or any app and keep scrolling. Paste a link, write a note, record a voice note, or import files, screenshots and transcripts (SRT, VTT, TXT). Shares survive the app being killed. |
+| **Understand** | Qivra works in English. YouTube's English captions are read directly (auto-generated, or YouTube's own English translation of the video's captions). Instagram reels are downloaded on the phone with yt-dlp (the engine [ytdlnis](https://github.com/deniscerri/ytdlnis) uses), and they, X videos, shared audio/video and voice notes of up to 12 minutes are turned into English text by Groq Whisper with your own key. Any other non-English transcript is translated to English with your key. Tap the translate button on an item to read its transcript and summary in **Kannada, Hindi, Telugu or Tamil**. YouTube videos without captions can't be fetched by apps (import a transcript); Instagram sometimes refuses unsigned downloads, and the item then offers Retry. On-screen text in silent videos and text in images are read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
 | **Ask & learn** | Chat with your whole library or one item. Answers stream, cite numbered sources and jump to the right second of a video. Make flashcards from any item and review them with spaced repetition. Daily, weekly and topic reports export as Markdown or PDF. |
 | **Organise** | Library grid or list, full-text search (SQLite FTS5) and search by meaning (your Groq key rewrites the query into synonyms and translations; add an optional free Gemini key for true vector search and Related items), smart collections, favourites, highlights and revisit reminders. Swipe to archive or delete, with undo. |
 | **Dev mode** (opt-in) | A Dev tab with AI trends from GitHub, Hacker News and Hugging Face; Claude Code skills, plugins and MCP servers (top or new this week); follow-ups on topics you choose, with new releases of repos you follow; a daily-habit streak with a 5-week heatmap and a weekly recap; and a searchable toolbox of the repos, tools and commands in your library, grouped by tool. Hidden unless you turn it on. |
@@ -69,7 +69,7 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 ### 1. Install the app
 
-Download **`Qivra-2.2.3-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
+Download **`Qivra-2.3.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
 
 > The APK is signed with the Android debug key and is meant for sideloading. Check the download against the `.sha256` file attached to the release.
 
@@ -105,7 +105,7 @@ flowchart LR
 
 1. **Capture.** A share writes an envelope to disk, starts a foreground service and returns you to the app you were in.
 2. **Process.** Each step (metadata, transcript, summary, index) is a row in a durable `jobs` table. Steps retry with backoff and recover after a crash. Without internet a step waits instead of failing, and continues by itself when the phone is back online.
-3. **Transcribe.** YouTube captions are fetched directly (YouTube doesn't let apps download videos, so a video without captions needs an imported transcript). X videos are found through their public embed. Instagram reels: download them in Instagram and share the saved video. Silent videos are read frame by frame with on-device OCR.
+3. **Transcribe.** YouTube captions are fetched directly (YouTube doesn't let apps download videos, so a video without captions needs an imported transcript). X videos are found through their public embed. Instagram reels are downloaded on the phone with yt-dlp (audio only; update it from Settings if Instagram changes). Speech is written in English (Groq Whisper's translation mode). Silent videos are read frame by frame with on-device OCR.
 4. **Enrich.** The model gets the transcript with `[mm:ss]` markers. Timestamps are snapped to real segments, and keywords that are not in the source are dropped.
 5. **Use.** Search, Ask, flashcards and reports read the local database. Ask answers only from your saved items and cites them.
 

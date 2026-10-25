@@ -24,6 +24,8 @@ export interface CaptionResult {
   kind: 'manual' | 'asr';
   trackName: string;
   segments: Segment[];
+  /** Set when YouTube translated the track (tlang): the track's own language. */
+  translatedFrom?: string;
 }
 
 export class CaptionsUnavailable extends Error {
@@ -35,23 +37,21 @@ export class CaptionsUnavailable extends Error {
 const CLIENT = { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 34, hl: 'en', gl: 'US' };
 const UA = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip';
 
-export function chooseTrack(tracks: CaptionTrack[], preferred: string[]): CaptionTrack | null {
-  if (!tracks.length) return null;
-  const pref = preferred.map((p) => p.toLowerCase().split('-')[0]);
-  const score = (t: CaptionTrack) => {
-    const lang = t.languageCode.toLowerCase().split('-')[0];
-    const idx = pref.indexOf(lang);
-    return (t.kind === 'manual' ? 100 : 0) + (idx === -1 ? 0 : 50 - idx);
-  };
-  // Prefer the video's own auto-captions (original spoken language) over manual translations in other languages.
-  const asr = tracks.find((t) => t.kind === 'asr');
-  const best = [...tracks].sort((a, b) => score(b) - score(a))[0];
-  if (best.kind === 'manual' && pref.includes(best.languageCode.toLowerCase().split('-')[0])) return best;
-  if (asr) {
-    const manualSameLang = tracks.find((t) => t.kind === 'manual' && t.languageCode.split('-')[0] === asr.languageCode.split('-')[0]);
-    return manualSameLang ?? asr;
+const langOf = (t: CaptionTrack) => t.languageCode.toLowerCase().split('-')[0];
+
+/**
+ * The track to download: a manual track in a preferred language (English), else auto-generated captions in
+ * it ("English (auto-generated)"), else the video's own auto-captions (its spoken language, which
+ * fetchYouTubeCaptions then asks YouTube to translate), else any manual track.
+ */
+export function chooseTrack(tracks: CaptionTrack[], preferred: string[] = ['en']): CaptionTrack | null {
+  for (const p of preferred.map((x) => x.toLowerCase().split('-')[0])) {
+    const hit = tracks.find((t) => t.kind === 'manual' && langOf(t) === p) ?? tracks.find((t) => t.kind === 'asr' && langOf(t) === p);
+    if (hit) return hit;
   }
-  return best;
+  const asr = tracks.find((t) => t.kind === 'asr');
+  if (asr) return tracks.find((t) => t.kind === 'manual' && langOf(t) === langOf(asr)) ?? asr;
+  return tracks[0] ?? null;
 }
 
 /** Parse YouTube timed-text XML (format 3 `<p t d>`, or legacy `<text start dur>`) into segments. */
@@ -117,9 +117,17 @@ export async function fetchYouTubeCaptions(videoId: string, fetchImpl: FetchLike
   const tracks = await listCaptionTracks(videoId, fetchImpl);
   const track = chooseTrack(tracks, preferredLanguages);
   if (!track) throw new CaptionsUnavailable('NO_TRACKS', 'This video has no captions on YouTube.');
-  const res = await fetchImpl(`${track.baseUrl.replace(/&fmt=[^&]*/, '')}&fmt=srv3`, { headers: { 'User-Agent': UA } });
+  const url = `${track.baseUrl.replace(/&fmt=[^&]*/, '').replace(/&tlang=[^&]*/, '')}&fmt=srv3`;
+  const want = preferredLanguages[0]?.toLowerCase().split('-')[0];
+  // Not in the wanted language: YouTube's own auto-translate ("Auto-translate → English" in its player).
+  if (want && langOf(track) !== want) {
+    const tr = await fetchImpl(`${url}&tlang=${want}`, { headers: { 'User-Agent': UA } }).catch(() => null);
+    const segments = tr?.ok ? parseTimedText(await tr.text()) : [];
+    if (segments.length) return { language: want, kind: track.kind, trackName: track.name, segments, translatedFrom: langOf(track) };
+  }
+  const res = await fetchImpl(url, { headers: { 'User-Agent': UA } });
   if (!res.ok) throw new CaptionsUnavailable('HTTP', `Caption download failed (HTTP ${res.status}).`);
   const segments = parseTimedText(await res.text());
   if (!segments.length) throw new CaptionsUnavailable('EMPTY', 'YouTube returned an empty caption track.');
-  return { language: track.languageCode.split('-')[0].toLowerCase(), kind: track.kind, trackName: track.name, segments };
+  return { language: langOf(track), kind: track.kind, trackName: track.name, segments };
 }

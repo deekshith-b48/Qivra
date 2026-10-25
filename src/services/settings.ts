@@ -28,10 +28,8 @@ export interface Settings {
   /** Build last week's report every Monday morning and notify. */
   weeklyReport: boolean;
   serverProcessing: boolean;
-  /** Automatically transcribe shared videos (YouTube captions, else Groq with the user's key). */
+  /** Automatically transcribe shared videos (YouTube captions in English, else Groq with the user's key). */
   autoTranscribe: boolean;
-  /** Translate non-English transcripts to English (with the user's AI key) and show English first. */
-  englishTranscripts: boolean;
   voice: VoiceSettings;
   /** Developer mode (opt-in at onboarding): shows the Dev tab with trends, Claude Code, follow-ups and habits. */
   devMode: boolean;
@@ -86,7 +84,6 @@ export async function getSettings(): Promise<Settings> {
     weeklyReport: s.weeklyReport ?? false,
     serverProcessing: s.serverProcessing ?? false,
     autoTranscribe: s.autoTranscribe ?? true,
-    englishTranscripts: s.englishTranscripts ?? true,
     voice: { ...DEFAULT_VOICE, ...(s.voice ?? {}) },
     devMode: s.devMode ?? false,
     devFollows: Array.isArray(s.devFollows) ? s.devFollows.filter((x) => typeof x === 'string' && x.trim()).slice(0, MAX_DEV_FOLLOWS) : ['Claude Code', 'MCP'],

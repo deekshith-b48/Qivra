@@ -1,5 +1,16 @@
 # Test results
 
+## 2.3.0 (2026-10-25): English only, Instagram reels downloaded in the app, Indian-language translation
+
+- Release APK: `dist/Qivra-2.3.0-release.apk`, version code 23.
+- `tsc` passes, Biome clean on changed files. Jest: 336 passed, 4 live tests skipped.
+- YouTube: the reported video (v3H-sJysJqI) lists 20 auto-dubbed caption tracks with Arabic first; the old code took the first one. Checked live: the new choice is English (auto-generated), and on the emulator the item shows the English transcript. Videos with no English track use YouTube's own translation (`tlang=en`), else Groq.
+- English only: Groq Whisper uses its translation endpoint (`whisper-large-v3`), on-device Whisper translates, and any other non-English transcript is translated and its original deleted (existing items cleaned once on upgrade). Tests cover each path.
+- Instagram: reels are downloaded on the phone with yt-dlp (youtubedl-android 0.18.1, as in ytdlnis; audio only, no login or cookies). Checked on the emulator: the bundled yt-dlp was refused by Instagram; after the in-app update (yt-dlp 2026.10.21) the reel downloaded and reached Groq (a fake key was rejected as expected). yt-dlp now updates itself weekly, and once more when a download is refused. A refused reel offers Retry and Import transcript.
+- Kannada, Hindi, Telugu and Tamil: the Translate sheet translates the transcript (timestamps kept) and the summary with the user's Groq key. Checked on the emulator: the sheet, the "Translating…" banner, and the failure banner with Try again (fake key). Not run with a real key.
+- Bottom bar: "+" moved into the bar, the round red button is Ask AI. Checked on the emulator.
+- APK size: 84 MB (native libraries are now stored compressed; Python + yt-dlp added).
+
 ## 2.2.3 (2026-10-25): Instagram reel attach, English transcripts, new reports
 
 - Release APK: `dist/Qivra-2.2.3-release.apk`, version code 22.

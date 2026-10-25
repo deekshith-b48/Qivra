@@ -1,6 +1,7 @@
 /**
- * Speech-to-text from the phone with the user's own Groq key (no laptop server).
- * Used for X videos, shared or imported audio/video files (such as downloaded Instagram reels) and long voice notes.
+ * Speech-to-English from the phone with the user's own Groq key (no laptop server): Whisper's translation mode
+ * writes English whatever language is spoken (Qivra works in English). Used for X and Instagram videos, shared
+ * audio/video files and long voice notes.
  * The file goes straight from the phone to Groq; the key never leaves secure storage
  * except in the Authorization header, and is never logged.
  */
@@ -11,7 +12,8 @@ import { getSecret, SECRET_KEYS } from './secure';
 import { getSettings } from './settings';
 
 const GROQ_HOST = 'api.groq.com';
-const MODEL = 'whisper-large-v3-turbo';
+/** Translation (speech → English) needs the full model; turbo only transcribes. */
+export const WHISPER_MODEL = 'whisper-large-v3';
 /** Groq's upload limit for the free tier. */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -59,7 +61,7 @@ export async function deleteCached(uri: string): Promise<void> {
   await FS.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
 }
 
-/** Transcribe a local audio/video file with Groq Whisper. */
+/** Transcribe a local audio/video file into English with Groq Whisper (`language` is then always 'en'). */
 export async function transcribeMedia(fileUri: string, mime: string, name: string): Promise<WhisperResult> {
   const s = await getSettings();
   const key = await getSecret(SECRET_KEYS.aiApiKey);
@@ -70,14 +72,13 @@ export async function transcribeMedia(fileUri: string, mime: string, name: strin
   }
   const form = new FormData();
   form.append('file', { uri: fileUri, name, type: mime || 'application/octet-stream' } as unknown as Blob);
-  form.append('model', MODEL);
+  form.append('model', WHISPER_MODEL);
   form.append('response_format', 'verbose_json');
-  form.append('timestamp_granularities[]', 'segment');
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 180_000);
   let res: Response;
   try {
-    res = await fetch(`${s.ai.baseUrl.replace(/\/+$/, '')}/audio/transcriptions`, {
+    res = await fetch(`${s.ai.baseUrl.replace(/\/+$/, '')}/audio/translations`, {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }, body: form, signal: ctl.signal,
     });
   } catch {
@@ -89,5 +90,6 @@ export async function transcribeMedia(fileUri: string, mime: string, name: strin
   if (res.status === 413) throw new CloudWhisperError('FILE_TOO_LARGE', 'This file is too large for Groq. Import a shorter clip or a transcript.', false);
   if (res.status === 429) throw new CloudWhisperError('RATE_LIMIT', 'Groq is busy (rate limit). Qivra will try again shortly.', true);
   if (!res.ok) throw new CloudWhisperError('PROVIDER_ERROR', `Groq could not transcribe this (${res.status}).`, res.status >= 500);
-  return parseWhisperVerbose(await res.json());
+  // In translation mode Whisper reports the language that was spoken; the text is English.
+  return { ...parseWhisperVerbose(await res.json()), language: 'en' };
 }

@@ -8,7 +8,7 @@
  *   transcribe-anything (MLX on Apple Silicon) or faster-whisper.
  */
 
-import { cloudWhisperReady, transcribeMedia } from './cloudWhisper';
+import { cloudWhisperReady, transcribeMedia, WHISPER_MODEL } from './cloudWhisper';
 import * as FS from 'expo-file-system/legacy';
 import { PermissionsAndroid, Platform } from 'react-native';
 // The package's exports map has no root entry; the './index' subpath resolves for TS, Metro and Jest alike.
@@ -197,7 +197,7 @@ export interface VoiceTranscript {
   provider: string;
 }
 
-/** Transcribe a 16 kHz WAV on the phone. */
+/** Transcribe a 16 kHz WAV on the phone, in English (Whisper translates other languages; Parakeet's output is translated later by the pipeline). */
 export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<VoiceTranscript> {
   if (transcribing) throw new Error('Another transcription is still finishing. Try again in a moment.');
   transcribing = true;
@@ -211,7 +211,7 @@ export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number
     const lang = s.voice.language === 'auto' ? undefined : s.voice.language;
     const job = m.engine === 'parakeet'
       ? (c as ParakeetContext).transcribe(wavUri.replace('file://', ''), {})
-      : (c as WhisperContext).transcribe(wavUri.replace('file://', ''), { language: lang ?? 'auto', maxLen: 0, onProgress: (p: number) => onProgress?.(p / 100) });
+      : (c as WhisperContext).transcribe(wavUri.replace('file://', ''), { language: lang ?? 'auto', translate: true, maxLen: 0, onProgress: (p: number) => onProgress?.(p / 100) });
     const abort = () => { void job.stop().catch(() => undefined); };
     signal?.addEventListener('abort', abort);
     detach = () => signal?.removeEventListener('abort', abort);
@@ -220,7 +220,7 @@ export async function transcribeOnDevice(wavUri: string, onProgress?: (p: number
     if (signal?.aborted || r.isAborted) throw new Error('Transcription was cancelled.');
     const segments = whisperSegmentsToMs(r.segments ?? []);
     const text = r.segments?.length ? segments.map((x) => x.text).join(' ').trim() : (r.result ?? '').trim();
-    const language = r.language && r.language !== 'auto' ? r.language : detectLanguage(text).code;
+    const language = m.engine === 'parakeet' ? detectLanguage(text).code : 'en';
     return { text, segments, language, provider: `${m.engine === 'parakeet' ? 'parakeet' : 'whisper.cpp'} ${m.file} (on device)` };
   } finally { detach(); transcribing = false; }
 }
@@ -241,7 +241,7 @@ export async function voiceModeAvailable(): Promise<{ device: boolean; cloud: bo
 export async function transcribeInCloud(wavUri: string): Promise<VoiceTranscript> {
   const r = await transcribeMedia(wavUri, 'audio/wav', 'voice.wav');
   const text = r.segments.map((x) => x.text).join(' ').trim();
-  return { text, segments: r.segments, language: r.language === 'und' ? 'und' : r.language, provider: 'groq-whisper-large-v3-turbo' };
+  return { text, segments: r.segments, language: r.language, provider: `groq-${WHISPER_MODEL}` };
 }
 
 /**

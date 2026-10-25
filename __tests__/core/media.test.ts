@@ -20,12 +20,33 @@ describe('YouTube captions', () => {
     expect(parseTimedText('<transcript><text start="1.2" dur="2.16">Hi &amp;amp; bye</text></transcript>')).toEqual([{ startMs: 1200, endMs: 3360, text: 'Hi & bye' }]);
   });
 
-  test('track choice: manual in preferred language > original auto-captions > anything', () => {
+  test('track choice: English manual > English auto-generated > original auto-captions > anything', () => {
     const t = (languageCode: string, kind: 'manual' | 'asr'): CaptionTrack => ({ baseUrl: 'https://x', languageCode, kind, name: languageCode });
     expect(chooseTrack([t('de', 'manual'), t('en', 'asr'), t('en', 'manual')], ['en'])?.kind).toBe('manual');
+    // A creator's Arabic/Hindi uploads listed before the English auto-captions: English wins.
+    expect(chooseTrack([t('ar', 'manual'), t('hi', 'manual'), t('te', 'asr'), t('en', 'asr')], ['en'])).toMatchObject({ languageCode: 'en', kind: 'asr' });
     expect(chooseTrack([t('de', 'manual'), t('hi', 'asr')], ['en'])).toMatchObject({ languageCode: 'hi', kind: 'asr' });
     expect(chooseTrack([t('fr', 'manual')], ['en'])?.languageCode).toBe('fr');
     expect(chooseTrack([], ['en'])).toBeNull();
+  });
+
+  test('a non-English track is translated by YouTube (tlang=en); if YouTube refuses, the original comes back', async () => {
+    const urls: string[] = [];
+    let tlangOk = true;
+    const fake = async (url: string) => {
+      urls.push(url);
+      if (url.includes('/player')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ playabilityStatus: { status: 'OK' }, captions: { playerCaptionsTracklistRenderer: { captionTracks: [{ baseUrl: 'https://www.youtube.com/api/timedtext?v=x', languageCode: 'hi', kind: 'asr' }] } } }) };
+      }
+      if (url.includes('tlang=')) return { ok: tlangOk, status: tlangOk ? 200 : 429, text: async () => xml };
+      return { ok: true, status: 200, text: async () => xml };
+    };
+    expect(await fetchYouTubeCaptions('x', fake)).toMatchObject({ language: 'en', translatedFrom: 'hi' });
+    expect(urls[1]).toMatch(/&fmt=srv3&tlang=en$/);
+    tlangOk = false;
+    const r = await fetchYouTubeCaptions('x', fake);
+    expect(r.language).toBe('hi');
+    expect(r.translatedFrom).toBeUndefined();
   });
 
   test('fetch flow with a fake YouTube', async () => {

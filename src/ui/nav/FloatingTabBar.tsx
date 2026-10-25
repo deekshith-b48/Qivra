@@ -1,9 +1,9 @@
 /**
  * Floating bottom navigation, used on every main screen.
  *
- * A rounded glass capsule holds the tabs. The active tab expands into a lighter
- * pill showing its icon and label, and the others show an outline icon only.
- * A separate round "+" action with a gradient and soft glow sits to the right.
+ * A rounded glass capsule holds the tabs and, last, the "+" (save something). The active
+ * tab expands into a lighter pill showing its icon and label; the others show an outline
+ * icon only. One tab (`fab`, Ask AI) is the round gradient button with a soft glow on the right.
  * Use it as the bottom-tabs `tabBar`; `useTabBarInset()` tells screens how much
  * space to leave at the bottom so content is never hidden behind it.
  */
@@ -36,10 +36,12 @@ export function useTabBarInset(): number {
   return BAR_HEIGHT + BAR_GAP * 2 + Math.max(insets.bottom, 8);
 }
 
-export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, addLabel = 'Save something' }: BottomTabBarProps & {
+export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, addLabel = 'Save something', fab }: BottomTabBarProps & {
   tabs: Record<string, TabSpec>;
   onAdd: () => void;
   addLabel?: string;
+  /** The tab shown as the round button on the right (Ask AI). */
+  fab: string;
 }) {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -59,21 +61,24 @@ export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, ad
   if (keyboard || focusedStyle?.display === 'none') return null;
   // Five tabs (Dev mode) still fit a phone-width capsule with tighter padding.
   const tight = state.routes.length > 4;
+  const go = (route: (typeof state.routes)[number], focused: boolean) => {
+    const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+    if (!focused && !event.defaultPrevented) {
+      LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.scaleXY));
+      navigation.navigate(route.name, route.params);
+    }
+  };
+  const fabIndex = state.routes.findIndex((r) => r.name === fab);
+  const fabSpec = tabs[fab];
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 8) + BAR_GAP }]}>
       <View style={[styles.capsule, { backgroundColor: c.navGlass, borderColor: c.navBorder }, shadow.float, c.scheme === 'dark' && { shadowOpacity: 0.4 }]} accessibilityRole="tablist">
         {state.routes.map((route, index) => {
           const spec = tabs[route.name];
-          if (!spec) return null;
+          if (!spec || index === fabIndex) return null;
           const focused = state.index === index;
-          const onPress = () => {
-            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!focused && !event.defaultPrevented) {
-              LayoutAnimation.configureNext(LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.scaleXY));
-              navigation.navigate(route.name, route.params);
-            }
-          };
+          const onPress = () => go(route, focused);
           const label = descriptors[route.key]?.options.tabBarAccessibilityLabel ?? spec.label;
           return (
             <Pressable
@@ -97,13 +102,19 @@ export function FloatingTabBar({ state, navigation, descriptors, tabs, onAdd, ad
             </Pressable>
           );
         })}
+        <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel={addLabel} accessibilityHint="Paste a link, write a note, record a voice note or import a file"
+          style={({ pressed }) => [styles.tab, tight && styles.tabTight, pressed && { opacity: 0.6 }]}>
+          <Ionicons name="add" size={28} color={c.navIcon} />
+        </Pressable>
       </View>
-      <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel={addLabel} accessibilityHint="Paste a link, write a note, record a voice note or import a file"
-        style={({ pressed }) => [styles.fab, { shadowColor: c.fabGlow }, pressed && { transform: [{ scale: 0.95 }] }]}>
-        <LinearGradient key={c.scheme} colors={c.fabGradient} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={styles.fabFill}>
-          <Ionicons name="add" size={32} color="#FFFFFF" />
-        </LinearGradient>
-      </Pressable>
+      {fabIndex >= 0 && fabSpec ? (
+        <Pressable onPress={() => go(state.routes[fabIndex], state.index === fabIndex)} accessibilityRole="tab" accessibilityLabel={fabSpec.label} accessibilityState={{ selected: state.index === fabIndex }}
+          style={({ pressed }) => [styles.fab, { shadowColor: c.fabGlow }, state.index === fabIndex && { borderWidth: 3, borderColor: c.navActive }, pressed && { transform: [{ scale: 0.95 }] }]}>
+          <LinearGradient key={c.scheme} colors={c.fabGradient} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={styles.fabFill}>
+            <Ionicons name={fabSpec.icon[0]} size={28} color="#FFFFFF" />
+          </LinearGradient>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

@@ -157,6 +157,7 @@ export type JobKind =
   | 'server_enrich'
   | 'cloud_transcribe'
   | 'translate'
+  | 'translate_to'
   | 'model_enrich'
   | 'embed'
   | 'sync'

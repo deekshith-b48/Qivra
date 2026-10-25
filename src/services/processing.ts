@@ -10,10 +10,11 @@
 import { localEnrich, type Enrichment } from '../core/enrich';
 import { enrichmentPrompt, mergeModelEnrichment, parseModelEnrichment } from '../core/enrichModel';
 import { detectLanguage, languageName } from '../core/language';
-import { parseTranslationBatch, TRANSLATION_BATCH, translationMessages } from '../core/translate';
+import { isIndianLanguage, parseSummaryTranslation, parseTranslationBatch, summaryTranslationMessages, TRANSLATION_BATCH, translationMessages, type IndianLanguage, type SummaryTranslation } from '../core/translate';
+import { keyMomentsOf } from '../core/enrich';
 import { fetchMetadata, stripMarkdown } from '../core/metadata';
 import { pickXVideo, xSyndicationUrl } from '../core/socialMedia';
-import { ProviderError } from '../core/ai/provider';
+import { ProviderError, type ChatProvider } from '../core/ai/provider';
 import { isFailed, type ItemStatus } from '../core/status';
 import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
 import { CaptionsUnavailable, fetchYouTubeCaptions } from '../core/youtubeCaptions';
@@ -24,7 +25,8 @@ import { getRepo } from './db';
 import { fetchText } from './http';
 import { emit } from './events';
 import { generateReport } from './reports';
-import { CloudWhisperError, cloudWhisperReady, deleteCached, downloadToCache, transcribeMedia } from './cloudWhisper';
+import { CloudWhisperError, cloudWhisperReady, deleteCached, downloadToCache, transcribeMedia, WHISPER_MODEL } from './cloudWhisper';
+import { DownloadError, downloadReelAudio } from './downloader';
 import { ocrItemImages, ocrVideoFrames } from './ocr';
 import { deleteSecret, SECRET_KEYS } from './secure';
 import { getSettings } from './settings';
@@ -90,11 +92,10 @@ export async function schedulePipeline(itemId: string, opts: { force?: boolean }
 }
 
 async function sourceText(repo: Repo, item: Item): Promise<{ body: string; timed: { startMs: number | null; text: string }[]; hasSpeech: boolean }> {
-  const all = await repo.listTranscripts(item.id);
-  const originals = all.filter((t) => t.kind === 'original');
-  // English by default: summaries, keywords and flashcards read the English translation of a non-English transcript.
-  const english = (await getSettings()).englishTranscripts ? all.find((t) => t.kind === 'translation' && t.language === 'en') : undefined;
-  const transcripts = english ? [english, ...originals.filter((t) => ARTICLE_SOURCES.has(t.source) || t.language === 'en')] : originals;
+  // Qivra works in English: summaries, keywords and flashcards read the English transcripts (Kannada, Hindi,
+  // Telugu and Tamil translations are views made from them). A not-yet-translated original is used until then.
+  const all = (await repo.listTranscripts(item.id)).filter((t) => t.kind === 'original' || t.language === 'en');
+  const transcripts = all.some((t) => t.language === 'en') ? all.filter((t) => t.language === 'en' || ARTICLE_SOURCES.has(t.source)) : all;
   const timed: { startMs: number | null; text: string }[] = [];
   // Markdown (GitHub READMEs) is read as plain text for summaries and keywords.
   const plain = (t: { format: string | null }, text: string) => (t.format === 'md' ? stripMarkdown(text) : text);
@@ -102,7 +103,7 @@ async function sourceText(repo: Repo, item: Item): Promise<{ body: string; timed
   const parts = [...transcripts.map((t) => plain(t, t.text)), item.metadata?.description ?? ''];
   const meta = item.metadata as (Item['metadata'] & { bodyText?: string }) | null;
   if (meta?.bodyText) parts.push(meta.bodyText);
-  return { body: parts.filter(Boolean).join('\n\n'), timed, hasSpeech: originals.some((t) => !ARTICLE_SOURCES.has(t.source)) };
+  return { body: parts.filter(Boolean).join('\n\n'), timed, hasSpeech: all.some((t) => !ARTICLE_SOURCES.has(t.source)) };
 }
 
 async function handleLocalEnrich(repo: Repo, job: Job): Promise<Record<string, unknown>> {
@@ -222,24 +223,17 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
     const videoId = analyzeUrl(item.url)?.youtubeId;
     if (videoId) {
       try {
-        const caps = await fetchYouTubeCaptions(videoId, fetch as never, [deviceLanguage(), 'en']);
+        // English captions, or YouTube's own translation into English; any other language is translated by Groq later.
+        const caps = await fetchYouTubeCaptions(videoId, fetch as never, ['en']);
         await repo.upsertTranscript({
           itemId: item.id, language: caps.language, languageMethod: 'provider', kind: 'original', source: 'youtube_captions',
-          provider: caps.kind === 'asr' ? 'youtube-auto-captions' : 'youtube-captions', format: 'srv3', segments: caps.segments,
+          provider: caps.translatedFrom ? `youtube-auto-translated (${caps.translatedFrom})` : caps.kind === 'asr' ? 'youtube-auto-captions' : 'youtube-captions', format: 'srv3', segments: caps.segments,
         });
         return 'stored';
       } catch (e) {
         captionNote = e instanceof CaptionsUnavailable ? e.message : 'Could not reach YouTube for captions.';
       }
     }
-  }
-  // Instagram serves reels only to its own app and website (the public embed page is an empty shell),
-  // so a reel link can't be fetched. Its downloaded video can: Share → Download in Instagram, then share it here.
-  if (item.sourceType === 'instagram') {
-    return {
-      kind: 'needs_input', code: 'INSTAGRAM_DOWNLOAD',
-      message: 'Instagram doesn\'t let apps fetch reels. In Instagram tap Share → Download, then tap "Add the downloaded reel" here: it is transcribed automatically.',
-    };
   }
   // YouTube cuts off audio downloads by apps (only its own apps may stream it), so without captions a
   // transcript has to be imported. Captions are tried first, above.
@@ -250,7 +244,7 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
     };
   }
   const settings = await getSettings();
-  // X videos are transcribed from the phone with the user's Groq key.
+  // X videos and Instagram reels (downloaded with yt-dlp on the phone) are transcribed with the user's Groq key.
   if (settings.autoTranscribe && CLOUD_TRANSCRIBABLE.has(item.sourceType)) {
     const cloud = await cloudDecision(repo, item);
     if (cloud.kind === 'waiting') return cloud;
@@ -274,7 +268,7 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
   };
 }
 
-const CLOUD_TRANSCRIBABLE = new Set(['x']);
+const CLOUD_TRANSCRIBABLE = new Set(['x', 'instagram']);
 
 /** Whether a phone-side Groq transcription is running, can start now, or already failed for this item. */
 async function cloudDecision(repo: Repo, item: Item): Promise<{ kind: 'waiting'; message: string } | { kind: 'failed'; code: string; message: string } | { kind: 'unavailable' }> {
@@ -316,6 +310,17 @@ async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<strin
       file = { uri: m.uri, mime: m.mime, name: m.name, temp: false };
     } else if (item.sourceType === 'file') {
       throw new JobError('NO_MEDIA', 'Attach an audio or video file first.', false);
+    } else if (item.sourceType === 'instagram' && item.url) {
+      const d = await downloadReelAudio(item.url).catch((e) => {
+        if (!(e instanceof DownloadError)) throw e;
+        if (e.code === 'OFFLINE') throw new CloudWhisperError('OFFLINE', e.message, true);
+        throw new JobError(e.code === 'BLOCKED' ? 'INSTAGRAM_BLOCKED' : e.code === 'TOO_LARGE' ? 'FILE_TOO_LARGE' : e.code === 'UNAVAILABLE' ? 'DOWNLOADER_UNAVAILABLE' : 'DOWNLOAD_FAILED', e.message, e.code === 'FAILED');
+      });
+      file = { uri: d.uri, mime: d.mime, name: d.uri.split('/').pop() ?? 'reel.m4a', temp: true };
+      durationMs = d.durationMs;
+      if (d.description && !(item.metadata?.description ?? '').trim()) {
+        await repo.updateItem(item.id, { metadata: { ...(item.metadata ?? {}), description: d.description, fetchedAt: new Date().toISOString(), provider: 'yt-dlp' } });
+      }
     } else {
       const found = await findPostVideo(item);
       if (found.caption && !(item.metadata?.description ?? '').trim()) {
@@ -330,7 +335,7 @@ async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<strin
       const text = r.segments.map((s) => s.text).join(' ');
       await repo.upsertTranscript({
         itemId: item.id, language: r.language === 'und' ? detectLanguage(text).code : r.language, languageMethod: r.language === 'und' ? 'heuristic' : 'provider',
-        kind: 'original', source: 'cloud_whisper', provider: 'groq-whisper-large-v3-turbo', format: null, segments: r.segments,
+        kind: 'original', source: 'cloud_whisper', provider: `groq-${WHISPER_MODEL}`, format: null, segments: r.segments,
       });
     } else if (!(/^video\//.test(file.mime) && (await ocrVideoFrames(repo, item.id, file.uri, r.durationMs ?? durationMs ?? 0)))) {
       throw new JobError('NO_SPEECH', 'No speech in this video.', false);
@@ -351,14 +356,6 @@ async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<strin
   }
   await schedulePipeline(item.id);
   return { transcribed: true };
-}
-
-function deviceLanguage(): string {
-  try {
-    return (Intl.DateTimeFormat().resolvedOptions().locale ?? 'en').split('-')[0];
-  } catch {
-    return 'en';
-  }
 }
 
 async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { startMs: number | null; text: string }[], finish: boolean): Promise<void> {
@@ -390,7 +387,7 @@ async function enrichAndIndex(repo: Repo, item: Item, body: string, timed: { sta
   if (await repo.syncEnabled()) await repo.enqueueJob({ id: 'job_sync', kind: 'sync', retry: true, maxAttempts: 6 });
   const ai = await aiInfo();
   // A non-English transcript is translated first; the summary is then made from the English text.
-  if (ai.enabled && (await getSettings()).englishTranscripts && (await untranslatedTranscript(repo, item.id))) {
+  if (ai.enabled && (await untranslatedTranscript(repo, item.id))) {
     await repo.enqueueJob({ id: `job_translate_${item.id}`, kind: 'translate', itemId: item.id, retry: true, maxAttempts: 6 });
   } else if (ai.enabled && ai.autoEnrich) await repo.enqueueJob({ id: `job_model_enrich_${item.id}`, kind: 'model_enrich', itemId: item.id, retry: true, maxAttempts: 3 });
   if (ai.embeddingModel) await repo.enqueueJob({ id: 'job_embed', kind: 'embed', retry: true, maxAttempts: 3 });
@@ -405,7 +402,33 @@ async function untranslatedTranscript(repo: Repo, itemId: string): Promise<Trans
     && (t.language !== 'und' || detectLanguage(t.text).code !== 'en') && t.text.trim().length > 0) ?? null;
 }
 
-/** Translate a speech transcript to English line by line (timestamps kept), resuming where it stopped. */
+/**
+ * Translate segment texts batch by batch, saving progress under `progressKey` so a rate limit or a lost
+ * connection resumes where it stopped. Returns 'offline' when the connection dropped.
+ */
+async function translateLines(repo: Repo, provider: ChatProvider, texts: string[], from: string, to: string, progressKey: string): Promise<string[] | 'offline'> {
+  const done = await repo.getJson<string[]>(progressKey, []);
+  try {
+    for (let i = done.length; i < texts.length; i += TRANSLATION_BATCH) {
+      const lines = texts.slice(i, i + TRANSLATION_BATCH);
+      const res = await provider.chat(translationMessages(lines, from, to), { temperature: 0, maxTokens: 4000 });
+      await repo.addUsage({ provider: provider.label, model: res.model, kind: 'translate', promptTokens: res.usage.promptTokens, completionTokens: res.usage.completionTokens });
+      const out = parseTranslationBatch(res.content, lines.length);
+      if (!out) throw new JobError('BAD_MODEL_OUTPUT', 'The translation did not come back line by line.', true);
+      done.push(...out);
+      await repo.setJson(progressKey, done);
+    }
+  } catch (e) {
+    if (e instanceof JobError) throw e;
+    if ((e instanceof ProviderError && (e.code === 'NETWORK' || e.code === 'TIMEOUT')) || e instanceof TypeError) return 'offline';
+    if (e instanceof ProviderError) throw new JobError(e.code, e.message, e.retryable);
+    throw new JobError('INTERNAL', (e as Error)?.message || 'Translation failed.', true);
+  }
+  await repo.setJson(progressKey, null);
+  return done;
+}
+
+/** Translate a speech transcript to English (timestamps kept); the English text then replaces the original. */
 async function handleTranslate(repo: Repo, job: Job): Promise<Record<string, unknown> | 'offline'> {
   const item = await repo.getItem(job.itemId ?? '');
   if (!item || item.deleted) throw new JobError('ITEM_NOT_FOUND', 'Item was deleted.', false);
@@ -414,31 +437,87 @@ async function handleTranslate(repo: Repo, job: Job): Promise<Record<string, unk
   const { provider, reason } = await loadProvider();
   if (!provider) throw new JobError('NO_PROVIDER', reason ?? 'No AI provider configured.', false);
   const segs = await repo.getSegments(t.id);
-  const progressKey = `translate.progress.${t.id}`;
-  const done = await repo.getJson<string[]>(progressKey, []);
-  try {
-    for (let i = done.length; i < segs.length; i += TRANSLATION_BATCH) {
-      const lines = segs.slice(i, i + TRANSLATION_BATCH).map((s) => s.text);
-      const res = await provider.chat(translationMessages(lines, t.language === 'und' ? '' : languageName(t.language)), { temperature: 0, maxTokens: 4000 });
-      await repo.addUsage({ provider: provider.label, model: res.model, kind: 'translate', promptTokens: res.usage.promptTokens, completionTokens: res.usage.completionTokens });
-      const out = parseTranslationBatch(res.content, lines.length);
-      if (!out) throw new JobError('BAD_MODEL_OUTPUT', 'The translation did not come back line by line.', true);
-      done.push(...out);
-      await repo.setJson(progressKey, done); // a rate limit or lost connection resumes from here
-    }
-  } catch (e) {
-    if (e instanceof JobError) throw e;
-    if ((e instanceof ProviderError && (e.code === 'NETWORK' || e.code === 'TIMEOUT')) || e instanceof TypeError) return 'offline';
-    if (e instanceof ProviderError) throw new JobError(e.code, e.message, e.retryable);
-    throw new JobError('INTERNAL', (e as Error)?.message || 'Translation failed.', true);
-  }
+  const done = await translateLines(repo, provider, segs.map((s) => s.text), t.language === 'und' ? '' : languageName(t.language), 'en', `translate.progress.${t.id}`);
+  if (done === 'offline') return 'offline';
   await repo.upsertTranscript({
     itemId: item.id, language: 'en', languageMethod: 'provider', kind: 'translation', source: 'ai_translation', provider: provider.label, format: t.format,
     segments: segs.map((s, k) => ({ startMs: s.startMs, endMs: s.endMs, text: done[k] })),
   });
-  await repo.setJson(progressKey, null);
+  await repo.deleteTranscript(t.id); // Qivra keeps transcripts in English only
   await schedulePipeline(item.id); // summary, keywords and flashcards from the English text
   return { translated: segs.length, from: t.language };
+}
+
+/** Meta key of an item's summary translated into an Indian language. */
+export const summaryTranslationKey = (itemId: string, lang: IndianLanguage) => `translation.${lang}.${itemId}`;
+
+/** Translate an item's English transcript and summary into Kannada, Hindi, Telugu or Tamil (on request). */
+async function handleTranslateTo(repo: Repo, job: Job): Promise<Record<string, unknown> | 'offline'> {
+  const item = await repo.getItem(job.itemId ?? '');
+  if (!item || item.deleted) throw new JobError('ITEM_NOT_FOUND', 'Item was deleted.', false);
+  const lang = String(job.payload?.lang ?? '');
+  if (!isIndianLanguage(lang)) throw new JobError('BAD_LANGUAGE', `Qivra translates into Kannada, Hindi, Telugu and Tamil, not "${lang}".`, false);
+  const { provider, reason } = await loadProvider();
+  if (!provider) throw new JobError('NO_PROVIDER', reason ?? 'No AI provider configured.', false);
+  const all = await repo.listTranscripts(item.id);
+  const en = all.find((t) => t.language === 'en' && !ARTICLE_SOURCES.has(t.source)) ?? all.find((t) => t.language === 'en');
+  if (en && !all.some((t) => t.kind === 'translation' && t.language === lang)) {
+    const segs = await repo.getSegments(en.id);
+    const done = await translateLines(repo, provider, segs.map((s) => s.text), 'English', lang, `translate.progress.${en.id}.${lang}`);
+    if (done === 'offline') return 'offline';
+    await repo.upsertTranscript({
+      itemId: item.id, language: lang, languageMethod: 'provider', kind: 'translation', source: 'ai_translation', provider: provider.label, format: en.format,
+      segments: segs.map((s, k) => ({ startMs: s.startMs, endMs: s.endMs, text: done[k] })),
+    });
+    emit('items');
+  }
+  const e = item.enrichment;
+  const src: SummaryTranslation = { tldr: e?.tldr || item.summary, summary: e?.summary || item.summary, moments: keyMomentsOf(e).map((m) => ({ text: m.text, startMs: m.startMs })) };
+  if (src.tldr.trim() || src.summary.trim()) {
+    try {
+      const res = await provider.chat(summaryTranslationMessages(src, lang), { temperature: 0, maxTokens: 3000 });
+      await repo.addUsage({ provider: provider.label, model: res.model, kind: 'translate', promptTokens: res.usage.promptTokens, completionTokens: res.usage.completionTokens });
+      const out = parseSummaryTranslation(res.content, src);
+      if (!out) throw new JobError('BAD_MODEL_OUTPUT', 'The summary translation came back in the wrong shape.', true);
+      await repo.setJson(summaryTranslationKey(item.id, lang), out);
+    } catch (err) {
+      if (err instanceof JobError) throw err;
+      if ((err instanceof ProviderError && (err.code === 'NETWORK' || err.code === 'TIMEOUT')) || err instanceof TypeError) return 'offline';
+      if (err instanceof ProviderError) throw new JobError(err.code, err.message, err.retryable);
+      throw new JobError('INTERNAL', (err as Error)?.message || 'Translation failed.', true);
+    }
+  }
+  emit('items');
+  return { lang, transcript: !!en };
+}
+
+/** Ask for an item in Kannada, Hindi, Telugu or Tamil (needs the user's AI key). */
+export async function requestTranslation(itemId: string, lang: IndianLanguage): Promise<void> {
+  const repo = await getRepo();
+  await repo.enqueueJob({ id: `job_translate_to_${lang}_${itemId}`, kind: 'translate_to', itemId, payload: { lang }, retry: true, maxAttempts: 6 });
+  emit('jobs');
+  void runDueJobs();
+}
+
+/**
+ * Qivra 2.3 keeps transcripts in English only. Once: drop originals that already have an English
+ * translation, and queue translation for other non-English speech transcripts.
+ */
+export async function englishOnlyOnce(repo: Repo): Promise<number> {
+  if ((await repo.getMeta('app.englishOnly')) === '1') return 0;
+  const rows = await repo.db.all<{ item_id: string }>(`SELECT DISTINCT item_id FROM transcripts WHERE language != 'en'`);
+  let queued = 0;
+  for (const { item_id } of rows) {
+    const all = await repo.listTranscripts(item_id);
+    if (all.some((t) => t.kind === 'translation' && t.language === 'en')) {
+      for (const t of all) if (t.kind === 'original' && t.language !== 'en' && !ARTICLE_SOURCES.has(t.source)) await repo.deleteTranscript(t.id);
+    } else if (await untranslatedTranscript(repo, item_id)) {
+      await repo.enqueueJob({ id: `job_translate_${item_id}`, kind: 'translate', itemId: item_id, retry: true, maxAttempts: 6 });
+      queued++;
+    }
+  }
+  await repo.setMeta('app.englishOnly', '1');
+  return queued;
 }
 
 async function handleModelEnrich(repo: Repo, job: Job): Promise<Record<string, unknown>> {
@@ -546,6 +625,9 @@ export async function runDueJobs(budgetMs = 25_000): Promise<number> {
               break;
             case 'translate':
               result = await handleTranslate(repo, job);
+              break;
+            case 'translate_to':
+              result = await handleTranslateTo(repo, job);
               break;
             case 'scheduled_report':
               result = await handleScheduledReport();

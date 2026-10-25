@@ -6,7 +6,7 @@ import { registerBackgroundWork } from './background';
 import { drainShareInbox, type CaptureResult } from './capture';
 import { getRepo } from './db';
 import { runLegacyImport } from './legacyImport';
-import { removeServerOnce, runDueJobs, upgradeOldReadmes, wakeWaitingJobs } from './processing';
+import { englishOnlyOnce, removeServerOnce, runDueJobs, upgradeOldReadmes, wakeWaitingJobs } from './processing';
 import { refreshDailyDigest } from './reminders';
 import { ensureEmbeddings } from './semantic';
 import { maybeGenerateWeeklyReport } from './weeklyReport';
@@ -29,6 +29,8 @@ export async function boot(): Promise<BootResult> {
   void (async () => {
     // Installs that were paired with the old laptop server move everything onto the phone (once).
     await removeServerOnce(repo).catch(() => 0);
+    // 2.3 keeps transcripts in English only: translate or drop older non-English ones (once).
+    await englishOnlyOnce(repo).catch(() => 0);
     await runDueJobs();
     await refreshDailyDigest();
     // Backfill meaning-based search for anything not embedded yet (new items, or a newly available model).
