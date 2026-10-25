@@ -1,5 +1,5 @@
 import { getRepo } from '../../src/services/db';
-import { removeServerOnce, runDueJobs, schedulePipeline, wakeWaitingJobs } from '../../src/services/processing';
+import { removeServerOnce, retryItemsNeedingKey, runDueJobs, schedulePipeline, wakeWaitingJobs } from '../../src/services/processing';
 import { getSecret, setSecret, SECRET_KEYS } from '../../src/services/secure';
 import { updateSettings } from '../../src/services/settings';
 import X_VIDEO from '../fixtures/x-syndication-video.json';
@@ -22,18 +22,20 @@ const WHISPER = { language: 'english', duration: 9.3, text: 'Entering Twitter HQ
 let groqCalls: { url: string; auth: string }[] = [];
 let instagramPage = '<title>Instagram</title>';
 let offline = false;
+let xBlocked = false;
 
 beforeEach(async () => {
   resetTestRepo();
   mockDeleted.length = 0;
   groqCalls = [];
   offline = false;
+  xBlocked = false;
   await setSecret(SECRET_KEYS.aiApiKey, 'gsk_test_key');
   await updateSettings({ autoTranscribe: true, ai: { enabled: true, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', externalConsent: true } });
   global.fetch = jest.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
     if (offline) throw new TypeError('Network request failed');
     const res = (status: number, body: unknown) => ({ ok: status < 400, status, headers: { get: () => null }, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)), json: async () => body });
-    if (url.includes('cdn.syndication.twimg.com')) return res(200, X_VIDEO);
+    if (url.includes('cdn.syndication.twimg.com')) return res(200, xBlocked ? '<html>Something went wrong</html>' : X_VIDEO);
     if (url.includes('/audio/transcriptions')) {
       groqCalls.push({ url, auth: init?.headers?.Authorization ?? '' });
       return res(200, WHISPER);
@@ -145,4 +147,33 @@ test('offline: the video waits for the internet without using up attempts, then 
   const done = await settle(item.id);
   expect(done?.status).toBe('READY');
   expect(groqCalls).toHaveLength(1);
+});
+
+test('an unreadable reply is a normal failure that uses up attempts, not an endless wait for the internet', async () => {
+  const repo = await getRepo();
+  xBlocked = true;
+  const { item } = await repo.createItem({ sourceType: 'x', url: 'https://x.com/a/status/1585341984679469056' });
+  await schedulePipeline(item.id);
+  let job = null;
+  for (let i = 0; i < 60 && !job?.lastErrorCode; i++) {
+    await runDueJobs(2_000);
+    await new Promise((r) => setImmediate(r));
+    job = await repo.getJob(`job_cloud_transcribe_${item.id}`);
+  }
+  expect(job).toMatchObject({ lastErrorCode: 'INTERNAL', attempts: 1, status: 'failed_retryable' });
+  expect((await repo.getItem(item.id))?.errorMessage).not.toBe('Waiting for internet…');
+});
+
+test('videos shared before the Groq key was added are transcribed once the key is saved', async () => {
+  const repo = await getRepo();
+  await updateSettings({ ai: { enabled: false } });
+  const { item } = await repo.createItem({ sourceType: 'x', url: 'https://x.com/a/status/1585341984679469056' });
+  await repo.updateItem(item.id, { metadata: { fetchedAt: '2026-10-24T00:00:00Z', provider: 'x-oembed' } }); // no post text
+  await schedulePipeline(item.id);
+  expect(await settle(item.id)).toMatchObject({ status: 'NEEDS_INPUT', errorCode: 'NO_TRANSCRIBER' });
+  await updateSettings({ ai: { enabled: true } }); // the user adds their key (stored in beforeEach)
+  expect(await retryItemsNeedingKey()).toBe(1);
+  const done = await settle(item.id);
+  expect(done?.status).toBe('READY');
+  expect((await repo.listTranscripts(item.id)).map((t) => t.source)).toContain('cloud_whisper');
 });

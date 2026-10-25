@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootProps, RootStackParamList } from '../navigation/types';
 import { getRepo } from '../services/db';
 import { SECRET_KEYS, setSecret } from '../services/secure';
+import { retryItemsNeedingKey } from '../services/processing';
 import { getSettings, updateSettings } from '../services/settings';
 import { createOpenAICompatProvider, ProviderError } from '../core/ai/provider';
 import { Backdrop, Button, elevation, Field, type IconName, T, Wordmark } from '../ui/components';
@@ -70,6 +71,7 @@ export default function OnboardingScreen({ navigation }: RootProps<'Onboarding'>
       await setSecret(SECRET_KEYS.aiApiKey, key);
       const cur = (await getSettings()).ai;
       await updateSettings({ ai: { ...cur, enabled: true, baseUrl: GROQ.baseUrl, model: GROQ.model, embeddingModel: '', externalConsent: true } });
+      void retryItemsNeedingKey();
       setGroqKey('');
       setAi({ state: 'ok' });
       goTo(last);

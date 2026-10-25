@@ -63,7 +63,7 @@ function textKindLabel(source: string): string | null {
 }
 
 /** Error codes that mean "no transcriber set up" (SERVER_NOT_PAIRED is from items saved before 2.1). */
-const NEEDS_KEY = new Set(['NO_TRANSCRIBER', 'SERVER_NOT_PAIRED', 'NO_PROVIDER']);
+const NEEDS_KEY = new Set(['NO_TRANSCRIBER', 'SERVER_NOT_PAIRED', 'NO_PROVIDER', 'AUTH']);
 
 export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemDetail'>) {
   const { id } = route.params;

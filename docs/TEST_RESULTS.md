@@ -1,5 +1,13 @@
 # Test results
 
+## 2.2.1 (2026-10-25): fixes from a code review
+
+- Release APK: `dist/Qivra-2.2.1-release.apk`, version code 20.
+- `tsc` passes. Jest: 320 passed, 4 live tests skipped.
+- Fixed: an unreadable reply (for example an HTML error page from X) no longer waits for the internet forever; it uses up an attempt and ends with a message. Test included (fails on 2.2.0).
+- Fixed: videos shared before the Groq key was added are transcribed as soon as the key is saved (also after a rejected key is replaced). Test included.
+- Removed dead sync helpers and the unused server voice setting.
+
 ## 2.2.0 (2026-10-24): no server — the whole app runs on the phone
 
 - Release APK: `dist/Qivra-2.2.0-release.apk`, version code 19.

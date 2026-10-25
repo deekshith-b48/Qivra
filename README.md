@@ -69,7 +69,7 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 ### 1. Install the app
 
-Download **`Qivra-2.2.0-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
+Download **`Qivra-2.2.1-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
 
 > The APK is signed with the Android debug key and is meant for sideloading. Check the download against the `.sha256` file attached to the release.
 

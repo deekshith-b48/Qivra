@@ -28,7 +28,7 @@ export default function VoiceSettingsScreen({ navigation }: RootProps<'VoiceSett
     setProgress((p) => ({ ...p, [m.id]: 0.001 }));
     try {
       await downloadModel(m, (f) => setProgress((p) => ({ ...p, [m.id]: Math.max(0.001, f) })));
-      await updateSettings({ voice: { ...(s?.voice ?? { language: 'auto', preferServer: false }), modelId: m.id } });
+      await updateSettings({ voice: { ...(s?.voice ?? { language: 'auto' }), modelId: m.id } });
     } catch (e) {
       Alert.alert('Download failed', (e as Error).message);
     } finally {

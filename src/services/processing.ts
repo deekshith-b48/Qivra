@@ -318,13 +318,15 @@ async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<strin
     }
   } catch (e) {
     // No connection (fetch throws a TypeError, a timeout aborts): wait for the internet instead of failing.
-    if ((e instanceof CloudWhisperError && e.code === 'OFFLINE') || (!(e instanceof JobError) && !(e instanceof CloudWhisperError))) {
+    if ((e instanceof CloudWhisperError && e.code === 'OFFLINE') || e instanceof TypeError || (e as Error)?.name === 'AbortError') {
       await repo.db.run('UPDATE items SET error_message = ? WHERE id = ?', ['Waiting for internet…', item.id]);
       emit('items');
       return 'offline';
     }
     if (e instanceof CloudWhisperError) throw new JobError(e.code, e.message, e.retryable);
-    throw e;
+    if (e instanceof JobError) throw e;
+    // Anything else (an unreadable reply, a full disk): use up an attempt and end with a message, never wait forever.
+    throw new JobError('INTERNAL', (e as Error)?.message || 'Transcription failed.', true);
   } finally {
     if (file?.temp) await deleteCached(file.uri);
   }
@@ -529,6 +531,20 @@ async function scheduleNextRun(): Promise<void> {
   } catch {
     /* the next app resume or background task will pick the work up */
   }
+}
+
+/** Codes for "no transcriber was set up" (or the key was rejected), so a newly added key can fix them. */
+const NEEDS_KEY_CODES = ['NO_TRANSCRIBER', 'SERVER_NOT_PAIRED', 'NO_PROVIDER', 'AUTH'];
+
+/** After the user adds an AI key: re-run items that stopped because no working key was set up. */
+export async function retryItemsNeedingKey(): Promise<number> {
+  const repo = await getRepo();
+  const marks = NEEDS_KEY_CODES.map(() => '?').join(',');
+  const rows = await repo.db.all<{ id: string }>(`SELECT id FROM items WHERE deleted = 0 AND status = 'NEEDS_INPUT' AND error_code IN (${marks})`, NEEDS_KEY_CODES);
+  // A phone transcription that failed for want of a key would otherwise be reported again instead of retried.
+  await repo.db.run(`DELETE FROM jobs WHERE kind = 'cloud_transcribe' AND status = 'failed_permanent' AND last_error_code IN (${marks})`, NEEDS_KEY_CODES);
+  for (const r of rows) await schedulePipeline(r.id);
+  return rows.length;
 }
 
 export async function requestModelEnrichment(itemId: string): Promise<void> {

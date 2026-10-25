@@ -11,7 +11,7 @@ import { backoffMs, transition, type ItemStatus } from '../core/status';
 import { chunkSegments, hasTimestamps, segmentsToText, type Segment } from '../core/transcripts';
 import type { SqlDriver, SqlExecutor, SqlValue } from './driver';
 import type {
-  Card, ChunkHit, Citation, Collection, CollectionSuggestion, Conflict, Highlight, Item, ItemMetadata, Job, JobKind, JobStatus, Message, NewItem, Origin, Report,
+  Card, ChunkHit, Citation, Collection, CollectionSuggestion, Highlight, Item, ItemMetadata, Job, JobKind, JobStatus, Message, NewItem, Origin, Report,
   SyncStatus, Transcript, TranscriptInput,
 } from './types';
 
@@ -857,9 +857,6 @@ export class Repo {
     return rows.map((r) => ({ id: str(r.id), uri: str(r.uri), name: str(r.name), mime: str(r.mime), size: Number(r.size), uploadedAt: strOrNull(r.uploaded_at) }));
   }
 
-  async markMediaUploaded(id: string): Promise<void> {
-    await this.db.run('UPDATE media SET uploaded_at = ? WHERE id = ?', [this.now(), id]);
-  }
 
   // ── jobs (persistent queue) ─────────────────────────────────────────────
   /**
@@ -950,9 +947,6 @@ export class Repo {
     return r.changes > 0;
   }
 
-  async setServerJobId(id: string, serverJobId: string): Promise<void> {
-    await this.db.run('UPDATE jobs SET server_job_id = ?, updated_at = ? WHERE id = ?', [serverJobId, this.now(), id]);
-  }
 
   /** After process death, jobs left 'running' are re-queued. */
   async recoverRunningJobs(): Promise<number> {
@@ -1047,28 +1041,7 @@ export class Repo {
     return out;
   }
 
-  // ── conflicts ────────────────────────────────────────────────────────────
-  async addConflict(kind: Conflict['entityKind'], entityId: string, remote: Record<string, unknown>, remoteRevision: number): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await tx.run(`UPDATE conflicts SET resolved_at = ?, resolution = 'superseded' WHERE entity_id = ? AND resolved_at IS NULL`, [this.now(), entityId]);
-      await tx.run('INSERT INTO conflicts (id, entity_kind, entity_id, remote_json, remote_revision, detected_at) VALUES (?,?,?,?,?,?)', [
-        newId('cf'), kind, entityId, JSON.stringify(remote), remoteRevision, this.now(),
-      ]);
-      await tx.run(`UPDATE ${kind === 'item' ? 'items' : 'collections'} SET sync_status = 'conflicted' WHERE id = ?`, [entityId]);
-    });
-  }
 
-  async openConflicts(): Promise<Conflict[]> {
-    const rows = await this.db.all<Row>('SELECT * FROM conflicts WHERE resolved_at IS NULL ORDER BY detected_at');
-    return rows.map((r) => ({
-      id: str(r.id), entityKind: str(r.entity_kind) as Conflict['entityKind'], entityId: str(r.entity_id),
-      remote: parseJson(r.remote_json, {}), remoteRevision: Number(r.remote_revision), detectedAt: str(r.detected_at),
-    }));
-  }
-
-  async resolveConflictRecord(id: string, resolution: string): Promise<void> {
-    await this.db.run('UPDATE conflicts SET resolved_at = ?, resolution = ? WHERE id = ?', [this.now(), resolution, id]);
-  }
 
   // ── usage (cost visibility) ─────────────────────────────────────────────
   async addUsage(e: { provider: string; model: string | null; kind: string; promptTokens?: number | null; completionTokens?: number | null }): Promise<void> {

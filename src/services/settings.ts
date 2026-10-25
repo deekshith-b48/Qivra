@@ -47,12 +47,11 @@ export interface VoiceSettings {
   /** 'auto' or a language code. */
   language: string;
   /** Send recordings to the paired server instead of transcribing on the phone. */
-  preferServer: boolean;
   /** Send voice notes to Groq Whisper (user's key) instead of the on-device model: up to 12 minutes. */
   preferCloud?: boolean;
 }
 
-export const DEFAULT_VOICE: VoiceSettings = { modelId: 'whisper-base', language: 'auto', preferServer: false };
+export const DEFAULT_VOICE: VoiceSettings = { modelId: 'whisper-base', language: 'auto' };
 
 export const DEFAULT_AI: AiSettings = { enabled: false, baseUrl: '', model: '', embeddingModel: '', externalConsent: false, autoEnrich: false };
 

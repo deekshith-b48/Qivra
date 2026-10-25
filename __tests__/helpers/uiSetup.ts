@@ -52,6 +52,7 @@ jest.mock('../../src/services/processing', () => ({
   runDueJobs: jest.fn(async () => 0),
   wakeWaitingJobs: jest.fn(async () => undefined),
   removeServerOnce: jest.fn(async () => 0),
+  retryItemsNeedingKey: jest.fn(async () => 0),
   requestModelEnrichment: jest.fn(async () => undefined),
   cancelItemProcessing: jest.fn(async () => undefined),
 }));

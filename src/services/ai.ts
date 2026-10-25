@@ -10,20 +10,16 @@ import { checkServerUrl, isPrivateHost } from '../core/net';
 import { getSecret, SECRET_KEYS } from './secure';
 import { getSettings } from './settings';
 
-export type AiSource = 'phone';
-
 export interface ProviderState {
   provider: ChatProvider | null;
   /** Human-readable reason when no provider is usable. */
   reason: string | null;
   external: boolean;
-  source: AiSource | null;
   embeddingModel: string | null;
 }
 
 export interface AiInfo {
   enabled: boolean;
-  source: AiSource | null;
   model: string | null;
   /** e.g. "api.groq.com" or the phone's endpoint URL. */
   where: string | null;
@@ -45,9 +41,9 @@ export async function aiInfo(): Promise<AiInfo> {
   // An embeddings-only key (Gemini) takes over embeddings from whichever chat provider is used.
   const embed = s.ai.embed?.enabled && s.ai.embed.model ? s.ai.embed.model : null;
   if (s.ai.enabled && s.ai.baseUrl && s.ai.model) {
-    return { enabled: true, source: 'phone', model: s.ai.model, where: s.ai.baseUrl, autoEnrich: s.ai.autoEnrich, embeddingModel: embed ?? (s.ai.embeddingModel || null) };
+    return { enabled: true, model: s.ai.model, where: s.ai.baseUrl, autoEnrich: s.ai.autoEnrich, embeddingModel: embed ?? (s.ai.embeddingModel || null) };
   }
-  return { enabled: false, source: null, model: null, where: null, autoEnrich: false, embeddingModel: embed };
+  return { enabled: false, model: null, where: null, autoEnrich: false, embeddingModel: embed };
 }
 
 /** The provider that makes embeddings: the optional embeddings key first, else the chat provider's embedding model. */
@@ -70,7 +66,7 @@ export async function loadEmbedder(): Promise<{ provider: ChatProvider | null; e
 async function phoneProvider(): Promise<ProviderState | null> {
   const s = await getSettings();
   if (!s.ai.enabled || !s.ai.baseUrl || !s.ai.model) return null;
-  const base = { source: 'phone' as const, embeddingModel: s.ai.embeddingModel || null };
+  const base = { embeddingModel: s.ai.embeddingModel || null };
   const check = checkServerUrl(s.ai.baseUrl);
   if (!check.ok) return { ...base, provider: null, reason: `AI endpoint rejected: ${check.message}`, external: false };
   const external = !isPrivateHost(check.url.hostname);
@@ -95,5 +91,5 @@ async function phoneProvider(): Promise<ProviderState | null> {
 export async function loadProvider(): Promise<ProviderState> {
   const phone = await phoneProvider();
   if (phone) return phone;
-  return { provider: null, reason: NONE, external: false, source: null, embeddingModel: null };
+  return { provider: null, reason: NONE, external: false, embeddingModel: null };
 }

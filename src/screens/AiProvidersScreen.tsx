@@ -6,6 +6,7 @@ import type { RootProps } from '../navigation/types';
 import { deleteSecret, getSecret, SECRET_KEYS, setSecret } from '../services/secure';
 import { GEMINI_EMBED } from '../services/ai';
 import { ensureEmbeddings } from '../services/semantic';
+import { retryItemsNeedingKey } from '../services/processing';
 import { updateSettings } from '../services/settings';
 import { Banner, Button, Card, Chip, Field, Header, Screen, Section, T, ToggleRow } from '../ui/components';
 import { confirm, useAction, useQuery } from '../ui/hooks';
@@ -57,6 +58,7 @@ export default function AiProvidersScreen({ navigation }: RootProps<'AiProviders
     setKey('');
     setHasKey(!!(await getSecret(SECRET_KEYS.aiApiKey)));
     await updateSettings({ ai: { enabled: true, baseUrl: baseUrl.trim(), model: model.trim(), embeddingModel: embeddingModel.trim(), externalConsent: external ? consent : false, autoEnrich: s?.ai.autoEnrich ?? false } });
+    void retryItemsNeedingKey(); // shares saved before the key now get transcribed
   }, 'Could not save');
 
   const testIt = () => run(async () => {

@@ -50,7 +50,7 @@ test('recording limit stops the native microphone exactly once', async () => {
 test('without an on-device model or a Groq key there is no voice mode; an old server setting is ignored', async () => {
   jest.mocked(FS.getInfoAsync).mockResolvedValueOnce({ exists: false } as never).mockResolvedValueOnce({ exists: false } as never);
   expect((await voiceModeAvailable()).preferred).toBeNull();
-  await updateSettings({ voice: { modelId: 'whisper-base', language: 'auto', preferServer: true } });
+  await updateSettings({ voice: { modelId: 'whisper-base', language: 'auto', preferServer: true } as never }); // an old saved setting
   expect((await voiceModeAvailable()).preferred).toBeNull();
 });
 
