@@ -1,0 +1,126 @@
+{
+ "playabilityStatus": {
+  "status": "OK"
+ },
+ "videoDetails": {
+  "videoId": "jNQXAC9IVRw",
+  "title": "Me at the zoo",
+  "lengthSeconds": "19"
+ },
+ "captions": {
+  "playerCaptionsTracklistRenderer": {
+   "captionTracks": [
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext?v=jNQXAC9IVRw&lang=en&fixture=1",
+     "name": {
+      "runs": [
+       {
+        "text": "English"
+       }
+      ]
+     },
+     "languageCode": "en"
+    },
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext?v=jNQXAC9IVRw&lang=de&fixture=1",
+     "name": {
+      "runs": [
+       {
+        "text": "German"
+       }
+      ]
+     },
+     "languageCode": "de"
+    }
+   ]
+  }
+ },
+ "streamingData": {
+  "adaptiveFormats": [
+   {
+    "itag": 139,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=139&fixture=1",
+    "contentLength": "117526",
+    "approxDurationMs": "19133"
+   },
+   {
+    "itag": 139,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=139&fixture=1",
+    "contentLength": "117495",
+    "approxDurationMs": "19133"
+   },
+   {
+    "itag": 140,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140&fixture=1",
+    "contentLength": "309288",
+    "approxDurationMs": "19063"
+   },
+   {
+    "itag": 140,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140&fixture=1",
+    "contentLength": "309197",
+    "approxDurationMs": "19063"
+   },
+   {
+    "itag": 249,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=249&fixture=1",
+    "contentLength": "112596",
+    "approxDurationMs": "19021"
+   },
+   {
+    "itag": 249,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=249&fixture=1",
+    "contentLength": "118912",
+    "approxDurationMs": "19021"
+   },
+   {
+    "itag": 251,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251&fixture=1",
+    "contentLength": "252182",
+    "approxDurationMs": "19021"
+   },
+   {
+    "itag": 251,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251&fixture=1",
+    "contentLength": "255427",
+    "approxDurationMs": "19021"
+   },
+   {
+    "itag": 599,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=599&fixture=1",
+    "contentLength": "74789",
+    "approxDurationMs": "19133"
+   },
+   {
+    "itag": 599,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=599&fixture=1",
+    "contentLength": "74672",
+    "approxDurationMs": "19133"
+   },
+   {
+    "itag": 600,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=600&fixture=1",
+    "contentLength": "79099",
+    "approxDurationMs": "19021"
+   },
+   {
+    "itag": 600,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=600&fixture=1",
+    "contentLength": "83160",
+    "approxDurationMs": "19021"
+   }
+  ]
+ }
+}

@@ -44,7 +44,7 @@ export default function PrivacyStorageScreen({ navigation }: RootProps<'PrivacyS
       </Card>
       <Section title="What leaves this phone">
         <T v="small" color="textMuted">• Public metadata lookups for links you save (YouTube oEmbed, GitHub API, the web page itself).</T>
-        <T v="small" color="textMuted">• Video posts you save from X and Instagram: their public video is fetched from the post's embed page, and with your Groq key its audio is sent to Groq for the transcript.</T>
+        <T v="small" color="textMuted">• Videos you save from X: their public video is fetched, and with your Groq key the audio is sent to Groq for the transcript.</T>
         <T v="small" color="textMuted">• With your own AI key (Groq, optional Gemini): the saved text needed for that request, sent straight from this phone. You give consent when you add the key.</T>
         {devMode ? <T v="small" color="textMuted">• Dev mode: public searches to GitHub, Hacker News and Hugging Face (trends, the Claude Code corner and the topics you follow). No library content is sent.</T> : null}
         <T v="small" color="textMuted">• Nothing else: no analytics, no crash reporting, no ads.</T>

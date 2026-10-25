@@ -1,0 +1,127 @@
+{
+ "playabilityStatus": {
+  "status": "OK"
+ },
+ "videoDetails": {
+  "videoId": "aqz-KE-bpKQ",
+  "title": "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film",
+  "lengthSeconds": "635"
+ },
+ "captions": {},
+ "streamingData": {
+  "adaptiveFormats": [
+   {
+    "itag": 139,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=139&fixture=1",
+    "contentLength": "3871021",
+    "approxDurationMs": "634694"
+   },
+   {
+    "itag": 139,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=139&fixture=1",
+    "contentLength": "3871021",
+    "approxDurationMs": "634694"
+   },
+   {
+    "itag": 140,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140&fixture=1",
+    "contentLength": "10271496",
+    "approxDurationMs": "634624"
+   },
+   {
+    "itag": 140,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140&fixture=1",
+    "contentLength": "10271496",
+    "approxDurationMs": "634624"
+   },
+   {
+    "itag": 249,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=249&fixture=1",
+    "contentLength": "3931453",
+    "approxDurationMs": "634601"
+   },
+   {
+    "itag": 249,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=249&fixture=1",
+    "contentLength": "3951579",
+    "approxDurationMs": "634601"
+   },
+   {
+    "itag": 251,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251&fixture=1",
+    "contentLength": "10202210",
+    "approxDurationMs": "634601"
+   },
+   {
+    "itag": 251,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=251&fixture=1",
+    "contentLength": "10258925",
+    "approxDurationMs": "634601"
+   },
+   {
+    "itag": 256,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=256&fixture=1",
+    "contentLength": "15479228",
+    "approxDurationMs": "634709"
+   },
+   {
+    "itag": 258,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=258&fixture=1",
+    "contentLength": "30767611",
+    "approxDurationMs": "634624"
+   },
+   {
+    "itag": 328,
+    "mimeType": "audio/mp4; codecs=\"ec-3\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=328&fixture=1",
+    "contentLength": "30468811",
+    "approxDurationMs": "634592"
+   },
+   {
+    "itag": 380,
+    "mimeType": "audio/mp4; codecs=\"ac-3\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=380&fixture=1",
+    "contentLength": "30468809",
+    "approxDurationMs": "634592"
+   },
+   {
+    "itag": 599,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=599&fixture=1",
+    "contentLength": "2442959",
+    "approxDurationMs": "634694"
+   },
+   {
+    "itag": 599,
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=599&fixture=1",
+    "contentLength": "2442959",
+    "approxDurationMs": "634694"
+   },
+   {
+    "itag": 600,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=600&fixture=1",
+    "contentLength": "2684348",
+    "approxDurationMs": "634601"
+   },
+   {
+    "itag": 600,
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=600&fixture=1",
+    "contentLength": "2696929",
+    "approxDurationMs": "634601"
+   }
+  ]
+ }
+}

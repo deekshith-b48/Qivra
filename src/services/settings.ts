@@ -28,7 +28,7 @@ export interface Settings {
   /** Build last week's report every Monday morning and notify. */
   weeklyReport: boolean;
   serverProcessing: boolean;
-  /** Automatically transcribe shared Instagram/X/YouTube videos on the paired server. */
+  /** Automatically transcribe shared videos (YouTube captions, else Groq with the user's key). */
   autoTranscribe: boolean;
   voice: VoiceSettings;
   /** Developer mode (opt-in at onboarding): shows the Dev tab with trends, Claude Code, follow-ups and habits. */

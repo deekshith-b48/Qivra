@@ -11,7 +11,7 @@ import { localEnrich, type Enrichment } from '../core/enrich';
 import { enrichmentPrompt, mergeModelEnrichment, parseModelEnrichment } from '../core/enrichModel';
 import { detectLanguage } from '../core/language';
 import { fetchMetadata, stripMarkdown } from '../core/metadata';
-import { instagramEmbedUrl, parseInstagramEmbed, pickXVideo, xSyndicationUrl } from '../core/socialMedia';
+import { pickXVideo, xSyndicationUrl } from '../core/socialMedia';
 import { ProviderError } from '../core/ai/provider';
 import { isFailed, type ItemStatus } from '../core/status';
 import { analyzeUrl, ARTICLE_SOURCES, VIDEO_SOURCES } from '../core/url';
@@ -218,36 +218,48 @@ async function obtainTranscript(repo: Repo, item: Item): Promise<TranscriptOutco
       }
     }
   }
+  // Instagram serves reels only to its own app and website (the public embed page is an empty shell),
+  // so a reel link can't be fetched. Its downloaded video can: Share → Download in Instagram, then share it here.
+  if (item.sourceType === 'instagram') {
+    return {
+      kind: 'needs_input', code: 'INSTAGRAM_DOWNLOAD',
+      message: 'Instagram doesn\'t let apps fetch reels. In Instagram tap Share → Download, then share the saved video from your gallery to Qivra: it is transcribed automatically. Or import a transcript.',
+    };
+  }
+  // YouTube cuts off audio downloads by apps (only its own apps may stream it), so without captions a
+  // transcript has to be imported. Captions are tried first, above.
+  if (item.sourceType === 'youtube') {
+    return {
+      kind: 'needs_input', code: 'YOUTUBE_NO_CAPTIONS',
+      message: `${captionNote || 'This video has no captions on YouTube.'} YouTube doesn't let apps download its audio, so import a transcript (or the video file, if you have it).`,
+    };
+  }
   const settings = await getSettings();
-  // Instagram and X videos are transcribed from the phone with the user's Groq key.
+  // X videos are transcribed from the phone with the user's Groq key.
   if (settings.autoTranscribe && CLOUD_TRANSCRIBABLE.has(item.sourceType)) {
     const cloud = await cloudDecision(repo, item);
     if (cloud.kind === 'waiting') return cloud;
     if (cloud.kind === 'failed') {
       if (NO_SPEECH_CODES.has(cloud.code)) return { kind: 'no_speech', message: cloud.message };
-      // Instagram refused the video but the caption was kept: finish with the caption.
-      if ((item.metadata?.description ?? '').trim() || ((await repo.getItem(item.id))?.metadata?.description ?? '').trim()) {
-        return { kind: 'no_speech', message: `${cloud.message} Using the post caption.` };
-      }
+      // A missing or rejected key: ask for it (saving a key re-runs this item, see retryItemsNeedingKey).
+      if (NEEDS_KEY_CODES.includes(cloud.code)) return { kind: 'needs_input', code: cloud.code, message: cloud.message };
+      // The post text is still worth keeping when the video could not be transcribed.
+      if (((await repo.getItem(item.id))?.metadata?.description ?? '').trim()) return { kind: 'no_speech', message: `${cloud.message} Using the post text.` };
       return { kind: 'needs_input', code: cloud.code, message: `${cloud.message} You can import a transcript instead.` };
     }
   }
-  if (item.sourceType === 'x' && (item.metadata?.description ?? '').trim()) {
-    const canTranscribe = await cloudWhisperReady();
-    return { kind: 'no_speech', message: canTranscribe ? 'Using the post text.' : 'Using the post text. Add your free Groq key in Settings → AI models to transcribe X videos too.' };
-  }
-  const why = item.sourceType === 'youtube' ? `${captionNote || 'No captions on YouTube.'} ` : '';
   const groq = await cloudWhisperReady();
+  if (item.sourceType === 'x' && (item.metadata?.description ?? '').trim() && groq) return { kind: 'no_speech', message: 'Using the post text.' };
   return {
     kind: 'needs_input',
     code: groq ? 'TRANSCRIPT_MISSING' : 'NO_TRANSCRIBER',
-    message: groq || item.sourceType === 'youtube'
-      ? `${why}Import a transcript (SRT, VTT, TXT) or paste one.`
-      : `${why}Add your free Groq key in Settings → AI models and Qivra transcribes Instagram and X videos on the phone. Or import a transcript.`,
+    message: groq
+      ? 'Import a transcript (SRT, VTT, TXT) or paste one.'
+      : 'Add your free Groq key in Settings → AI models to transcribe videos on the phone, or import a transcript.',
   };
 }
 
-const CLOUD_TRANSCRIBABLE = new Set(['instagram', 'x']);
+const CLOUD_TRANSCRIBABLE = new Set(['x']);
 
 /** Whether a phone-side Groq transcription is running, can start now, or already failed for this item. */
 async function cloudDecision(repo: Repo, item: Item): Promise<{ kind: 'waiting'; message: string } | { kind: 'failed'; code: string; message: string } | { kind: 'unavailable' }> {
@@ -263,7 +275,7 @@ async function cloudDecision(repo: Repo, item: Item): Promise<{ kind: 'waiting';
   return { kind: 'waiting', message: 'Transcribing with Groq Whisper…' };
 }
 
-/** The video (and caption) of a shared X or Instagram post, from the public embed sources. */
+/** The video (and post text) of a shared X post, from X's public embed source. */
 async function findPostVideo(item: Item): Promise<{ url: string | null; durationMs: number | null; caption: string | null }> {
   const info = item.url ? analyzeUrl(item.url) : null;
   if (item.sourceType === 'x' && info?.xStatusId) {
@@ -272,12 +284,6 @@ async function findPostVideo(item: Item): Promise<{ url: string | null; duration
     const json = JSON.parse(r.text) as { text?: string };
     const v = pickXVideo(json);
     return { url: v?.url ?? null, durationMs: v?.durationMs ?? null, caption: typeof json.text === 'string' ? json.text : null };
-  }
-  if (item.sourceType === 'instagram' && info?.instagramShortcode) {
-    const r = await fetchText(instagramEmbedUrl(info.instagramShortcode), { accept: 'text/html', timeoutMs: 15_000 });
-    if (!r.ok) return { url: null, durationMs: null, caption: null };
-    const p = parseInstagramEmbed(r.text);
-    return { url: p.videoUrl, durationMs: null, caption: p.caption };
   }
   return { url: null, durationMs: null, caption: null };
 }
@@ -298,11 +304,7 @@ async function handleCloudTranscribe(repo: Repo, job: Job): Promise<Record<strin
       if (found.caption && !(item.metadata?.description ?? '').trim()) {
         await repo.updateItem(item.id, { metadata: { ...(item.metadata ?? {}), description: found.caption, fetchedAt: new Date().toISOString(), provider: item.metadata?.provider ?? 'embed' } });
       }
-      if (!found.url) {
-        throw item.sourceType === 'instagram'
-          ? new JobError('VIDEO_UNAVAILABLE', 'Instagram did not share this video with apps.', false)
-          : new JobError('NO_MEDIA_IN_POST', 'No video in this post.', false);
-      }
+      if (!found.url) throw new JobError('NO_MEDIA_IN_POST', 'No video in this post.', false);
       durationMs = found.durationMs;
       file = { uri: await downloadToCache(found.url, `${item.id}.mp4`), mime: 'video/mp4', name: 'video.mp4', temp: true };
     }

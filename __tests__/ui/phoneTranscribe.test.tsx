@@ -3,6 +3,8 @@ import { removeServerOnce, retryItemsNeedingKey, runDueJobs, schedulePipeline, w
 import { getSecret, setSecret, SECRET_KEYS } from '../../src/services/secure';
 import { updateSettings } from '../../src/services/settings';
 import X_VIDEO from '../fixtures/x-syndication-video.json';
+import YT_CAPTIONS from '../fixtures/youtube-player-captions.json';
+import YT_NO_CAPTIONS from '../fixtures/youtube-player-nocaptions.json';
 import { resetTestRepo } from '../helpers/uiSetup';
 
 // Phone-only: transcription goes to Groq with the user's own key.
@@ -14,15 +16,19 @@ jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///data/files/',
   cacheDirectory: 'file:///data/cache/',
   getInfoAsync: jest.fn(async () => ({ exists: true, size: 200_000 })),
-  downloadAsync: jest.fn(async () => ({ status: 200 })),
+  downloadAsync: jest.fn(async (url: string) => {
+    downloads.push(url);
+    return { status: 200 };
+  }),
   deleteAsync: jest.fn(async (uri: string) => void mockDeleted.push(uri)),
 }));
 
 const WHISPER = { language: 'english', duration: 9.3, text: 'Entering Twitter HQ.', segments: [{ start: 0.4, end: 3.1, text: ' Entering Twitter HQ.', no_speech_prob: 0.02 }] };
 let groqCalls: { url: string; auth: string }[] = [];
-let instagramPage = '<title>Instagram</title>';
 let offline = false;
 let xBlocked = false;
+let groqStatus = 200;
+const downloads: string[] = [];
 
 beforeEach(async () => {
   resetTestRepo();
@@ -32,15 +38,18 @@ beforeEach(async () => {
   xBlocked = false;
   await setSecret(SECRET_KEYS.aiApiKey, 'gsk_test_key');
   await updateSettings({ autoTranscribe: true, ai: { enabled: true, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', externalConsent: true } });
-  global.fetch = jest.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
+  groqStatus = 200;
+  downloads.length = 0;
+  global.fetch = jest.fn(async (url: string, init?: { headers?: Record<string, string>; body?: string }) => {
     if (offline) throw new TypeError('Network request failed');
     const res = (status: number, body: unknown) => ({ ok: status < 400, status, headers: { get: () => null }, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)), json: async () => body });
     if (url.includes('cdn.syndication.twimg.com')) return res(200, xBlocked ? '<html>Something went wrong</html>' : X_VIDEO);
     if (url.includes('/audio/transcriptions')) {
       groqCalls.push({ url, auth: init?.headers?.Authorization ?? '' });
-      return res(200, WHISPER);
+      return groqStatus === 200 ? res(200, WHISPER) : res(groqStatus, { error: { message: 'Invalid API Key' } });
     }
-    if (url.includes('instagram.com/p/')) return res(200, instagramPage);
+    if (url.includes('youtubei/v1/player')) return res(200, String(init?.body).includes('jNQXAC9IVRw') ? YT_CAPTIONS : YT_NO_CAPTIONS);
+    if (url.includes('/api/timedtext')) return res(200, '<?xml version="1.0"?><timedtext format="3"><body><p t="1200" d="2500">All right, so here we are</p><p t="4000" d="3000">in front of the elephants</p></body></timedtext>');
     return res(404, '');
   }) as never;
 });
@@ -72,16 +81,15 @@ test('an X video is transcribed on the phone with the user\'s Groq key, and the 
   expect(mockDeleted.some((u) => u.startsWith('file:///data/cache/cloud-'))).toBe(true);
 });
 
-test('Instagram that will not share its video falls back to the caption; nothing is sent to Groq', async () => {
-  instagramPage = '<div class="Caption"><a class="CaptionUsername">chef</a> Three-minute pasta: boil, toss, eat<div class="CaptionComments">';
+test('an Instagram reel link explains how to get it transcribed (download, then share the video); nothing is fetched or sent', async () => {
   const repo = await getRepo();
-  const { item } = await repo.createItem({ sourceType: 'instagram', url: 'https://www.instagram.com/reel/C5ZyJm0P8Z8/' });
+  const { item } = await repo.createItem({ sourceType: 'instagram', url: 'https://www.instagram.com/reel/DcY6Ltcyo7B/' });
   await schedulePipeline(item.id);
   const done = await settle(item.id);
-  expect(done?.status).toBe('READY');
-  expect(done?.metadata?.description).toBe('Three-minute pasta: boil, toss, eat');
-  expect(done?.errorMessage).toMatch(/Using the post caption/);
+  expect(done).toMatchObject({ status: 'NEEDS_INPUT', errorCode: 'INSTAGRAM_DOWNLOAD' });
+  expect(done?.errorMessage).toMatch(/Share → Download/);
   expect(groqCalls).toHaveLength(0);
+  expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).includes('instagram.com'))).toBe(false);
 });
 
 test('an imported audio file is transcribed on the phone when no server is paired', async () => {
@@ -176,4 +184,35 @@ test('videos shared before the Groq key was added are transcribed once the key i
   const done = await settle(item.id);
   expect(done?.status).toBe('READY');
   expect((await repo.listTranscripts(item.id)).map((t) => t.source)).toContain('cloud_whisper');
+});
+
+test('YouTube with captions uses the captions and never calls Groq', async () => {
+  const repo = await getRepo();
+  const { item } = await repo.createItem({ sourceType: 'youtube', url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw' });
+  await schedulePipeline(item.id);
+  expect((await settle(item.id))?.status).toBe('READY');
+  expect((await repo.listTranscripts(item.id)).map((t) => t.source)).toEqual(['youtube_captions']);
+  expect(groqCalls).toHaveLength(0);
+});
+
+test('YouTube without captions says why and asks for a transcript; nothing is downloaded or sent to Groq', async () => {
+  const repo = await getRepo();
+  const { item } = await repo.createItem({ sourceType: 'youtube', url: 'https://youtu.be/aqz-KE-bpKQ' });
+  await schedulePipeline(item.id);
+  const done = await settle(item.id);
+  expect(done).toMatchObject({ status: 'NEEDS_INPUT', errorCode: 'YOUTUBE_NO_CAPTIONS' });
+  expect(done?.errorMessage).toMatch(/no captions on YouTube.*import a transcript/);
+  expect(downloads).toEqual([]);
+  expect(groqCalls).toHaveLength(0);
+});
+
+test('a key Groq rejects asks for a new key (instead of finishing as "no speech"), so saving a key re-runs it', async () => {
+  const repo = await getRepo();
+  groqStatus = 401;
+  const { item } = await repo.createItem({ sourceType: 'x', url: 'https://x.com/a/status/1585341984679469056' });
+  await schedulePipeline(item.id);
+  expect(await settle(item.id)).toMatchObject({ status: 'NEEDS_INPUT', errorCode: 'AUTH' });
+  groqStatus = 200;
+  expect(await retryItemsNeedingKey()).toBe(1);
+  expect((await settle(item.id))?.status).toBe('READY');
 });

@@ -1,5 +1,16 @@
 # Test results
 
+## 2.2.2 (2026-10-25): verified on a device; clear YouTube and Instagram limits
+
+- Release APK: `dist/Qivra-2.2.2-release.apk`, version code 21.
+
+- `tsc` passes. Jest: 322 passed, 4 live tests skipped.
+- Checked on the emulator (release build): YouTube captions work on Android (a new video got its 6-line transcript with no key). The phone transcription path works end to end: an X video was downloaded and uploaded to Groq, which rejected the fake test key as expected.
+- Checked from the Mac: Instagram's public embed page for real reels (found through public Hacker News links) is an empty JavaScript shell; the reel is loaded only through Instagram's private API, which Qivra does not use. So reel links now explain the working route: download the reel in Instagram and share the saved video, which is transcribed like any video file.
+- Checked from the Mac: YouTube's audio streams can't be downloaded by apps any more (after the first few KB they redirect or return 403 without a token only YouTube's own apps produce), and the app does not try to get around that. A YouTube video without captions now says so and offers importing a transcript. Captions are still fetched as before (tested on saved real YouTube responses, with IPs and signatures removed).
+- Fixed: a key Groq rejects now asks for a new key (it used to finish as "No speech"), so saving a working key re-runs the item.
+- 2.2.1 (built, not released) is included.
+
 ## 2.2.1 (2026-10-25): fixes from a code review
 
 - Release APK: `dist/Qivra-2.2.1-release.apk`, version code 20.

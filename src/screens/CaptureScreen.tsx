@@ -116,7 +116,7 @@ export default function CaptureScreen({ navigation, route }: RootProps<'Capture'
           <Button title="Save" icon="checkmark" onPress={() => void (mode === 'transcript' ? saveTranscript() : saveLinkOrNote())} loading={busy} />
           {mode === 'transcript' ? <Button kind="outline" title="Import .srt / .vtt / .txt file" icon="document-outline" onPress={() => void fromFile()} style={{ marginTop: space.sm }} /> : null}
           <T v="small" color="textFaint" style={{ marginTop: space.lg }}>
-            Saving a YouTube or Instagram link stores the link and public metadata only. Qivra doesn't download videos or bypass platform restrictions — add captions or a transcript to make the content searchable.
+            YouTube captions are read directly (YouTube doesn't let apps download videos without captions); X videos are transcribed with your Groq key. Instagram doesn't let apps fetch reels: download the reel in Instagram and share the saved video instead.
           </T>
         </>
       )}

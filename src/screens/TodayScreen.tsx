@@ -150,7 +150,7 @@ export default function TodayScreen({ navigation }: Props) {
         ) : null}
 
         {/* Things that need attention come first. */}
-        {ai && !ai.enabled ? <Banner tone="info" title="Add your free Groq key" body="It turns on AI answers and summaries, and transcribes Instagram and X videos on this phone." action={<Button kind="outline" title="Add key" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
+        {ai && !ai.enabled ? <Banner tone="info" title="Add your free Groq key" body="It turns on AI answers and summaries, and transcribes X videos and shared video files on this phone." action={<Button kind="outline" title="Add key" onPress={() => navigation.navigate('AiProviders')} />} /> : null}
 
         {/* Quick capture: the same modes as the + button. */}
         <Section title="Save something">
@@ -243,7 +243,7 @@ export default function TodayScreen({ navigation }: Props) {
 
             {!d.total ? (
               <EmptyState icon="share-social-outline" title="Save your first reel, video or page"
-                body="In Instagram, X, YouTube or your browser, tap Share → Qivra. Keep scrolling: you'll get a notification when the transcript and summary are ready. Or tap + below."
+                body="In YouTube, X or your browser, tap Share → Qivra (for Instagram reels, download the reel and share the saved video). Keep scrolling: you'll get a notification when the transcript and summary are ready. Or tap + below."
               />
             ) : !d.feed.ready.length && !d.feed.needsYou.length && !d.feed.processing.length ? (
               <EmptyState icon="checkmark-done-outline" title="You're all caught up" body="Everything you saved has been reviewed. Share something new, or ask your library a question." />

@@ -218,7 +218,7 @@ export function buildReport(input: ReportInput): BuiltReport {
     L.push(`- ${noTranscript.length} item(s) have no transcript; their content is represented only by title, notes and metadata:`);
     for (const s of noTranscript) L.push(`  - S${sources.indexOf(s) + 1}: ${esc(s.title || s.url || s.id)}`);
   } else if (sources.length) L.push('- Every item in this report has a transcript.');
-  L.push('- Instagram and YouTube media are not downloaded by Qivra; only captions, metadata and transcripts you imported are used.');
+  L.push('- Transcripts come from YouTube captions, Groq Whisper (with your key) or transcripts you imported; nothing is invented.');
   L.push('');
 
   // 11. Provider info

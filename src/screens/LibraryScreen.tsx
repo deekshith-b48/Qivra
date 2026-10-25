@@ -345,7 +345,7 @@ export default function LibraryScreen({ navigation, route }: Props) {
             <EmptyState
               icon={section === 'videos' ? 'play-circle-outline' : section === 'websites' ? 'globe-outline' : 'document-text-outline'}
               title={section === 'videos' ? 'No videos yet' : section === 'websites' ? 'No websites yet' : 'No notes yet'}
-              body={section === 'videos' ? 'Share a YouTube, Instagram or X video to Qivra — it is transcribed and summarised automatically.' : section === 'websites' ? 'Share any article or GitHub link; Qivra extracts the text and summarises it.' : 'Write a note, paste text, or import a transcript file.'}
+              body={section === 'videos' ? 'Share a YouTube or X video, or a downloaded Instagram reel, to Qivra — it is transcribed and summarised automatically.' : section === 'websites' ? 'Share any article or GitHub link; Qivra extracts the text and summarises it.' : 'Write a note, paste text, or import a transcript file.'}
               action={<Button title={section === 'notes' ? 'New note' : 'Save a link'} icon="add" onPress={() => navigation.navigate('Capture', { mode: section === 'notes' ? 'note' : 'link' })} />}
             />
           )

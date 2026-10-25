@@ -82,17 +82,24 @@ export function parseTimedText(xml: string): Segment[] {
   return segs;
 }
 
-export async function listCaptionTracks(videoId: string, fetchImpl: FetchLike): Promise<CaptionTrack[]> {
+interface PlayerResponse {
+  playabilityStatus?: { status?: string; reason?: string };
+  captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: { baseUrl: string; languageCode: string; kind?: string; name?: { runs?: { text: string }[]; simpleText?: string } }[] } };
+}
+
+/** The public player response (the same request the YouTube Android app makes; no login). */
+async function fetchPlayer(videoId: string, fetchImpl: FetchLike): Promise<PlayerResponse> {
   const res = await fetchImpl('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
     body: JSON.stringify({ context: { client: CLIENT }, videoId }),
   });
   if (!res.ok) throw new CaptionsUnavailable('HTTP', `YouTube returned HTTP ${res.status}.`);
-  const j = JSON.parse(await res.text()) as {
-    playabilityStatus?: { status?: string; reason?: string };
-    captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: { baseUrl: string; languageCode: string; kind?: string; name?: { runs?: { text: string }[]; simpleText?: string } }[] } };
-  };
+  return JSON.parse(await res.text()) as PlayerResponse;
+}
+
+export async function listCaptionTracks(videoId: string, fetchImpl: FetchLike): Promise<CaptionTrack[]> {
+  const j = await fetchPlayer(videoId, fetchImpl);
   const status = j.playabilityStatus?.status;
   if (status && status !== 'OK') throw new CaptionsUnavailable('UNPLAYABLE', j.playabilityStatus?.reason ?? `Video is not available (${status}).`);
   const tracks = j.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];

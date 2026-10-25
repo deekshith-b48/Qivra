@@ -1,6 +1,6 @@
 /**
  * Speech-to-text from the phone with the user's own Groq key (no laptop server).
- * Used for X and Instagram videos, imported audio/video files and long voice notes.
+ * Used for X videos, shared or imported audio/video files (such as downloaded Instagram reels) and long voice notes.
  * The file goes straight from the phone to Groq; the key never leaves secure storage
  * except in the Authorization header, and is never logged.
  */

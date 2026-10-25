@@ -70,7 +70,7 @@ export function CaptureSheet({ visible, onClose, onOpenItem, onCapture }: {
       <Option icon="create-outline" title="Write a note" subtitle="Plain text, searchable offline" onPress={() => go('note')} />
       <Option icon="mic-outline" title="Voice note" subtitle="Recorded and transcribed on this phone" onPress={() => go('voice')} />
       <Option icon="document-attach-outline" title="Import a transcript or file" subtitle="SRT, VTT, TXT, audio or video" onPress={() => go('transcript')} />
-      <T v="caption" color="textFaint">Tip: share straight from Instagram, X or YouTube. You can keep scrolling while Qivra transcribes and summarises.</T>
+      <T v="caption" color="textFaint">Tip: share straight from YouTube, X or your browser and keep scrolling. For an Instagram reel, download it in Instagram and share the saved video.</T>
     </Sheet>
   );
 }
