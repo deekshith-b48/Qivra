@@ -29,12 +29,11 @@ describe('collection report', () => {
     const built = buildReport({ kind: 'collection', range: sel.range, generatedAt: '2026-10-22T10:00:00Z', collection: sel.collection, sources: await toReportSources(repo, sel.items) });
     expect(built.title).toBe('Collection: Agents <reading>');
     expect(built.filename).toBe('Qivra-Collection-Report-agents-reading-2026-10-21.md');
-    expect(built.markdown).toContain('- **Collection:** Agents <reading>');
-    expect(built.markdown).toContain('- **Items covered:** 2');
-    expect(built.markdown).toContain('### S1. Recent video');
-    expect(built.markdown).toContain('### S2. Old repo');
+    expect(built.markdown).toContain('· Collection: Agents <reading> · 2 items_');
+    expect(built.markdown).toMatch(/^\[S1\] \*\*\w+\*\* · .*Recent video/m);
+    expect(built.markdown).toMatch(/^\[S2\] \*\*\w+\*\* · .*Old repo/m);
     expect(built.markdown).not.toContain('Not in collection');
-    expect(built.markdown).toContain('**agents** — 2 item(s): S1, S2');
+    expect(built.markdown).toContain('**agents** — Recent video [S1] · Old repo [S2]');
   });
 
   test('empty collection gives an empty report for today; a deleted one is an error', async () => {

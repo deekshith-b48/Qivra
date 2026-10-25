@@ -71,6 +71,7 @@ export default function SettingsScreen({ navigation }: RootProps<'Settings'>) {
         <Group>
           <Row icon="hardware-chip" tint={t.pink} title="AI models" value={ai?.enabled ? ai.model ?? 'On' : 'Off'} subtitle={ai?.enabled ? 'Your own key: answers, summaries and video transcripts' : 'Add your free Groq key for AI and video transcripts'} onPress={() => navigation.navigate('AiProviders')} />
           <Row icon="mic" tint={t.red} title="Speech & dictation" value={s.voice.modelId.startsWith('parakeet') ? 'Parakeet' : 'Whisper'} onPress={() => navigation.navigate('VoiceSettings')} />
+          <ToggleRow icon="language" tint={t.green} title="Transcripts in English" subtitle="Translate other languages with your Groq key and show English first; the original stays one tap away." value={s.englishTranscripts} onChange={(v) => void updateSettings({ englishTranscripts: v })} />
           <ToggleRow icon="videocam" tint={t.blue} title="Auto-transcribe shared videos" subtitle="YouTube captions directly; X videos and shared video files with your Groq key." value={s.autoTranscribe} onChange={(v) => void updateSettings({ autoTranscribe: v })} />
           <Row icon="time" tint={t.gray} title="Processing queue" value={j ? `${j.queued + j.running} pending${j.failed_retryable + j.failed_permanent ? ` · ${j.failed_retryable + j.failed_permanent} failed` : ''}` : undefined} onPress={() => navigation.navigate('Jobs')} />
         </Group>

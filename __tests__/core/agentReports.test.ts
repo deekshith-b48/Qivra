@@ -3,7 +3,7 @@ import { validateCitations } from '../../src/core/agent/citations';
 import { looksLikeInjection, neutralise } from '../../src/core/agent/guard';
 import type { ChatMessage, ChatProvider, ChatResult } from '../../src/core/ai/provider';
 import { createOpenAICompatProvider, ProviderError } from '../../src/core/ai/provider';
-import { buildReport, markdownToPlainText, reportFilename, type ReportSource } from '../../src/core/reports';
+import { buildReport, markdownToPlainText, parseGlance, reportFilename, type ReportSource, sourceBlocks, splitReport } from '../../src/core/reports';
 import { rangeFor } from '../../src/core/dates';
 
 const NOW = Date.parse('2026-10-21T08:00:00Z');
@@ -180,30 +180,53 @@ describe('reports', () => {
     origin: 'local' as const, version: 1, provider: 'x', generatedAt: '', summary: '', keyPoints: ['Point A'], concepts: [], tools, commands, repos, urls: [], tags: [], followUpQuestions: [], actionItems: ['You should try hooks.'], timestamps: [],
   });
 
-  test('daily report has every required section and honest provenance', () => {
+  test('daily report has the compact sections and honest provenance', () => {
     const r = buildReport({
       kind: 'daily', range, generatedAt: '2026-10-21T08:00:00Z',
       sources: [
-        src('a', { tags: ['claude-code'], hasTranscript: true, transcriptLanguages: ['en'], highlights: [{ startMs: 61000, text: 'Hooks run first' }], enrichment: enr(['Claude Code'], ['anthropics/claude-code'], [{ command: 'rm -rf build', destructive: true, reason: 'Recursively/forcibly deletes files' }]) }),
-        src('b', { tags: ['claude-code'], enrichment: enr(['Claude Code'], []) }),
+        src('a', { tags: ['claude-code'], summary: 'Hooks run before tools. Then more.', hasTranscript: true, transcriptLanguages: ['en'], highlights: [{ startMs: 61000, text: 'Hooks run first' }], enrichment: enr(['Claude Code'], ['anthropics/claude-code'], [{ command: 'rm -rf build', destructive: true, reason: 'Recursively/forcibly deletes files' }]) }),
+        src('b', { title: 'Notes [draft]', url: null, sourceType: 'note', tags: ['claude-code'], enrichment: enr(['Claude Code'], []) }),
       ],
     });
     expect(r.filename).toBe('Qivra-Daily-Report-2026-10-21.md');
-    for (const h of ['# Qivra Daily Report — 2026-10-21', '## Executive summary', '## Topic clusters', '## Important learning points', '## Sources', '## Tools, repositories and commands', '## Connections between sources', '## Recommended next actions', '## Coverage and limitations', '## Generation details']) {
-      expect(r.markdown).toContain(h);
-    }
-    expect(r.markdown).toContain('Asia/Kolkata');
-    expect(r.markdown).toContain('`1:01` Hooks run first');
+    const heads = ['# Qivra Daily Report — 2026-10-21', '## Summary', '## Key takeaways', '## Topics', '## By source', '## Tools & commands', '## Next steps'];
+    const at = heads.map((h) => r.markdown.indexOf(h));
+    expect(at.every((x) => x >= 0)).toBe(true);
+    expect([...at].sort((x, y) => x - y)).toEqual(at); // in this order
+    expect(r.markdown).toContain('_Today (2026-10-21) · 2 items_');
+    expect(r.markdown).toContain('**At a glance:** 1 video · 1 note · 1 with transcript');
+    expect(parseGlance(r.markdown)).toEqual({ videos: 1, transcripts: 1 });
+    // Topics list titles with citations, not "2 item(s): S1, S2".
+    expect(r.markdown).toContain('- **claude-code** — Title a [S1] · Notes (draft) [S2]');
+    expect(r.markdown).not.toMatch(/item\(s\)/);
+    expect(r.markdown).toContain('[S1] **YouTube** · [Title a](https://youtu.be/a)');
+    expect(r.markdown).toContain('[S2] **Note** · **Notes (draft)**');
+    expect(r.markdown).toContain('\nHooks run before tools.\n');
+    expect(r.markdown).toContain('- [01:01] Hooks run first');
+    expect(r.markdown).toContain('- Point A [S1]');
     expect(r.markdown).toContain('⚠️ **Potentially destructive:**');
-    expect(r.markdown).toContain('S1 ↔ S2: both mention Claude Code');
+    expect(r.markdown).toContain('never run');
     expect(r.markdown).toContain('no AI model was used');
-    expect(r.markdown).toContain('S2: Title b'); // missing transcript disclosed
-    expect(r.markdown).toContain('AI provider: none');
+    // Footer: coverage and generation details in two short lines.
+    const { footer, sections } = splitReport(r.markdown);
+    expect(footer.split('\n').filter(Boolean)).toHaveLength(2);
+    expect(footer).toContain('1 item has no transcript (S2)');
+    expect(footer).toContain('No AI model used · Asia/Kolkata');
+    expect(sections.map((s) => s.heading)).toEqual(['Summary', 'Key takeaways', 'Topics', 'By source', 'Tools & commands', 'Next steps']);
+    expect(sourceBlocks(sections[3].body)).toHaveLength(2);
+  });
+
+  test('sections without data are left out', () => {
+    const r = buildReport({ kind: 'daily', range, generatedAt: 'x', sources: [src('a')] });
+    expect(r.markdown).not.toContain('## Tools & commands');
+    expect(r.markdown).not.toContain('## Key takeaways');
+    expect(r.markdown).toContain('Add captions or a transcript for 1 video [S1].');
   });
 
   test('AI summary is labelled with provider and model', () => {
     const r = buildReport({ kind: 'weekly', range: rangeFor('week', NOW, 'UTC'), generatedAt: 'now', sources: [src('a')], ai: { executiveSummary: 'You learned hooks [S1].', provider: 'ollama', model: 'llama3.2' } });
     expect(r.markdown).toContain('AI-generated by ollama (llama3.2)');
+    expect(r.markdown).toContain('AI: ollama (llama3.2)');
     expect(r.filename).toBe('Qivra-Weekly-Report-2026-10-15_to_2026-10-21.md');
   });
 

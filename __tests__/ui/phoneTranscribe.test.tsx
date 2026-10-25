@@ -9,7 +9,13 @@ import { resetTestRepo } from '../helpers/uiSetup';
 
 // Phone-only: transcription goes to Groq with the user's own key.
 jest.mock('../../src/services/processing', () => jest.requireActual('../../src/services/processing'));
-jest.mock('../../src/services/ai', () => ({ aiInfo: jest.fn(async () => ({ enabled: false })), loadProvider: jest.fn(async () => ({ provider: null })) }));
+// The chat model (for translation) is off unless a test turns it on.
+let mockAiOn = false;
+const mockChat = jest.fn();
+jest.mock('../../src/services/ai', () => ({
+  aiInfo: jest.fn(async () => ({ enabled: mockAiOn, autoEnrich: false, embeddingModel: null })),
+  loadProvider: jest.fn(async () => ({ provider: mockAiOn ? { label: 'groq · test', chat: (...a: unknown[]) => mockChat(...a) } : null, reason: mockAiOn ? null : 'off' })),
+}));
 
 const mockDeleted: string[] = [];
 jest.mock('expo-file-system/legacy', () => ({
@@ -23,6 +29,7 @@ jest.mock('expo-file-system/legacy', () => ({
   deleteAsync: jest.fn(async (uri: string) => void mockDeleted.push(uri)),
 }));
 
+let whisperReply: unknown = null;
 const WHISPER = { language: 'english', duration: 9.3, text: 'Entering Twitter HQ.', segments: [{ start: 0.4, end: 3.1, text: ' Entering Twitter HQ.', no_speech_prob: 0.02 }] };
 let groqCalls: { url: string; auth: string }[] = [];
 let offline = false;
@@ -39,6 +46,9 @@ beforeEach(async () => {
   await setSecret(SECRET_KEYS.aiApiKey, 'gsk_test_key');
   await updateSettings({ autoTranscribe: true, ai: { enabled: true, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', externalConsent: true } });
   groqStatus = 200;
+  whisperReply = null;
+  mockAiOn = false;
+  mockChat.mockReset();
   downloads.length = 0;
   global.fetch = jest.fn(async (url: string, init?: { headers?: Record<string, string>; body?: string }) => {
     if (offline) throw new TypeError('Network request failed');
@@ -46,7 +56,7 @@ beforeEach(async () => {
     if (url.includes('cdn.syndication.twimg.com')) return res(200, xBlocked ? '<html>Something went wrong</html>' : X_VIDEO);
     if (url.includes('/audio/transcriptions')) {
       groqCalls.push({ url, auth: init?.headers?.Authorization ?? '' });
-      return groqStatus === 200 ? res(200, WHISPER) : res(groqStatus, { error: { message: 'Invalid API Key' } });
+      return groqStatus === 200 ? res(200, whisperReply ?? WHISPER) : res(groqStatus, { error: { message: 'Invalid API Key' } });
     }
     if (url.includes('youtubei/v1/player')) return res(200, String(init?.body).includes('jNQXAC9IVRw') ? YT_CAPTIONS : YT_NO_CAPTIONS);
     if (url.includes('/api/timedtext')) return res(200, '<?xml version="1.0"?><timedtext format="3"><body><p t="1200" d="2500">All right, so here we are</p><p t="4000" d="3000">in front of the elephants</p></body></timedtext>');
@@ -215,4 +225,41 @@ test('a key Groq rejects asks for a new key (instead of finishing as "no speech"
   groqStatus = 200;
   expect(await retryItemsNeedingKey()).toBe(1);
   expect((await settle(item.id))?.status).toBe('READY');
+});
+
+test('an Instagram item with the downloaded reel attached is transcribed into that same item', async () => {
+  const repo = await getRepo();
+  const { item } = await repo.createItem({ sourceType: 'instagram', url: 'https://www.instagram.com/reel/DcY6Ltcyo7B/' });
+  await schedulePipeline(item.id);
+  expect((await settle(item.id))?.errorCode).toBe('INSTAGRAM_DOWNLOAD');
+  // "Add the downloaded reel" attaches the file and re-runs the item (pickMediaFile).
+  await repo.addMedia(item.id, { uri: 'file:///data/files/media/reel.mp4', name: 'reel.mp4', mime: 'video/mp4', size: 3_000_000 });
+  await schedulePipeline(item.id);
+  const done = await settle(item.id);
+  expect(done?.status).toBe('READY');
+  expect((await repo.listTranscripts(item.id)).map((t) => t.source)).toContain('cloud_whisper');
+  expect(groqCalls).toHaveLength(1);
+});
+
+test('a Hindi video gets an English translation (same timestamps), shown and summarised in English', async () => {
+  const repo = await getRepo();
+  mockAiOn = true;
+  whisperReply = { language: 'hindi', duration: 8, segments: [
+    { start: 0, end: 3, text: 'आज हम वेक्टर डेटाबेस सीखेंगे', no_speech_prob: 0.01 },
+    { start: 3, end: 8, text: 'यह खोज को तेज़ बनाता है', no_speech_prob: 0.01 },
+  ] };
+  mockChat.mockResolvedValue({ content: '["Today we will learn about vector databases", "It makes search faster"]', toolCalls: [], model: 'm', usage: { promptTokens: 10, completionTokens: 10 } });
+  const { item } = await repo.createItem({ sourceType: 'x', url: 'https://x.com/a/status/1585341984679469056' });
+  await schedulePipeline(item.id);
+  let tr = null;
+  for (let i = 0; i < 80 && !tr; i++) {
+    await runDueJobs(2_000);
+    await new Promise((r) => setImmediate(r));
+    tr = (await repo.listTranscripts(item.id)).find((t) => t.kind === 'translation') ?? null;
+  }
+  expect(tr).toMatchObject({ language: 'en', source: 'ai_translation' });
+  expect((await repo.getSegments(tr!.id)).map((s) => [s.startMs, s.text])).toEqual([[0, 'Today we will learn about vector databases'], [3000, 'It makes search faster']]);
+  const done = await settle(item.id);
+  expect(done?.summary).toMatch(/vector databases|search faster/i); // the summary is made from the English text
+  expect(mockChat).toHaveBeenCalledTimes(1);
 });

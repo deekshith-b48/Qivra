@@ -37,6 +37,10 @@ describe('reportHtml', () => {
     expect(inlineHtml('[**bold** <b>](https://a.com)')).toBe('<a href="https://a.com"><strong>bold</strong> &lt;b&gt;</a>');
   });
 
+  test('citations and timestamps become pills', () => {
+    expect(inlineHtml('Hooks [S2] at [01:05]')).toBe('Hooks <span class="cite">S2</span> at <span class="ts">01:05</span>');
+  });
+
   test('inline formatting', () => {
     expect(inlineHtml('**Saved:** `npm i` and _note_ here')).toBe('<strong>Saved:</strong> <code>npm i</code> and <em>note</em> here');
     expect(inlineHtml('snake_case_name stays')).toBe('snake_case_name stays');
@@ -56,13 +60,16 @@ describe('reportHtml', () => {
   test('a full report becomes a self-contained document', () => {
     const r = buildReport({
       kind: 'weekly', range: rangeFor('week', Date.parse('2026-10-21T08:00:00Z'), 'UTC'), generatedAt: '2026-10-21T08:00:00Z',
-      sources: [{ id: 'a', title: 'Evil <script>alert(1)</script>', url: 'https://example.com', sourceType: 'article', capturedAt: '2026-10-20T00:00:00Z', summary: 'x', summaryOrigin: 'extracted', note: '', tags: ['ai'], language: 'en', enrichment: null, transcriptLanguages: [], hasTranscript: false, highlights: [] }],
+      sources: [{ id: 'a', title: 'Evil <script>alert(1)</script>', url: 'https://example.com', sourceType: 'web', capturedAt: '2026-10-20T00:00:00Z', summary: 'x', summaryOrigin: 'extracted', note: '', tags: ['ai'], language: 'en', enrichment: null, transcriptLanguages: [], hasTranscript: false, highlights: [] }],
     });
     const html = reportToHtml(r.markdown, r.title);
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true);
     expect(html).toContain('<style>');
     expect(html).not.toMatch(/<script|<link|src=/i);
-    expect(html).toContain('<h3>S1. Evil &lt;script&gt;alert(1)&lt;/script&gt;</h3>');
-    expect(html).toContain('<a href="https://example.com">https://example.com</a>');
+    expect(html).toContain('<h1>Qivra Weekly Learning Report');
+    expect(html).toContain('<div class="stat"><b>1</b><span>item</span></div>');
+    expect(html).toContain('<section><h2>By source</h2>');
+    expect(html).toContain('<div class="src"><p><span class="cite">S1</span> <strong>Web</strong> · <a href="https://example.com">Evil &lt;script&gt;alert(1)&lt;/script&gt;</a></p>');
+    expect(html).toContain('<footer>');
   });
 });

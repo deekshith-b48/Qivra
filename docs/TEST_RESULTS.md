@@ -1,5 +1,13 @@
 # Test results
 
+## 2.2.3 (2026-10-25): Instagram reel attach, English transcripts, new reports
+
+- Release APK: `dist/Qivra-2.2.3-release.apk`, version code 22.
+- `tsc` passes. Jest: 328 passed, 4 live tests skipped.
+- Instagram: "Add the downloaded reel" on an Instagram item attaches the reel downloaded in Instagram and transcribes it into the same item. Checked on the emulator: the picker opened, the picked video reached Groq (a fake key was rejected as expected).
+- English by default: non-English transcripts are translated with the user's Groq key line by line (timestamps kept, resumes after rate limits or lost connection), shown first and used for summaries. Tests: batch parsing, a Hindi video translated and summarised in English. Not run with a real key.
+- Reports: new template (summary, key takeaways, topics with titles, by source with timestamps, short footer), new PDF template, and new generate and report screens (type grid, header stats, Share PDF + More). Checked on the emulator.
+
 ## 2.2.2 (2026-10-25): verified on a device; clear YouTube and Instagram limits
 
 - Release APK: `dist/Qivra-2.2.2-release.apk`, version code 21.

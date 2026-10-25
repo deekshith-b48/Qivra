@@ -123,7 +123,10 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
     const t = setTimeout(() => heroRef.current?.seek(atParam), 300);
     return () => clearTimeout(t);
   }, [atParam, videoIdForAt]);
-  const speech = d?.transcripts.filter((t) => !ARTICLE_SOURCES.has(t.source)) ?? [];
+  // English first (the AI translation of a non-English video), the original language one tap away.
+  const englishFirst = settings?.englishTranscripts ?? true;
+  const speech = (d?.transcripts.filter((t) => !ARTICLE_SOURCES.has(t.source)) ?? [])
+    .sort((a, b) => (englishFirst ? Number(b.kind === 'translation' && b.language === 'en') - Number(a.kind === 'translation' && a.language === 'en') : 0));
   const articles = d?.transcripts.filter((t) => ARTICLE_SOURCES.has(t.source)) ?? [];
   const ordered: Transcript[] = [...speech, ...articles];
   const activeT = ordered.find((t) => t.id === transcriptId) ?? ordered[0] ?? null;
@@ -218,6 +221,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
   const retryA: Action = { title: 'Retry', icon: 'refresh', onPress: () => void retry() };
   const problem: { primary: Action; secondary?: Action } | null =
     item.status !== 'NEEDS_INPUT' && !isFailed(item.status) && item.status !== 'CANCELLED' ? null
+      : item.errorCode === 'INSTAGRAM_DOWNLOAD' ? { primary: { title: 'Add the downloaded reel', icon: 'download-outline', onPress: () => void run(() => pickMediaFile(id)) }, secondary: importT }
       : NEEDS_KEY.has(item.errorCode ?? '') ? { primary: { title: 'Add Groq key', icon: 'key-outline', onPress: () => navigation.navigate('AiProviders') }, secondary: importT }
         : isFailed(item.status) || item.status === 'CANCELLED' ? { primary: retryA, secondary: importT }
           : { primary: importT, secondary: isVideo || item.sourceType === 'file' ? { ...retryA, title: 'Try again' } : undefined };
@@ -348,7 +352,7 @@ export default function ItemDetailScreen({ navigation, route }: RootProps<'ItemD
       ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.xs }}>
         <T v="caption" color="textFaint" style={{ flex: 1 }} numberOfLines={2}>
-          {activeT.provider ?? activeT.source} · {/^(cloud_whisper|voice_cloud)$/.test(activeT.source) ? 'Groq Whisper' : activeT.origin === 'server' ? 'imported' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps'}{activeT.corrected ? ' · corrected' : ''}
+          {activeT.provider ?? activeT.source} · {activeT.source === 'ai_translation' ? 'translated by AI' : /^(cloud_whisper|voice_cloud)$/.test(activeT.source) ? 'Groq Whisper' : activeT.origin === 'server' ? 'imported' : 'on this phone'}{activeT.language === 'und' ? '' : ` · ${languageName(activeT.language)} (${activeT.languageMethod === 'user' ? 'set by you' : activeT.languageMethod === 'provider' ? 'reported by source' : 'detected'})`}{activeT.hasTimestamps ? '' : ' · no timestamps'}{activeT.corrected ? ' · corrected' : ''}
         </T>
         <IconButton icon="language-outline" size={19} label="Language" onPress={() => setLangOpen(true)} />
         <IconButton icon="copy-outline" size={19} label="Copy" onPress={() => void Clipboard.setStringAsync(activeT.text).then(() => Alert.alert('Copied', 'Transcript copied.'))} />

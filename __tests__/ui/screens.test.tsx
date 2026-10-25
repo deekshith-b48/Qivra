@@ -10,6 +10,7 @@ import LibraryScreen from '../../src/screens/LibraryScreen';
 import ItemDetailScreen from '../../src/screens/ItemDetailScreen';
 import AgentScreen from '../../src/screens/AgentScreen';
 import ReportDetailScreen from '../../src/screens/ReportDetailScreen';
+import ReportsScreen from '../../src/screens/ReportsScreen';
 import CaptureScreen from '../../src/screens/CaptureScreen';
 import TodayScreen from '../../src/screens/TodayScreen';
 import { CaptureSheet, captureCopiedLink } from '../../src/ui/CaptureSheet';
@@ -151,14 +152,47 @@ test('ask answers from saved items without a model; sources open from the Source
   expect(n.navigate).toHaveBeenCalledWith('ItemDetail', { id: item.id, at: undefined });
 });
 
-test('report detail previews markdown and offers export', async () => {
+test('report detail: header stats, section cards, Share PDF and a More sheet', async () => {
   const repo = await getRepo();
   await repo.createItem({ sourceType: 'note', title: 'Saved today' });
   const r = await generateReport({ kind: 'daily' });
-  wrap(<ReportDetailScreen navigation={nav()} route={{ key: 'r', name: 'ReportDetail', params: { id: r.id } } as never} />);
+  const n = nav() as { replace: jest.Mock };
+  wrap(<ReportDetailScreen navigation={n as never} route={{ key: 'r', name: 'ReportDetail', params: { id: r.id } } as never} />);
   expect(await screen.findByText(/Qivra Daily Report/)).toBeTruthy();
-  expect(screen.getByText('Executive summary')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Export .md' })).toBeTruthy();
+  expect(screen.getByLabelText('1 Items')).toBeTruthy();
+  expect(screen.getByLabelText('0 Videos')).toBeTruthy();
+  expect(screen.getByLabelText('0 Transcripts')).toBeTruthy();
+  for (const h of ['Summary', 'By source', 'Next steps']) expect(screen.getByRole('header', { name: h })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Share PDF' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Delete report' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Export .md' })).toBeNull();
+
+  fireEvent.press(screen.getByRole('button', { name: 'More' }));
+  for (const a of ['Export .md', 'Export .txt', 'Copy', 'Share text', 'Regenerate']) expect(await screen.findByRole('button', { name: a })).toBeTruthy();
+  const copy = jest.spyOn(Clipboard, 'setStringAsync');
+  fireEvent.press(screen.getByRole('button', { name: 'Copy' }));
+  await waitFor(() => expect(copy).toHaveBeenCalledWith(expect.stringContaining('Saved today')));
+  expect(copy.mock.calls[0][0]).not.toContain('**');
+
+  fireEvent.press(screen.getByRole('button', { name: 'More' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Regenerate' }));
+  await waitFor(() => expect(n.replace).toHaveBeenCalledWith('ReportDetail', { id: expect.any(String) }));
+});
+
+test('reports: type tiles, AI summary on by default when AI is set up, compact history', async () => {
+  await updateSettings({ ai: { enabled: true, baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', externalConsent: true } });
+  const repo = await getRepo();
+  await repo.createItem({ sourceType: 'note', title: 'Saved today' });
+  await generateReport({ kind: 'daily' });
+  wrap(<ReportsScreen navigation={nav()} route={{ key: 'rs', name: 'Reports' } as never} />);
+  const toggle = () => screen.getByLabelText('Add an AI executive summary');
+  await waitFor(() => expect(toggle().props.on).toBe(true));
+  fireEvent.press(screen.getByRole('button', { name: 'Weekly report' }));
+  expect(screen.getByRole('button', { name: 'Weekly report' }).props.accessibilityState).toMatchObject({ selected: true });
+  expect(screen.getByText('The last 7 days, clustered by topic')).toBeTruthy();
+  fireEvent(toggle(), 'change', { nativeEvent: { value: false } });
+  expect(toggle().props.on).toBe(false);
+  expect(await screen.findByText(/· 1 item$/)).toBeTruthy();
 });
 
 test('capture saves a link once and reports duplicates', async () => {

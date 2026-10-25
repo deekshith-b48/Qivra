@@ -49,8 +49,8 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 | | |
 |---|---|
-| **Capture** | Share from YouTube, X, a browser or any app and keep scrolling (for an Instagram reel, download it in Instagram and share the saved video). Paste a link, write a note, record a voice note, or import files, screenshots and transcripts (SRT, VTT, TXT). Shares survive the app being killed. |
-| **Understand** | YouTube captions are read directly. X videos, shared or imported audio/video (including downloaded Instagram reels) and voice notes of up to 12 minutes are transcribed by Groq Whisper with your own key, straight from the phone. YouTube videos without captions and Instagram reel links can't be fetched by apps; import a transcript or share the downloaded video. On-screen text in silent videos and text in images are read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
+| **Capture** | Share from YouTube, X, a browser or any app and keep scrolling (for an Instagram reel, download it in Instagram, then tap **Add the downloaded reel** on its item). Paste a link, write a note, record a voice note, or import files, screenshots and transcripts (SRT, VTT, TXT). Shares survive the app being killed. |
+| **Understand** | YouTube captions are read directly. X videos, shared or imported audio/video (including downloaded Instagram reels) and voice notes of up to 12 minutes are transcribed by Groq Whisper with your own key, straight from the phone. Non-English transcripts are translated to English with your key and shown in English first (the original is one tap away), and summaries are made from the English text. YouTube videos without captions can't be fetched by apps (import a transcript); for an Instagram reel, download it in Instagram and tap **Add the downloaded reel** on its item. On-screen text in silent videos and text in images are read on the phone. GitHub links keep their README as Markdown. Each item gets a TL;DR, key moments linked to timestamps, and keyword highlights. |
 | **Ask & learn** | Chat with your whole library or one item. Answers stream, cite numbered sources and jump to the right second of a video. Make flashcards from any item and review them with spaced repetition. Daily, weekly and topic reports export as Markdown or PDF. |
 | **Organise** | Library grid or list, full-text search (SQLite FTS5) and search by meaning (your Groq key rewrites the query into synonyms and translations; add an optional free Gemini key for true vector search and Related items), smart collections, favourites, highlights and revisit reminders. Swipe to archive or delete, with undo. |
 | **Dev mode** (opt-in) | A Dev tab with AI trends from GitHub, Hacker News and Hugging Face; Claude Code skills, plugins and MCP servers (top or new this week); follow-ups on topics you choose, with new releases of repos you follow; a daily-habit streak with a 5-week heatmap and a weekly recap; and a searchable toolbox of the repos, tools and commands in your library, grouped by tool. Hidden unless you turn it on. |
@@ -69,7 +69,7 @@ Saved posts pile up and are never seen again. Qivra keeps them **useful**: every
 
 ### 1. Install the app
 
-Download **`Qivra-2.2.2-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
+Download **`Qivra-2.2.3-release.apk`** from the [latest release](https://github.com/deekshith-b48/Qivra/releases/latest) and open it on your phone (Android 7.0 or newer). Allow your file manager to install unknown apps when Android asks.
 
 > The APK is signed with the Android debug key and is meant for sideloading. Check the download against the `.sha256` file attached to the release.
 
